@@ -1,0 +1,4 @@
+# Treat CSV data files as binary to prevent Git from altering line endings.
+# Required for Windows/macOS shared CSV workflow (PD-20).
+*.csv -text
+*.tmp -text

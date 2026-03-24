@@ -1,0 +1,117 @@
+════════════════════════════════════════════════════════════════
+  🏦 LOANTRACKER - DEMO READY IN 2 MINUTES
+════════════════════════════════════════════════════════════════
+
+FOR YOUR MAC DEMO (RIGHT NOW):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open Terminal
+
+2. Run these commands:
+   cd /Users/ishq_kan/Documents/Github/LoanTracker
+   ./start-dev.sh
+
+3. Open browser: http://localhost:8000
+
+4. You're ready! 🚀
+
+
+THAT'S IT! No Docker needed!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The start-dev.sh script will:
+✓ Create Python virtual environment
+✓ Install all dependencies
+✓ Start the backend server
+✓ Everything automatic!
+
+
+DEMO FLOW (5 minutes):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. SHOW DATA ENTRY (2 min)
+   - Create loan with sample data
+   - Show validation works
+
+2. SHOW VIEW LOANS (1 min)
+   - See table with your loan
+   - Update status dropdown
+   - Show delete with confirmation
+
+3. SHOW REPORTS (1 min)
+   - Statistics dashboard
+   - Borrower/depositor summaries
+
+4. SHOW FEATURES (1 min)
+   - Switch between 4 themes
+   - Show system config
+   - Open CSV in Excel
+
+
+IF ISSUES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Port in use?
+  lsof -ti:8000 | xargs kill -9
+
+Python not found?
+  brew install python@3.11
+
+Dependencies fail?
+  See TROUBLESHOOTING.md
+
+
+YOUR DATA LOCATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CSV File: engine_output/loan_records.csv
+Logs:     logs/loantracker.log
+
+
+STOP THE APP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Press Ctrl+C in terminal
+
+
+FOR YOUR CLIENT (Windows):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Share:
+1. LoanTracker folder (ZIP)
+2. USER_GUIDE_WINDOWS.md
+
+Tell them:
+1. Extract ZIP
+2. Double-click start.bat
+3. Open http://localhost:8000
+
+
+DOCUMENTATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+START_HERE.md          ← Begin here
+QUICKSTART.md          ← Demo script
+USER_GUIDE_WINDOWS.md  ← For Windows users
+USER_GUIDE_MAC.md      ← For Mac users
+TROUBLESHOOTING.md     ← Fix issues
+README.md              ← Full docs
+PROJECT_SUMMARY.md     ← What's built
+
+
+WHAT YOU HAVE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Full CRUD operations
+✓ CSV storage (Excel-compatible)
+✓ Optional encryption
+✓ 4 beautiful UI themes
+✓ Real-time reports
+✓ Docker deployment
+✓ Complete documentation
+✓ Windows + Mac support
+✓ Production-ready
+
+
+READY TO PRESENT! 🎉
+════════════════════════════════════════════════════════════════

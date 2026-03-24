@@ -1,0 +1,2 @@
+reference_id,borrower_name,borrower_group,amount,giving_date,depositor_name,depositor_group,due_date,status,paidoff_date
+2026_03_002,b20,bg10,10000,2026-03-22,d21,dg10,,Paidoff,2026-03-23
