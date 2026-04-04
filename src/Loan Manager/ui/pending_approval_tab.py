@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from data.csv_manager import batch_extend_loans, read_loans
+from data.csv_manager import batch_extend_loans, mark_paidoff, read_loans
 from data.report_manager import (
     delete_report_records,
     get_active_reference_ids_in_queue,
@@ -625,6 +625,12 @@ class PendingApprovalTab(QWidget):
             if reply != QMessageBox.StandardButton.Ok:
                 return
 
+        # --- Determine report mode (Paidoff vs regular extension) ---
+        report = next(
+            (r for r in self._reports if r.report_id == report_id), None
+        )
+        is_paidoff_report = report is not None and report.mode == "Paidoff"
+
         # --- Write approval_recovery.tmp (crash safety PD-34) ---
         try:
             _APPROVAL_RECOVERY.parent.mkdir(parents=True, exist_ok=True)
@@ -632,36 +638,69 @@ class PendingApprovalTab(QWidget):
         except Exception as exc:
             logger.error("Failed to write approval_recovery.tmp: %s", exc)
 
-        # --- Batch extend loans ---
-        try:
-            extensions = []
+        if is_paidoff_report:
+            # R3: Paidoff approval — call mark_paidoff() for each record
+            # paidoff_date is stored in new_due_date field of the ReportRecord
+            paidoff_errors = []
             for rec in records:
                 if rec.reference_id in deleted_ids:
                     continue
-                if rec.new_giving_date is None and rec.new_due_date is None:
-                    continue
-                extensions.append(
-                    {
-                        "reference_id": rec.reference_id,
-                        "new_giving_date": rec.new_giving_date,
-                        "new_due_date": rec.new_due_date,
-                    }
+                paidoff_date = rec.new_due_date if rec.new_due_date else date.today()
+                try:
+                    mark_paidoff(rec.reference_id, paidoff_date)
+                    logger.info(
+                        "Paidoff approval: archived loan %s (paidoff_date=%s)",
+                        rec.reference_id, paidoff_date,
+                    )
+                except ValueError as exc:
+                    # Loan may have already been removed (deleted between report gen and approval)
+                    logger.warning(
+                        "Paidoff archive skipped for %s (not in loans.csv): %s",
+                        rec.reference_id, exc,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Paidoff archive failed for %s: %s", rec.reference_id, exc
+                    )
+                    paidoff_errors.append(str(exc))
+
+            if paidoff_errors:
+                QMessageBox.critical(
+                    self, "Paidoff Approval Error",
+                    f"Some records could not be archived:\n" + "\n".join(paidoff_errors)
                 )
-            if extensions:
-                batch_extend_loans(extensions)
-                logger.info(
-                    "Approval batch-extended %d loans for report %s",
-                    len(extensions), report_id
+                return
+        else:
+            # --- Batch extend loans (regular reports) ---
+            try:
+                extensions = []
+                for rec in records:
+                    if rec.reference_id in deleted_ids:
+                        continue
+                    if rec.new_giving_date is None and rec.new_due_date is None:
+                        continue
+                    extensions.append(
+                        {
+                            "reference_id": rec.reference_id,
+                            "new_giving_date": rec.new_giving_date,
+                            "new_due_date": rec.new_due_date,
+                        }
+                    )
+                if extensions:
+                    batch_extend_loans(extensions)
+                    logger.info(
+                        "Approval batch-extended %d loans for report %s",
+                        len(extensions), report_id
+                    )
+            except Exception as exc:
+                logger.error(
+                    "Batch extend failed for report %s: %s", report_id, exc
                 )
-        except Exception as exc:
-            logger.error(
-                "Batch extend failed for report %s: %s", report_id, exc
-            )
-            QMessageBox.critical(
-                self, "Approval Failed",
-                f"Failed to update loan records:\n{exc}"
-            )
-            return
+                QMessageBox.critical(
+                    self, "Approval Failed",
+                    f"Failed to update loan records:\n{exc}"
+                )
+                return
 
         # --- Mark report Approved ---
         try:

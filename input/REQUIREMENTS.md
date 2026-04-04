@@ -9,10 +9,12 @@
 
 - **Requirement 1**: 
   - User should be able to record an entry for a Loan.
-  - The UI should ask for `[Borrower Name, Depositor Name, Amount, Giving Date, Due Date [OPTIONAL], Borrower Group, Depositor Group[OPTIONAL]`.
+  - The UI should ask for `[Borrower Name, Depositor Name, Amount, Giving Date, Due Date [OPTIONAL], Due Period [OPTIONAL], Borrower Group, Depositor Group[OPTIONAL]`.
     - Giving Date is just for the reference. This value does **not** account towards any calculations revolving around loan tenure.
-    - By default, `No Due Date` is checked.
-  - For Dates, instead of manual entry a calendar widget for date-picker is needed.
+    - By default, `due_date` = `Unknown`.
+    - User will either give `due_date` or `due_period`. Unit for `due_period` will always be `months`. Upon entering `due_period` value, `due_date` value is automatically calculated and reflected in its field. `due_date = giving_date + due_period(months)` 
+    - Normalize to lowercase at write time to support filtering logic (`borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`).
+  - For Dates, instead of manual entry a calendar widget for date-picker is needed which should appear whenever the user 'Tabs' into the date field or clicks on the form field.
   - Amount defaults to INR as currency and is a non-negative integer.
   - There be an autocomplete from existing values for future entries for fields like: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`
   - Entries are stored in a data folder (`./app/output/data/YYYY/`) for as `loans.csv`
@@ -31,22 +33,24 @@
     - `G Dt` = `giving_date` for the record
     - `D Dt` = `due_date` for the record.
   - Any missing fields should show as "Unknown" value in the View tab.
+  - For Date columns edits, date picker should show up by default instead of asking for text-field values.
 
 - **Requirement 3**:
   - User should be able to modify any value for each entry in the View Tab by selecting the record and these values should update in storage too.
   - A Loan record's `Status` can be `[Active, Overdue, Paidoff, Pending]`, User can toggle in between these states for any record in the tab. Leverage `QComboBox` for simplicity.
     - A loan record is `Active` when `giving_date <= today < due_date`
     - A loan record is `Overdue` when `due_date <= today` 
-    - When a loan record is marked `Paidoff` , ask for `paidoff_date` and make the original record as inactive record i.e. not visible in View Tab anymore. Internally, keep the record in the history with `paidoff_date` recorded. No in-app view for Paidoff history required. A separate `history.csv` file is maintained in the data directory and the `Paidoff` entries are removed from `loans.csv`. The app should create a timestamped backup copy of loans.csv before any destructive operation (Paidoff/**bulk Approve**) to reduce the risk of irrecoverable data loss. For prototype scope, this is not required but is a meaningful risk which has to be deferred for future. **Atomic Paidoff write**: i.e. recovery on partial failure. If the app crashes between two writes operation i.e. `loans.csv` and `history.csv` update, a record may be permanently lost. Crash-safety by logging the target row to a temporary recovery file before the first write is expected along with other potential risks documented. When `paidoff_date` is entered, A report is generated for the interest calculations which is then sent over for approval, the calculations happen as per Daily Calculator. Refer to **Requirement 5** `Daily` mode, `extension_period(days) = paidoff_date - due_date` to calculate daily interest. A toggle option to `Mark Paidoff` when Right Click on the record should be sufficient to open up the date picker dialog box, the dialog box should also ask for `interest_rate`, `commission_rate` and `tds_flag` values to generate appropriate calculation report. The following message can be displayed as a warning: "This report was generated for a Paidoff loan. The loan has been moved to history. No extension was applied."
+    - A loan record when right clicked, can have `Mark Paidoff` option to open up the date picker dialog box, the dialog box should also ask for:  `paidoff_date`, `interest_rate`, `commission_rate` and `tds_flag` values to generate appropriate calculation report. The generated report is then sent over for approval, the calculations happen as per Daily Calculator. The record can not be marked as PaidOff if there is no `due_date` mentioned, also Disable "Mark Paidoff" if a Paidoff report for that loan is already pending. Refer to **Requirement 5** `Daily` mode, `extension_period(days) = paidoff_date - due_date` to calculate daily interest. When the report is approved, the loan record is marked as `Paidoff`. The following message can be displayed as a warning: "This report was generated for a Paidoff loan. The loan will be moved to history. No extension will be applied." Make the original record as inactive record i.e. not visible in View Tab anymore. Internally, keep the record in the history with `paidoff_date` recorded. No in-app view for Paidoff history required. This `paidoff_date` can be stored for each `ReportRecord`s as a separate column for report mode = `Paidoff`. A separate `history.csv` file is maintained in the data directory and the `Paidoff` entries are removed from `loans.csv`. If the report is Declined, the older values are retained in the original view.
+    - The app should create a timestamped backup copy of loans.csv before any destructive operation (Paidoff/**bulk Approve**) to reduce the risk of irrecoverable data loss. For prototype scope, this is not required but is a meaningful risk which has to be deferred for future. **Atomic Paidoff write**: i.e. recovery on partial failure. If the app crashes between two writes operation i.e. `loans.csv` and `history.csv` update, a record may be permanently lost. Crash-safety by logging the target row to a temporary recovery file before the first write is expected along with other potential risks documented.
     - A loan record is `Pending` when `giving_date > today`. All Pre-dated loan entries are marked as Pending. User can manually toggle Active → Pending, if user were to do an in-line edit of `giving_date`. User can manually toggle Overdue → Pending indirectly and the flow will be Overdue → Active (via **R4 Extend**) → Pending (via in-line `giving_date` edit). User csn manually toggle Pending → Overdue indirectly and the flow will be Pending → Active (via in-line `giving_date` edit) → Overdue (via in-line `due_date` edit). When no `due_date` given, loan with future i.e. `giving_date` > `today`, status = `Pending`.
   - The app auto-recomputes status on every app launch (overriding any manual toggle) and all manual toggles should be updating the app's state's storage.
   - A user can manually mark a loan as Active even if it is technically Overdue by date but then user is asked for the new expiration date and is similar to **R4: Extend**. Manual Active override always prompts for a new due date (same as Extend) and recompute evaluates against that new due date — never silently reverting to Overdue.
   - The allowed transition matrix (e.g., can Paidoff be toggled back to Active?) is: Paidoff loans are not visible on the View tab, user will have to manually update the .csv and import to make the record active again, otherwise no need.
   - Proposed color palette is:
-    - Active: dark green (#2d6a4f) with bold black text
-    - Overdue: dark red (#9b2226) with bold black text
-    - Pending: dark amber (#ca6702) with bold black text
-    - Paidoff: dark grey (#495057) with bold black text
+    - Active: dark green `#025c33` with bold white text
+    - Overdue: dark red `#6b0307` with bold white text
+    - Pending: dark amber `#804001` with bold white text
+    - Paidoff: dark grey `#022a52` with bold white text
 
 - **Requirement 4**:
   - Each entry should have a `reference_id` in the following format: `YYYY_MM_<order>` where YYYY and MM are current year and month for the data entry. For example, `2026_03_001, .. 2026_12_999`. The increment of the order is crucial and should be validated. This `reference_id` is not editable by the user on View Tab but it should be visible.
@@ -99,12 +103,13 @@
     - "Generate Report" button in the Interest Calculator Tab should be disabled until the user has clicked "Calculate".
     - When a loan has no Depositor Group (e.g., sample records b14, b15), there should be an "Unknown"/blank option appear in the dropdown so the user can explicitly filter for loans with no depositor.
   - This tab ask for 5 filter options:
-    - `Borrower Group = Out of existing list of entries and exclude inactive entries i.e. PaidOff records`
-    - `Borrower Name = Out of existing list of entries and exclude inactive entries i.e. PaidOff records`
-    - `Depositor Name = Out of existing list of entries and exclude inactive entries i.e. PaidOff records`
-    - `Depositor Group = Out of existing list of entries and exclude inactive entries i.e. PaidOff records`
+    - `Borrower Group = Out of existing list of unique borrower group entries and exclude inactive entries i.e. PaidOff records`
+    - `Borrower Name = Out of existing list of unique borrower Name entries and exclude inactive entries i.e. PaidOff records`
+    - `Depositor Name = Out of existing list of unique Depositor Name entries and exclude inactive entries i.e. PaidOff records`
+    - `Depositor Group = Out of existing list of unique Depositor Group entries and exclude inactive entries i.e. PaidOff records`
     - `ByMonth = Out of 12 months for the year, show records whose due_date is in the selected month for the current calendar year only including the Overdue records`.
   - Multiple or all 5 filters can be applied at once and the inputs are set by default on all filtered records.
+  - Filter logic should be thoroughly tested - use examples from sample data eg. When filtered on "bg3" as Borrower group, there should be 2 records that show up and if the filter is on "dg3" as Depositor group, there should be 4 records that show up.
   - If no filter applied, then by default present all records that have no `due_date` values but when a filter is applied, the calculator totally excludes the ones without due date and only show the records which match the filter criteria.
   - Displayed record should show [`reference_id`, `borrower_name`, `amount`, `depositor_name`, `giving_date`, `due_date`]
   - **Calculations**:
@@ -112,15 +117,16 @@
     - For Mode = `Monthly`, `extension_period_unit = months`, `Time = extension_period`,`Interest = (Amount*(interest_rate)*Time)/(12*100)`, `Commission = (Amount*(commission_rate)*Time)/(12*100)`
     - For Mode = `Daily`, `extension_period_unit = days` ,`Time = extension_period`, `Interest = (Amount*(interest_rate)*Time)/(365*100)` ,`Commission = (Amount*(commission_rate)*Time)/(365*100)`
     - For Mode = `Both`, User enters global `interest_rate`, `commission_rate`, `extension_period_unit` and `extension_period` values to be applied by default on all filtered records. There should be an orchestrator function for mode = `both` added to core calculator code file for testability.
-  - Inline editable cells in the filtered table for all 4 parameters across all records.
+  - When all input values are entered and Calculation is triggered. A new dialog box with all filtered records and calculations will show up for User-review. The filtered records should have the option for Inline editable cells for all 4 input parameters and calculation updates on-the-fly. Upon user-review and any needed modifications, User generates the report which is then sent to `Pending Approval` tab. 
   - For 20–50+ records, this is high data-entry burden. A "fill all rows" or "copy down" shortcut is not needed for prototype but a good feature. For now, the request for always filling default values is enough as the initial count post filtering is not supposed to cross 10 records.
   - The calculator accepts global `interest_rate` and `commission_rate` inputs applied to all filtered records. In all Modes, These values are still global and they can be overridden per-record via inline editing alongside `extension_period` and `extension_period_unit`. When the global header values change, the system overwrites all rows (including manually-edited rows).
   - Once Interest is calculated for all filtered records, summary report is created capturing `total_loan_amount, total_interest, total_commission` 
+  - `CHQ_Amt = (Interest Amount) - TDS` or `CHQ_Amt = 0.9*(Interest Amount)`
 
 ### Report Format per Borrower
 ```
 [Borrower Name]
-[Amount, Giving Date, Depositor, Extension Period, Extension Period Unit, Due Date, Interest Amount, Commission Amount, TDS]
+[Amount, Giving Date, Depositor, Extension Period, Extension Period Unit, Due Date, Interest Amount, TDS, CHQ_Amt, Commission Amount]
 record1
 ...
 ...
@@ -155,6 +161,7 @@ recordN
     - Can a loan without a due_date ever become Overdue? Assume that it is overdue
     - Should Extend be disabled for loans without a due_date (since new giving_date = old due_date)? No because, for this particular scenario new `giving_date` = `today_date` and the `due_date` = new due date picked by the user via date picker.
     - Sample data is for developer-only testing, the prototype ships with an empty data file for user to provide in `.csv`
+    - Ensure this sample Data is loaded into the application for demo purposes.
 
 - **Requirement8**:
   - User wants a prototype. `PySide6` is good for GUI framework choice.
@@ -172,13 +179,18 @@ recordN
   - A user guide for the application run steps on both Mac OS and Windows should prepared under `/src/Loan Manager/user_guides/*`
   - Assume user has atleast python v3.10 installed, the Bash script should have a fallback message to request for upgrade. Python version check should not be absent from `run_windows.bat` and `run_mac.sh`.
   - Adding batch write option to avoid O(N^2) write operations on startup.
+  - Add a non-blocking informational warning on startup if `approval_recovery.tmp` exists: "An approval was in progress when the application last closed. Please check the Pending Approval queue and verify loan records."
 
 - **User-Testing Requirement 1**:
-  - User was unable to see the filtering logic work for Interest calculator when using `BorrowerGroup`, `BorrowerName`, `DepositorName`, `DepositorGroup`. Whenever a filter is applied based on the dropdown options, the filter switches back to default = `All`.
-  - Windows User was unable to validate the increment of `reference_id`s, multiple entries with same reference_ids were created -> 2026_04_001
-  - Windows user found that upon hitting refresh in the view tab some entries were incorrectly getting overwritten with wrong data most likely due to `data.csv_manager: Loan updated` happening upon every Refresh button press for all the records.
-  - Windows user found the UI for picking up the Date for `giving_date` and `due_date` to be un-intuitive for clicking on the drop down, the date picker should show up whenever the field is clicked. 
   - User forbids testing drifts between OS implementations.
+  - While testing the Inline Cell edit for date fields i.e. `giving_date` and `due_date` in View Tab. The following error shows up: 
+```
+Error calling Python override of QDateEdit::mousePressEvent(): Traceback (most recent call last):
+  File "/Users/ishq_kan/Documents/Github/FinHive/src/Loan Manager/ui/widgets.py", line 33, in mousePressEvent
+    self.showCalendarWidget()
+    ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ClickableDateEdit' object has no attribute 'showCalendarWidget'. Did you mean: 'setCalendarWidget'?
+```
 
 
 ---
@@ -192,24 +204,26 @@ User wants to know what prototype can be built and for what features in what/how
 3. Requirements which User requires fixing upon review = [**User-Testing Requirement 1**]
 4. Requirements which enhance User experience = [**R7**, **R9**, **R10**]
 
+**Note:** User is in final stages of accepting MVP and wants all requirements to be implemented and covered. 
+
 ## Sample Input
 ```
-borrower_name, borrower_group, amount, giving_date(DD-MM-YYYY), Depositor_name, depositor_group, due_date(DD-MM-YYYY)
-b1, bg1, 10000, 02-01-2026, d1, dg1, 02-04-2026
-b2, bg2, 10000, 04-01-2026, d2, dg1, 04-05-2026
-b3, bg3, 15000, 06-02-2026, d3, dg1, 06-05-2026
-b4, bg3, 20000, 07-02-2026, d4, dg2, 07-06-2026
-b5, bg4, 20000, 08-02-2026, d5, dg2, 08-06-2026
-b6, bg4, 15000, 08-02-2026, d6, dg3, 08-07-2026
-b7, bg5, 15000, 15-02-2026, d7, dg3, 15-07-2026
-b8, bg5, 20000, 18-02-2026, d8, dg3, 18-06-2026
-b9, bg1, 20000, 20-02-2026, d9, dg3, 20-06-2026
-b10, bg6, 10000, 25-02-2026, d10, dg1, 25-05-2026
-b11, bg6, 15000, 28-02-2026, d11, dg2, 28-05-2026
-b12, bg7, 15000, 02-03-2026, d12, dg4, 02-07-2026
-b13, bg7, 10000, 05-03-2026, d13, dg4, 05-07-2026
-b14, bg8, 15000, 10-03-2026, d14, , 10-07-2026
-b15, bg8, 20000, 14-03-2026, d15, , 14-07-2026
+borrower_name,borrower_group,amount,giving_date(DD-MM-YYYY),Depositor_name,depositor_group,due_date(DD-MM-YYYY)
+b1,bg1,10000,02-01-2026,d1,dg1,02-04-2026
+b2,bg2,10000,04-01-2026,d2,dg1,04-05-2026
+b3,bg3,15000,06-02-2026,d3,dg1,06-05-2026
+b4,bg3,20000,07-02-2026,d4,dg2,07-06-2026
+b5,bg4,20000,08-02-2026,d5,dg2,08-06-2026
+b6,bg4,15000,08-02-2026,d6,dg3,08-07-2026
+b7,bg5,15000,15-02-2026,d7,dg3,15-07-2026
+b8,bg5,20000,18-02-2026,d8,dg3,18-06-2026
+b9,bg1,20000,20-02-2026,d9,dg3,20-06-2026
+b10,bg6,10000,25-02-2026,d10,dg1,25-05-2026
+b11,bg6,15000,28-02-2026,d11,dg2,28-05-2026
+b12,bg7,15000,02-03-2026,d12,dg4,02-07-2026
+b13,bg7,10000,05-03-2026,d13,dg4,05-07-2026
+b14,bg8,15000,10-03-2026,d14,,10-07-2026
+b15,bg8,20000,14-03-2026,d15,,14-07-2026
 ```
 
 

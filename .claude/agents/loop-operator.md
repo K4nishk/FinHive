@@ -7,7 +7,7 @@ color: orange
 ---
 
 ## Prompt
-This is Phase3 implementation closure and phase4 planning stage; check previous version of `input/REQUIREMENTS.md` file from git history and based on the changes, pass on the new requirements over to downstream agents to delegate the necessary tasks of either implementing new features/revising old logic/even bug-fixing.
+This is Phase4 implementation closure stage; check previous version of `input/REQUIREMENTS.md` file from git history and based on the changes, pass on the new requirements over to downstream agents to delegate the necessary tasks of either implementing new features/revising old logic/even bug-fixing.
 
 ## Overview
 

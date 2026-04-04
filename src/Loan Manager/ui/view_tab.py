@@ -10,7 +10,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QAction, QColor, QFont, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
 from data.csv_manager import (
     delete_loan,
     extend_loan,
-    mark_paidoff,
     read_loans,
     update_loan,
 )
@@ -44,6 +43,7 @@ from models.loan import Loan
 from models.report import PendingReport, ReportRecord
 from ui.dialogs.extend_dialog import ExtendDialog
 from ui.dialogs.paidoff_dialog import PaidoffDialog
+from ui.widgets import DatePickerDelegate
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +72,12 @@ COLUMN_HEADERS = [
     "Status",
 ]
 
+# (bg_hex, fg_hex) tuples — R3 + UTR1: dark palette with bold white text
 STATUS_COLORS = {
-    "Active": QColor("#d4edda"),
-    "Overdue": QColor("#f8d7da"),
-    "Pending": QColor("#fff3cd"),
-    "Paidoff": QColor("#e2e3e5"),
+    "Active":  ("#025c33", "#ffffff"),
+    "Overdue": ("#6b0307", "#ffffff"),
+    "Pending": ("#804001", "#ffffff"),
+    "Paidoff": ("#022a52", "#ffffff"),
 }
 
 
@@ -127,7 +128,11 @@ class ViewTab(QWidget):
         self._table.customContextMenuRequested.connect(self._show_context_menu)
         self._table.doubleClicked.connect(self._on_double_click)
 
-        # Make ref_id and SNo columns non-editable via delegate workaround
+        # R2: Apply date picker delegate to date columns so inline editing opens a calendar
+        _date_delegate = DatePickerDelegate(self._table)
+        self._table.setItemDelegateForColumn(COL_GIVING_DATE, _date_delegate)
+        self._table.setItemDelegateForColumn(COL_DUE_DATE, _date_delegate)
+
         layout.addWidget(self._table)
 
     # ------------------------------------------------------------------
@@ -176,12 +181,19 @@ class ViewTab(QWidget):
 
     def _make_row(self, sno: int, loan: Loan) -> List[QStandardItem]:
         """Create a list of QStandardItem for one loan row."""
-        color = STATUS_COLORS.get(loan.status, QColor("white"))
+        # R3 + UTR1: dark palette with bold white text
+        bg_hex, fg_hex = STATUS_COLORS.get(loan.status, ("#ffffff", "#000000"))
+        bg_color = QColor(bg_hex)
+        fg_color = QColor(fg_hex)
 
         def item(text: str, editable: bool = True) -> QStandardItem:
             it = QStandardItem(text)
             it.setEditable(editable)
-            it.setBackground(color)
+            it.setBackground(bg_color)
+            it.setForeground(fg_color)
+            font = QFont()
+            font.setBold(True)
+            it.setFont(font)
             return it
 
         def numeric_item(value: int, editable: bool = True) -> QStandardItem:
@@ -189,7 +201,11 @@ class ViewTab(QWidget):
             it = QStandardItem()
             it.setData(value, Qt.ItemDataRole.DisplayRole)
             it.setEditable(editable)
-            it.setBackground(color)
+            it.setBackground(bg_color)
+            it.setForeground(fg_color)
+            font = QFont()
+            font.setBold(True)
+            it.setFont(font)
             return it
 
         depositor_name = loan.depositor_name or "Unknown"
@@ -306,6 +322,8 @@ class ViewTab(QWidget):
 
         paidoff_action = QAction("Mark Paidoff", self)
         paidoff_action.triggered.connect(lambda: self._action_paidoff(loan))
+        # R3: Disable Mark Paidoff when loan has no due_date
+        paidoff_action.setEnabled(loan.due_date is not None)
         menu.addAction(paidoff_action)
 
         menu.exec(self._table.viewport().mapToGlobal(pos))
@@ -353,6 +371,23 @@ class ViewTab(QWidget):
             self.load_data()
 
     def _action_paidoff(self, loan: Loan) -> None:
+        """R3: Paidoff workflow redesign.
+
+        No longer immediately archives the loan. Instead generates a report
+        and sends it to Pending Approval. The loan is only archived (moved to
+        history.csv) when the Paidoff report is approved in the Pending
+        Approval tab.
+        """
+        # R3: Guard — cannot mark Paidoff without a due_date
+        if loan.due_date is None:
+            QMessageBox.warning(
+                self,
+                "Cannot Mark as Paidoff",
+                "This loan has no due date.\n\n"
+                "Please set a due date before marking the loan as Paidoff.",
+            )
+            return
+
         dialog = PaidoffDialog(loan.reference_id, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -362,21 +397,12 @@ class ViewTab(QWidget):
             commission_rate = dialog.commission_rate()
             tds_flag = dialog.tds_flag()
 
-            # Step 1: archive loan (with recovery.tmp crash safety)
-            mark_paidoff(loan.reference_id, paidoff_date)
-            logger.info("Loan marked paidoff: %s", loan.reference_id)
-
-            # Step 2: compute extension period (TC-401: 0 if no due_date)
-            if loan.due_date is not None:
-                extension_period = (paidoff_date - loan.due_date).days
-            else:
+            # R3: extension_period(days) = paidoff_date - due_date (Daily Calculator)
+            extension_period = (paidoff_date - loan.due_date).days
+            if extension_period < 0:
                 extension_period = 0
-                logger.debug(
-                    "Paidoff report for %s: no due_date, extension_period=0",
-                    loan.reference_id,
-                )
 
-            # Step 3: compute interest amounts
+            # Compute interest amounts
             if extension_period > 0:
                 interest_amount = (
                     loan.amount * interest_rate * extension_period
@@ -392,71 +418,58 @@ class ViewTab(QWidget):
             interest_amount = round(interest_amount, 4)
             commission_amount = round(commission_amount, 4)
 
-            # Step 4: generate report and send to Pending Approval queue
-            try:
-                today = date.today()
-                report_id = generate_report_id(today)
-                now = datetime.now()
+            # R3: Generate report and send to Pending Approval queue.
+            # Do NOT call mark_paidoff() here — it will be called at approval time.
+            today = date.today()
+            report_id = generate_report_id(today)
+            now = datetime.now()
 
-                report = PendingReport(
-                    report_id=report_id,
-                    report_creation_date=today,
-                    report_latest_update_dt=now,
-                    mode="Paidoff",
-                    status="Pending",
-                )
-                write_report(report)
-
-                record = ReportRecord(
-                    report_id=report_id,
-                    reference_id=loan.reference_id,
-                    borrower_name=loan.borrower_name,
-                    amount=loan.amount,
-                    depositor_name=loan.depositor_name,
-                    giving_date=loan.giving_date,
-                    due_date=loan.due_date,
-                    interest_rate=interest_rate,
-                    commission_rate=commission_rate,
-                    extension_period=extension_period,
-                    extension_period_unit="days",
-                    tds_flag=tds_flag,
-                    new_giving_date=None,
-                    new_due_date=None,
-                    interest_amount=interest_amount,
-                    commission_amount=commission_amount,
-                    tds_amount=tds_amount,
-                )
-                write_report_records([record])
-                logger.info(
-                    "Paidoff report generated: %s for loan %s",
-                    report_id, loan.reference_id,
-                )
-            except Exception as report_exc:
-                # Report generation failure does NOT undo the paidoff archival.
-                # Log error and notify user — loan is safely in history.csv.
-                logger.error(
-                    "Paidoff report generation failed for %s: %s",
-                    loan.reference_id, report_exc,
-                )
-                QMessageBox.warning(
-                    self,
-                    "Report Generation Failed",
-                    f"Loan {loan.reference_id} has been marked as Paidoff "
-                    f"and moved to history.\n\n"
-                    f"However, the interest report could not be generated: "
-                    f"{report_exc}\n\n"
-                    f"You can manually generate the report from the Interest "
-                    f"Calculator Tab.",
-                )
-
-            self.data_changed.emit()
-        except Exception as exc:
-            logger.error("Failed to mark paidoff %s: %s", loan.reference_id, exc)
-            QMessageBox.critical(
-                self, "Error", f"Could not mark loan as Paidoff: {exc}"
+            report = PendingReport(
+                report_id=report_id,
+                report_creation_date=today,
+                report_latest_update_dt=now,
+                mode="Paidoff",
+                status="Pending",
             )
-        finally:
-            self.load_data()
+            write_report(report)
+
+            record = ReportRecord(
+                report_id=report_id,
+                reference_id=loan.reference_id,
+                borrower_name=loan.borrower_name,
+                amount=loan.amount,
+                depositor_name=loan.depositor_name,
+                giving_date=loan.giving_date,
+                due_date=loan.due_date,
+                interest_rate=interest_rate,
+                commission_rate=commission_rate,
+                extension_period=extension_period,
+                extension_period_unit="days",
+                tds_flag=tds_flag,
+                new_giving_date=None,
+                new_due_date=paidoff_date,  # paidoff_date stored in new_due_date field
+                interest_amount=interest_amount,
+                commission_amount=commission_amount,
+                tds_amount=tds_amount,
+            )
+            write_report_records([record])
+            logger.info(
+                "Paidoff report generated: %s for loan %s (awaiting approval)",
+                report_id, loan.reference_id,
+            )
+
+            QMessageBox.information(
+                self,
+                "Paidoff Report Generated",
+                f"Report {report_id} has been sent to Pending Approval.\n\n"
+                f"The loan will be moved to history when the report is approved.",
+            )
+            # Loan stays in View Tab — do NOT emit data_changed or call load_data
+        except Exception as exc:
+            logger.error("Failed to generate paidoff report for %s: %s", loan.reference_id, exc)
+            QMessageBox.critical(
+                self, "Error", f"Could not generate Paidoff report: {exc}"
+            )
 
     # ------------------------------------------------------------------
     # Double-click handler (inline edit is default; double-click opens cell)

@@ -9,8 +9,9 @@ Filter behavior (PD-29 / R5):
     No filter applied: show all loans with no due_date.
     Any filter applied: exclude no-due-date loans; show only matching records.
 
-Generate Report button is disabled until Calculate has been clicked (PD-24 / R5).
-Global header value changes overwrite all row values (R5).
+R5 Phase 4: Calculate button now opens CalculationDialog for user review.
+Generate Report button is inside the dialog (not in the tab).
+UTR1: Filter comparisons use case-insensitive matching (.lower()).
 blockSignals() guards prevent itemChanged recursion during programmatic cell population.
 """
 import logging
@@ -312,17 +313,17 @@ class InterestCalculatorTab(QWidget):
             if loan.due_date is None:
                 continue
 
-            # Apply filters
+            # Apply filters — UTR1: case-insensitive comparisons
             if bg_filter != "All":
-                if (loan.borrower_group or "") != bg_filter:
+                if (loan.borrower_group or "").lower() != bg_filter.lower():
                     continue
 
             if bn_filter != "All":
-                if loan.borrower_name != bn_filter:
+                if loan.borrower_name.lower() != bn_filter.lower():
                     continue
 
             if dn_filter != "All":
-                if (loan.depositor_name or "") != dn_filter:
+                if (loan.depositor_name or "").lower() != dn_filter.lower():
                     continue
 
             if dg_filter != "All":
@@ -330,7 +331,7 @@ class InterestCalculatorTab(QWidget):
                     if loan.depositor_group:
                         continue
                 else:
-                    if (loan.depositor_group or "") != dg_filter:
+                    if (loan.depositor_group or "").lower() != dg_filter.lower():
                         continue
 
             if month_filter != "All":
@@ -440,47 +441,38 @@ class InterestCalculatorTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_calculate(self) -> None:
-        """Calculate interest for all rows and populate result columns."""
+        """R5 Phase 4: Open CalculationDialog for user review instead of inline update."""
+        if not self._filtered_loans:
+            QMessageBox.warning(
+                self, "No Records",
+                "Apply filters first to select records for calculation.",
+            )
+            return
+
         mode = self._mode_combo.currentText()
+        global_rate = self._global_interest_rate.value()
+        global_comm = self._global_commission_rate.value()
+        global_period = self._global_extension_period.value()
+        global_unit = self._global_extension_unit.currentText()
+        global_tds = self._global_tds_flag.isChecked()
 
-        self._table.blockSignals(True)
         try:
-            for row_idx in range(self._table.rowCount()):
-                record = self._get_record_dict(row_idx)
-                try:
-                    if mode == "Monthly":
-                        result = calculate_monthly(record)
-                    elif mode == "Daily":
-                        result = calculate_daily(record)
-                    else:
-                        result = calculate_both(record)
-                except (ValueError, KeyError) as exc:
-                    logger.warning("Calculation error at row %d: %s", row_idx, exc)
-                    continue
-
-                def _ro_item(text: str) -> QTableWidgetItem:
-                    item = QTableWidgetItem(text)
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    return item
-
-                self._table.setItem(
-                    row_idx, COL_INTEREST_AMOUNT,
-                    _ro_item(f"{result['interest_amount']:.2f}")
-                )
-                self._table.setItem(
-                    row_idx, COL_COMMISSION_AMOUNT,
-                    _ro_item(f"{result['commission_amount']:.2f}")
-                )
-                self._table.setItem(
-                    row_idx, COL_TDS_AMOUNT,
-                    _ro_item(f"{result['tds_amount']:.2f}")
-                )
-        finally:
-            self._table.blockSignals(False)
-
-        self._calculated = True
-        self._btn_generate.setEnabled(True)
-        self._update_summary()
+            from ui.dialogs.calculation_dialog import CalculationDialog
+            dialog = CalculationDialog(
+                filtered_loans=self._filtered_loans,
+                mode=mode,
+                global_interest_rate=global_rate,
+                global_commission_rate=global_comm,
+                global_extension_period=global_period,
+                global_extension_unit=global_unit,
+                global_tds_flag=global_tds,
+                parent=self,
+            )
+            dialog.report_generated.connect(self.report_generated.emit)
+            dialog.exec()
+        except Exception as exc:
+            logger.error("Failed to open calculation dialog: %s", exc)
+            QMessageBox.critical(self, "Error", f"Failed to open calculation dialog: {exc}")
 
     def _get_record_dict(self, row_idx: int) -> dict:
         """Extract a record dict from the table row for calculator input."""

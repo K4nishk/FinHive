@@ -2,6 +2,7 @@
 import logging
 from datetime import date
 
+from dateutil.relativedelta import relativedelta
 from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -91,6 +92,20 @@ class EntryTab(QWidget):
 
         form_layout.addRow("Due Date (Optional):", due_date_widget)
 
+        # Due Period (optional) — R1: auto-calculates due_date = giving_date + period months
+        self._due_period = QSpinBox()
+        self._due_period.setMinimum(0)
+        self._due_period.setMaximum(360)
+        self._due_period.setValue(0)
+        self._due_period.setSuffix(" months")
+        self._due_period.setSpecialValueText("Not set")
+        form_layout.addRow("Due Period (Optional):", self._due_period)
+
+        # Wire due_period change to auto-calc due_date
+        self._due_period.valueChanged.connect(self._on_due_period_changed)
+        # Wire giving_date change to recalc due_date when period is set
+        self._giving_date.dateChanged.connect(self._on_giving_date_changed)
+
         # Depositor Name
         self._depositor_name = QLineEdit()
         self._depositor_name.setPlaceholderText("Depositor name (optional)")
@@ -119,6 +134,32 @@ class EntryTab(QWidget):
 
     def _on_no_due_date_toggled(self, checked: bool) -> None:
         self._due_date.setEnabled(not checked)
+        if checked:
+            self._due_period.blockSignals(True)
+            self._due_period.setValue(0)
+            self._due_period.blockSignals(False)
+
+    def _on_due_period_changed(self, value: int) -> None:
+        """R1: auto-calculate due_date = giving_date + value months when due_period > 0."""
+        if value <= 0:
+            return
+        q_giving = self._giving_date.date()
+        giving = date(q_giving.year(), q_giving.month(), q_giving.day())
+        new_due = giving + relativedelta(months=value)
+        self._no_due_date_cb.setChecked(False)
+        self._due_date.blockSignals(True)
+        self._due_date.setDate(QDate(new_due.year, new_due.month, new_due.day))
+        self._due_date.blockSignals(False)
+
+    def _on_giving_date_changed(self, q_date) -> None:
+        """Recalculate due_date when giving_date changes and due_period is set."""
+        period = self._due_period.value()
+        if period > 0:
+            giving = date(q_date.year(), q_date.month(), q_date.day())
+            new_due = giving + relativedelta(months=period)
+            self._due_date.blockSignals(True)
+            self._due_date.setDate(QDate(new_due.year, new_due.month, new_due.day))
+            self._due_date.blockSignals(False)
 
     def _on_submit(self) -> None:
         if not self._validate():
@@ -192,6 +233,9 @@ class EntryTab(QWidget):
         self._giving_date.setDate(QDate.currentDate())
         self._due_date.setDate(QDate.currentDate())
         self._no_due_date_cb.setChecked(False)
+        self._due_period.blockSignals(True)
+        self._due_period.setValue(0)
+        self._due_period.blockSignals(False)
         self._depositor_name.clear()
         self._depositor_group.clear()
 
