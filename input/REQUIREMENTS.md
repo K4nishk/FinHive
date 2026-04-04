@@ -11,11 +11,13 @@
   - User should be able to record an entry for a Loan.
   - The UI should ask for `[Borrower Name, Depositor Name, Amount, Giving Date, Due Date [OPTIONAL], Borrower Group, Depositor Group[OPTIONAL]`.
     - Giving Date is just for the reference. This value does **not** account towards any calculations revolving around loan tenure.
+    - By default, `No Due Date` is checked.
   - For Dates, instead of manual entry a calendar widget for date-picker is needed.
   - Amount defaults to INR as currency and is a non-negative integer.
   - There be an autocomplete from existing values for future entries for fields like: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`
   - Entries are stored in a data folder (`./app/output/data/YYYY/`) for as `loans.csv`
   - After a user saves a new loan entry, Show a status-bar message: `Loan saved successfully. Reference ID: {ref_id}.` No need for auto-switch to View Tab.
+
 - **Requirement 2**:
   - There should be a page where all the entries can be viewed. The Data Entries can be sorted in the View Tab based on the column values. `example`: Alphabetical sorting on `borrower_name or depositor_name or borrower_group or depositor_group`, Date sorting for `giving_date or due_date` and numerical sorting for `amount`.
     - When a loan has no Depositor Name (e.g., sample records b14, b15), there should be an "Unknown" Depositor Group value which can be in-line edited by the user
@@ -29,18 +31,25 @@
     - `G Dt` = `giving_date` for the record
     - `D Dt` = `due_date` for the record.
   - Any missing fields should show as "Unknown" value in the View tab.
+
 - **Requirement 3**:
   - User should be able to modify any value for each entry in the View Tab by selecting the record and these values should update in storage too.
   - A Loan record's `Status` can be `[Active, Overdue, Paidoff, Pending]`, User can toggle in between these states for any record in the tab. Leverage `QComboBox` for simplicity.
     - A loan record is `Active` when `giving_date <= today < due_date`
     - A loan record is `Overdue` when `due_date <= today` 
-    - When a loan record is marked `Paidoff` , ask for `paidoff_date` and make the original record as inactive record i.e. not visible in View Tab anymore. Internally, keep the record in the history with `paidoff_date` recorded. No in-app view for Paidoff history required. A separate `history.csv` file is maintained in the data directory and the `Paidoff` entries are removed from `loans.csv`. The app should create a timestamped backup copy of loans.csv before any destructive operation (Paidoff/**bulk Approve**) to reduce the risk of irrecoverable data loss. For prototype scope, this is not required but is a meaningful risk which has to be deferred for future. **Atomic Paidoff write**: i.e. recovery on partial failure. If the app crashes between two writes operation i.e. `loans.csv` and `history.csv` update, a record may be permanently lost. Crash-safety by logging the target row to a temporary recovery file before the first write is expected along with other potential risks documented.
+    - When a loan record is marked `Paidoff` , ask for `paidoff_date` and make the original record as inactive record i.e. not visible in View Tab anymore. Internally, keep the record in the history with `paidoff_date` recorded. No in-app view for Paidoff history required. A separate `history.csv` file is maintained in the data directory and the `Paidoff` entries are removed from `loans.csv`. The app should create a timestamped backup copy of loans.csv before any destructive operation (Paidoff/**bulk Approve**) to reduce the risk of irrecoverable data loss. For prototype scope, this is not required but is a meaningful risk which has to be deferred for future. **Atomic Paidoff write**: i.e. recovery on partial failure. If the app crashes between two writes operation i.e. `loans.csv` and `history.csv` update, a record may be permanently lost. Crash-safety by logging the target row to a temporary recovery file before the first write is expected along with other potential risks documented. When `paidoff_date` is entered, A report is generated for the interest calculations which is then sent over for approval, the calculations happen as per Daily Calculator. Refer to **Requirement 5** `Daily` mode, `extension_period(days) = paidoff_date - due_date` to calculate daily interest. A toggle option to `Mark Paidoff` when Right Click on the record should be sufficient to open up the date picker dialog box, the dialog box should also ask for `interest_rate`, `commission_rate` and `tds_flag` values to generate appropriate calculation report. The following message can be displayed as a warning: "This report was generated for a Paidoff loan. The loan has been moved to history. No extension was applied."
     - A loan record is `Pending` when `giving_date > today`. All Pre-dated loan entries are marked as Pending. User can manually toggle Active → Pending, if user were to do an in-line edit of `giving_date`. User can manually toggle Overdue → Pending indirectly and the flow will be Overdue → Active (via **R4 Extend**) → Pending (via in-line `giving_date` edit). User csn manually toggle Pending → Overdue indirectly and the flow will be Pending → Active (via in-line `giving_date` edit) → Overdue (via in-line `due_date` edit). When no `due_date` given, loan with future i.e. `giving_date` > `today`, status = `Pending`.
   - The app auto-recomputes status on every app launch (overriding any manual toggle) and all manual toggles should be updating the app's state's storage.
   - A user can manually mark a loan as Active even if it is technically Overdue by date but then user is asked for the new expiration date and is similar to **R4: Extend**. Manual Active override always prompts for a new due date (same as Extend) and recompute evaluates against that new due date — never silently reverting to Overdue.
   - The allowed transition matrix (e.g., can Paidoff be toggled back to Active?) is: Paidoff loans are not visible on the View tab, user will have to manually update the .csv and import to make the record active again, otherwise no need.
+  - Proposed color palette is:
+    - Active: dark green (#2d6a4f) with bold black text
+    - Overdue: dark red (#9b2226) with bold black text
+    - Pending: dark amber (#ca6702) with bold black text
+    - Paidoff: dark grey (#495057) with bold black text
+
 - **Requirement 4**:
-  - Each entry should have a `reference_id` in the following format: `YYYY_MM_<order>` where YYYY and MM are current year and month for the data entry. For example, `2026_03_001, .. 2026_12_999`. This `reference_id` is not editable by the user on View Tab but it should be visible.
+  - Each entry should have a `reference_id` in the following format: `YYYY_MM_<order>` where YYYY and MM are current year and month for the data entry. For example, `2026_03_001, .. 2026_12_999`. The increment of the order is crucial and should be validated. This `reference_id` is not editable by the user on View Tab but it should be visible.
     - 999 loans/month is a safe upper bound. Fallback/break avoidance logic to incorporate 1000th loan for the month should be there too i.e. after `2026_12_999` upon new entry, `2026_12_1000` should be possible.
     - Approx max loan records is 1500.
     - If all records for a given YYYY_MM are deleted, the counter resets to 001 for the next entry in that month. If the entire CSV is empty (all records deleted across all months/header row present and no data rows/file itself does not exist), each YYYY_MM counter independently resets to 001 and the next entry will have YYYY and MM values of `today`.
@@ -53,6 +62,7 @@
     - User to provide 2 values for extension: `extension_period_unit, extension_period`
       - `extension_period_unit` options are `[months, days]`, by default `months` should be the unit.
       - Based on `extension_period` value, Update the record such that new `giving_date` = old `due_date` of the record and new `due_date` = old `due_date` + `extension_period(in extension_period_unit)`. 
+
 - **Requirement 5**:
   - There has to be an Interest Calculator Tab which has 3 modes (a hover-dropdown-select UI to switch between the 3):
     - **Monthly** = Default Mode
@@ -160,13 +170,15 @@ recordN
 
 - **Requirement 10**:
   - A user guide for the application run steps on both Mac OS and Windows should prepared under `/src/Loan Manager/user_guides/*`
-  - Assume user has atleast python v3.10 installed, the Bash script should have a fallback message to request for upgrade. Python version check should not be absent from `run_windows.bat` and `run_mac.sh`. [Low priority]
+  - Assume user has atleast python v3.10 installed, the Bash script should have a fallback message to request for upgrade. Python version check should not be absent from `run_windows.bat` and `run_mac.sh`.
   - Adding batch write option to avoid O(N^2) write operations on startup.
 
 - **User-Testing Requirement 1**:
-  - User was unable to see the Interest Calculator Tab/Pending Approval Tab on the App's UI
-  - User demands testing of filtering logic in interest calculator tab along with calculation and the report generation.
-  - User wasn't able to test out in-line edits in neither Filtered records of Calculator Tab nor for the reports generated under Pending Approval Tab 
+  - User was unable to see the filtering logic work for Interest calculator when using `BorrowerGroup`, `BorrowerName`, `DepositorName`, `DepositorGroup`. Whenever a filter is applied based on the dropdown options, the filter switches back to default = `All`.
+  - Windows User was unable to validate the increment of `reference_id`s, multiple entries with same reference_ids were created -> 2026_04_001
+  - Windows user found that upon hitting refresh in the view tab some entries were incorrectly getting overwritten with wrong data most likely due to `data.csv_manager: Loan updated` happening upon every Refresh button press for all the records.
+  - Windows user found the UI for picking up the Date for `giving_date` and `due_date` to be un-intuitive for clicking on the drop down, the date picker should show up whenever the field is clicked. 
+  - User forbids testing drifts between OS implementations.
 
 
 ---
@@ -174,29 +186,32 @@ recordN
 ## Prototype - Phase estimates
 User wants to know what prototype can be built and for what features in what/how many phases to combine into a MVP
 
+## Priority
+1. Requirements which bring Business value = [**R4**, **R5**]
+2. Requirements which revolve around designing = [**R1**, **R2**, **R3**, **R6**, **R8**]
+3. Requirements which User requires fixing upon review = [**User-Testing Requirement 1**]
+4. Requirements which enhance User experience = [**R7**, **R9**, **R10**]
 
 ## Sample Input
 ```
-borrower_name, borrower_group, amount, giving_date(YYYY-MM-DD), Depositor_name, depositor_group, due_date(YYYY-MM-DD)
-b1, bg1, 10000, 2026-01-02, d1, dg1, 2026-04-02
-b2, bg2, 10000, 2026-01-04, d2, dg1, 2026-05-04
-b3, bg3, 15000, 2026-02-06, d3, dg1, 2026-05-06
-b4, bg3, 20000, 2026-02-07, d4, dg2, 2026-06-07
-b5, bg4, 20000, 2026-02-08, d5, dg2, 2026-06-08
-b6, bg4, 15000, 2026-02-08, d6, dg3, 2026-07-08
-b7, bg5, 15000, 2026-02-15, d7, dg3, 2026-07-15
-b8, bg5, 20000, 2026-02-18, d8, dg3, 2026-06-18
-b9, bg1, 20000, 2026-02-20, d9, dg3, 2026-06-20
-b10, bg6, 10000, 2026-02-25, d10, dg1, 2026-05-25
-b11, bg6, 15000, 2026-02-28, d11, dg2, 2026-05-28
-b12, bg7, 15000, 2026-03-02, d12, dg4, 2026-07-02
-b13, bg7, 10000, 2026-03-05, d13, dg4, 2026-07-05
-b14, bg8, 15000, 2026-03-10, d14, , 2026-07-10
-b15, bg8, 20000, 2026-03-14, d15, , 2026-07-14
+borrower_name, borrower_group, amount, giving_date(DD-MM-YYYY), Depositor_name, depositor_group, due_date(DD-MM-YYYY)
+b1, bg1, 10000, 02-01-2026, d1, dg1, 02-04-2026
+b2, bg2, 10000, 04-01-2026, d2, dg1, 04-05-2026
+b3, bg3, 15000, 06-02-2026, d3, dg1, 06-05-2026
+b4, bg3, 20000, 07-02-2026, d4, dg2, 07-06-2026
+b5, bg4, 20000, 08-02-2026, d5, dg2, 08-06-2026
+b6, bg4, 15000, 08-02-2026, d6, dg3, 08-07-2026
+b7, bg5, 15000, 15-02-2026, d7, dg3, 15-07-2026
+b8, bg5, 20000, 18-02-2026, d8, dg3, 18-06-2026
+b9, bg1, 20000, 20-02-2026, d9, dg3, 20-06-2026
+b10, bg6, 10000, 25-02-2026, d10, dg1, 25-05-2026
+b11, bg6, 15000, 28-02-2026, d11, dg2, 28-05-2026
+b12, bg7, 15000, 02-03-2026, d12, dg4, 02-07-2026
+b13, bg7, 10000, 05-03-2026, d13, dg4, 05-07-2026
+b14, bg8, 15000, 10-03-2026, d14, , 10-07-2026
+b15, bg8, 20000, 14-03-2026, d15, , 14-07-2026
 ```
 
-## Priority
-R5 > R4 > R1 > R2 > R3 > R6 > R8 > R7 > R10 > R9
 
 ## Usage Scope
 - Single-System End-user (Windows)

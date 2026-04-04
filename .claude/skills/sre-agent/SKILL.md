@@ -37,6 +37,7 @@ You do not own features. You own the **reliability posture** of everything that 
 - **Post-Incident Reviews**: Conducting "blameless post-mortems" after incidents to document problems, solutions, and prevent future recurrences.
 - **Collaboration with Development Teams**: Working with developers to improve code reliability, performing operational readiness tests, and creating runbooks for services.
 - **Startup Reliability**: SRE should add a startup reliability section covering execution failure modes for packaged apps.
+- When recommending a reliability improvement for deferral to a future phase, include a brief impact statement: what is the failure scenario and what would the user experience be? This supports PO prioritization decisions.
 
 
 ## Output Types

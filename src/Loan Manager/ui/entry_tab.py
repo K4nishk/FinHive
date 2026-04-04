@@ -6,7 +6,6 @@ from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QCompleter,
-    QDateEdit,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -18,6 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ui.widgets import ClickableDateEdit
 
 from data.csv_manager import read_autocomplete_values, write_loan
 from data.ref_id_manager import generate_ref_id
@@ -68,8 +69,7 @@ class EntryTab(QWidget):
         form_layout.addRow("Amount (INR):", self._amount)
 
         # Giving Date
-        self._giving_date = QDateEdit()
-        self._giving_date.setCalendarPopup(True)
+        self._giving_date = ClickableDateEdit()
         self._giving_date.setDate(QDate.currentDate())
         self._giving_date.setDisplayFormat("yyyy-MM-dd")
         form_layout.addRow("Giving Date:", self._giving_date)
@@ -79,8 +79,7 @@ class EntryTab(QWidget):
         due_date_row = QHBoxLayout(due_date_widget)
         due_date_row.setContentsMargins(0, 0, 0, 0)
 
-        self._due_date = QDateEdit()
-        self._due_date.setCalendarPopup(True)
+        self._due_date = ClickableDateEdit()
         self._due_date.setDate(QDate.currentDate())
         self._due_date.setDisplayFormat("yyyy-MM-dd")
         due_date_row.addWidget(self._due_date)

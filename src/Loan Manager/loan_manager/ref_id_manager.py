@@ -103,13 +103,21 @@ class RefIdManager:
             return {}
 
     def _write_meta(self, meta: Dict[str, int]) -> None:
-        """Overwrite loans_meta.csv with the provided mapping."""
+        """Atomically overwrite loans_meta.csv via write-to-temp + rename.
+
+        Uses pathlib.Path.replace() which maps to os.replace():
+        - POSIX: rename(2) syscall — atomic
+        - Windows NTFS: MoveFileEx with MOVEFILE_REPLACE_EXISTING — atomic
+        If the process crashes before replace(), the original file is intact.
+        """
         self._meta_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._meta_path.with_suffix(".tmp")
         rows = [
             {"year_month": ym, "counter": str(order)}
             for ym, order in sorted(meta.items())
         ]
-        with self._meta_path.open("w", newline="", encoding="utf-8") as fh:
+        with tmp.open("w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=_META_FIELDNAMES)
             writer.writeheader()
             writer.writerows(rows)
+        tmp.replace(self._meta_path)

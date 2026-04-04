@@ -25,11 +25,12 @@ When this skill is triggered, you will produce one or more of the following outp
 
 #### Requirement Change
 When the user mentions a new requirement, a change to existing scope, or a shift in direction:
-1. Acknowledge the change and its business context.
-2. Assess impact across: **scope**, **timeline**, **resources**, and **risk**.
-3. Make a PO decision: Accept / Defer / Reject — with clear reasoning.
-4. Update or draft updated backlog items / acceptance criteria if accepted.
-5. Offer a stakeholder communication draft if the change affects external parties.
+1. Acknowledge the change and its business context. 
+2. Should also cross-reference **BSA**/**DEV Lead**/**SA** agents' open questions from previous runs(if available) before declaring Wave 0 decisions complete to avoid duplicate clarifications.
+3. Assess impact across: **scope**, **timeline**, **resources**, and **risk**.
+4. Make a PO decision: Accept / Defer / Reject — with clear reasoning.
+5. Update or draft updated backlog items / acceptance criteria if accepted.
+6. Offer a stakeholder communication draft if the change affects external parties.
 
 **Output format:**
 ```

@@ -189,6 +189,18 @@ class PendingApprovalTab(QWidget):
 
         bottom_layout.addLayout(detail_header)
 
+        # BC-301: Paidoff warning label — hidden by default, shown for mode="Paidoff" reports
+        self._paidoff_warning = QLabel(
+            "This report was generated for a Paidoff loan. "
+            "The loan has been moved to history. No extension was applied."
+        )
+        self._paidoff_warning.setWordWrap(True)
+        self._paidoff_warning.setStyleSheet(
+            "background-color: #ca6702; color: white; padding: 6px; font-weight: bold;"
+        )
+        self._paidoff_warning.setVisible(False)
+        bottom_layout.addWidget(self._paidoff_warning)
+
         self._rec_table = QTableWidget(0, len(REC_HEADERS))
         self._rec_table.setHorizontalHeaderLabels(REC_HEADERS)
         self._rec_table.setSelectionBehavior(
@@ -263,6 +275,7 @@ class PendingApprovalTab(QWidget):
             self._btn_approve.setEnabled(False)
             self._btn_decline.setEnabled(False)
             self._lbl_selected.setText("Select a report above to view its records.")
+            self._paidoff_warning.setVisible(False)
             return
 
         row_idx = selected_rows[0].row()
@@ -284,6 +297,15 @@ class PendingApprovalTab(QWidget):
             records = []
 
         self._populate_record_table(records)
+
+        # BC-301: Show warning only for Paidoff-mode reports
+        report = next(
+            (r for r in self._reports if r.report_id == self._selected_report_id),
+            None,
+        )
+        self._paidoff_warning.setVisible(
+            report is not None and report.mode == "Paidoff"
+        )
 
     # ------------------------------------------------------------------
     # Record detail table

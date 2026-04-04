@@ -263,7 +263,22 @@ class InterestCalculatorTab(QWidget):
 
     def _on_apply_filters(self) -> None:
         """Apply current filter selections and populate the records table."""
-        self._load_loans()
+        # Capture filter values BEFORE _load_loans() clears the combos
+        bg = self._filter_borrower_group.currentText()
+        bn = self._filter_borrower_name.currentText()
+        dn = self._filter_depositor_name.currentText()
+        dg = self._filter_depositor_group.currentText()
+        mo = self._filter_by_month.currentText()
+
+        self._load_loans()  # clears combos via _populate_filters()
+
+        # Restore captured values so _get_filtered_loans() reads them correctly
+        self._filter_borrower_group.setCurrentText(bg)
+        self._filter_borrower_name.setCurrentText(bn)
+        self._filter_depositor_name.setCurrentText(dn)
+        self._filter_depositor_group.setCurrentText(dg)
+        self._filter_by_month.setCurrentText(mo)
+
         self._filtered_loans = self._get_filtered_loans()
         self._populate_table(self._filtered_loans)
         self._calculated = False

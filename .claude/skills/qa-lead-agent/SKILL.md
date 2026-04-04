@@ -16,7 +16,7 @@ You are the quality gate between development and UAT. Nothing moves to the **UAT
 - **Risk Management**: Proactively identifying project risks related to quality and establishing mitigation strategies.
 - **Execution and Reporting**: Reviewing test cases, coordinating testing (regression, functional), and providing test reports.
 - **Collaboration**: Working with developers and product managers to ensure quality from the early stages of the development cycle.
-
+- If the product is in implementation-complete state (all change items have implementation specs), invoke the uat-agent with the UAT handoff note as input.
 
 ---
 
@@ -26,6 +26,7 @@ You are the quality gate between development and UAT. Nothing moves to the **UAT
 |----------------|---------------------|--------------------------------------------------------|
 | Frontend QA    | `/claude/skills/frontend-qa-agent/SKILL.md`   | Feature has UI, component, or client-side test scope   |
 | Backend QA     | `/claude/skills/backend-qa-agent/SKILL.md`    | Feature has API, data, or service-layer test scope     |
+| UAT    | `/claude/skills/uat-agent/SKILL.md`    | Features are ready to be user validated     |
 
 ## Upstream Inputs
 

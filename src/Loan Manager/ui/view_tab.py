@@ -1,6 +1,6 @@
 """View Tab — sortable, inline-editable loan table (Requirements 2, 3, 4)."""
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from PySide6.QtCore import (
@@ -38,8 +38,10 @@ from data.csv_manager import (
     read_loans,
     update_loan,
 )
+from data.report_manager import generate_report_id, write_report, write_report_records
 from data.status_engine import compute_status, recompute_all
 from models.loan import Loan
+from models.report import PendingReport, ReportRecord
 from ui.dialogs.extend_dialog import ExtendDialog
 from ui.dialogs.paidoff_dialog import PaidoffDialog
 
@@ -133,13 +135,21 @@ class ViewTab(QWidget):
     # ------------------------------------------------------------------
 
     def load_data(self) -> None:
-        """Reload loans from CSV, recompute status, repopulate model."""
+        """Reload loans from CSV, recompute status, persist only changed statuses."""
         try:
             loans = read_loans()
+            # Snapshot status BEFORE recompute_all() mutates Loan objects in place
+            snapshot = {loan.reference_id: loan.status for loan in loans}
             loans = recompute_all(loans, date.today())
-            # Persist status changes
-            for loan in loans:
+            # Only write loans whose status genuinely changed
+            changed = [l for l in loans if l.status != snapshot.get(l.reference_id)]
+            for loan in changed:
                 update_loan(loan)
+            # SRE-mandated log line for operational verification
+            if changed:
+                logger.info("Refresh: %d loan(s) status changed — persisted", len(changed))
+            else:
+                logger.debug("Refresh: no status changes — skipping all writes")
         except Exception as exc:
             logger.error("Failed to load loans: %s", exc)
             QMessageBox.critical(self, "Error", f"Could not load loan data: {exc}")
@@ -347,12 +357,104 @@ class ViewTab(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            mark_paidoff(loan.reference_id, dialog.paidoff_date())
+            paidoff_date = dialog.paidoff_date()
+            interest_rate = dialog.interest_rate()
+            commission_rate = dialog.commission_rate()
+            tds_flag = dialog.tds_flag()
+
+            # Step 1: archive loan (with recovery.tmp crash safety)
+            mark_paidoff(loan.reference_id, paidoff_date)
             logger.info("Loan marked paidoff: %s", loan.reference_id)
+
+            # Step 2: compute extension period (TC-401: 0 if no due_date)
+            if loan.due_date is not None:
+                extension_period = (paidoff_date - loan.due_date).days
+            else:
+                extension_period = 0
+                logger.debug(
+                    "Paidoff report for %s: no due_date, extension_period=0",
+                    loan.reference_id,
+                )
+
+            # Step 3: compute interest amounts
+            if extension_period > 0:
+                interest_amount = (
+                    loan.amount * interest_rate * extension_period
+                ) / (365 * 100)
+                commission_amount = (
+                    loan.amount * commission_rate * extension_period
+                ) / (365 * 100)
+            else:
+                interest_amount = 0.0
+                commission_amount = 0.0
+
+            tds_amount = round(0.1 * interest_amount, 4) if tds_flag else 0.0
+            interest_amount = round(interest_amount, 4)
+            commission_amount = round(commission_amount, 4)
+
+            # Step 4: generate report and send to Pending Approval queue
+            try:
+                today = date.today()
+                report_id = generate_report_id(today)
+                now = datetime.now()
+
+                report = PendingReport(
+                    report_id=report_id,
+                    report_creation_date=today,
+                    report_latest_update_dt=now,
+                    mode="Paidoff",
+                    status="Pending",
+                )
+                write_report(report)
+
+                record = ReportRecord(
+                    report_id=report_id,
+                    reference_id=loan.reference_id,
+                    borrower_name=loan.borrower_name,
+                    amount=loan.amount,
+                    depositor_name=loan.depositor_name,
+                    giving_date=loan.giving_date,
+                    due_date=loan.due_date,
+                    interest_rate=interest_rate,
+                    commission_rate=commission_rate,
+                    extension_period=extension_period,
+                    extension_period_unit="days",
+                    tds_flag=tds_flag,
+                    new_giving_date=None,
+                    new_due_date=None,
+                    interest_amount=interest_amount,
+                    commission_amount=commission_amount,
+                    tds_amount=tds_amount,
+                )
+                write_report_records([record])
+                logger.info(
+                    "Paidoff report generated: %s for loan %s",
+                    report_id, loan.reference_id,
+                )
+            except Exception as report_exc:
+                # Report generation failure does NOT undo the paidoff archival.
+                # Log error and notify user — loan is safely in history.csv.
+                logger.error(
+                    "Paidoff report generation failed for %s: %s",
+                    loan.reference_id, report_exc,
+                )
+                QMessageBox.warning(
+                    self,
+                    "Report Generation Failed",
+                    f"Loan {loan.reference_id} has been marked as Paidoff "
+                    f"and moved to history.\n\n"
+                    f"However, the interest report could not be generated: "
+                    f"{report_exc}\n\n"
+                    f"You can manually generate the report from the Interest "
+                    f"Calculator Tab.",
+                )
+
             self.data_changed.emit()
         except Exception as exc:
             logger.error("Failed to mark paidoff %s: %s", loan.reference_id, exc)
-            QMessageBox.critical(self, "Error", f"Could not mark loan as Paidoff: {exc}")
+            QMessageBox.critical(
+                self, "Error", f"Could not mark loan as Paidoff: {exc}"
+            )
         finally:
             self.load_data()
 
