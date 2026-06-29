@@ -9,14 +9,15 @@
 
 - **Requirement 1**: 
   - User should be able to record an entry for a Loan.
-  - The UI should ask for `[Borrower Name, Depositor Name, Amount, Giving Date, Due Date [OPTIONAL], Due Period [OPTIONAL], Borrower Group, Depositor Group[OPTIONAL]`.
+  - The UI should ask for `[Borrower Name, Depositor Name, Amount, Giving Date, Due Period [OPTIONAL], Due Date [OPTIONAL] , Borrower Group, Depositor Group[OPTIONAL]`.
     - Giving Date is just for the reference. This value does **not** account towards any calculations revolving around loan tenure.
     - By default, `due_date` = `Unknown`.
     - User will either give `due_date` or `due_period`. Unit for `due_period` will always be `months`. Upon entering `due_period` value, `due_date` value is automatically calculated and reflected in its field. `due_date = giving_date + due_period(months)` 
     - Normalize to lowercase at write time to support filtering logic (`borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`).
-  - For Dates, instead of manual entry a calendar widget for date-picker is needed which should appear whenever the user 'Tabs' into the date field or clicks on the form field.
+  - `due_period` field should show up before `due_date`.
+  - For Dates, instead of manual entry a calendar widget for date-picker is needed which should appear whenever the user presses Tab in the form fields into the date field or double clicks on the date-field values.
   - Amount defaults to INR as currency and is a non-negative integer.
-  - There be an autocomplete from existing values for future entries for fields like: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`
+  - There should be an autocomplete from existing values for future entries for fields like: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`. `depositor_name` is not an optional field. Whenever a `borrower_name` and `depositor_name` are entered, if these value exists in the history, then pick the corresponding values of `borrower_group` and `depositor_group` respectively.
   - Entries are stored in a data folder (`./app/output/data/YYYY/`) for as `loans.csv`
   - After a user saves a new loan entry, Show a status-bar message: `Loan saved successfully. Reference ID: {ref_id}.` No need for auto-switch to View Tab.
 
@@ -97,7 +98,7 @@
     - If two reports in the Pending Approval queue contain the same `reference_id` (e.g., a borrower appears in both a "March group" report and a borrower specific report). Warn the user when approving a report whose `reference_id`s appear in another currently-Pending report. Display: `This report shares loan records with another pending report. Approving may overwrite previous updates.` with `Proceed` and `Cancel` options. If one of them is approved, automatically silent overwrite the previous updates in both storage for loans and the other reports and their report records.
     - If a loan record is in the Pending Approval queue (as part of a report) and the user deletes that loan record from the View Tab before approving the report, when the report is approved, The user is warned: "Records in this report have been deleted.", if user wishes to ignore the warning, The approval updates only the records that still exist (skip deleted ones) otherwise user may decline the report.
     - If Report is `Declined`, the `report_id` is marked as Declined and the calculated values are deleted without any storage updates.
-    - If Report is `Approved`, the `report_id` is updated and the original records(in `loans.csv`) as well is the in-line updated records on the `pending_report_records.csv` also updated with the post-extension values.
+    - If Report is `Approved`, the `report_id` is updated and the original records(in `loans.csv`) as well is the in-line updated records on the `pending_report_records.csv` also updated with the post-extension values. Approved reports can then downloaded as PDF or can be 'Print' as well. 
     - The Pending Approval report display the pre-extension value, only after approval are the values updated in both UI and the storage.
     - There will be preview columns for `post_extension_giving_date`, `post_extension_due_date` along with pre-extension values.
     - "Generate Report" button in the Interest Calculator Tab should be disabled until the user has clicked "Calculate".
@@ -183,7 +184,7 @@ recordN
 
 - **User-Testing Requirement 1**:
   - User forbids testing drifts between OS implementations.
-  - While testing the Inline Cell edit for date fields i.e. `giving_date` and `due_date` in View Tab. The following error shows up: 
+  - While testing the Inline Cell edit for date fields i.e. `giving_date` and `due_date` in View Tab or even the Entry Tab. The user expects the Date-picker dialog box to show up as soon as he Tabs into the date cells during Entry or View Tabs. The following error shows up: 
 ```
 Error calling Python override of QDateEdit::mousePressEvent(): Traceback (most recent call last):
   File "/Users/ishq_kan/Documents/Github/FinHive/src/Loan Manager/ui/widgets.py", line 33, in mousePressEvent
