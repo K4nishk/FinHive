@@ -1,41 +1,46 @@
-#!/usr/bin/env bash
-# Loan Manager launcher for macOS.
-# Creates a virtual environment, installs dependencies, and starts the app.
-set -euo pipefail
+#!/bin/bash
+set -e
 
-# Check Python version (requires Python 3.10+)
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 was not found. Please install Python 3.10 or later from https://www.python.org/downloads/"
+echo "=== Loan Manager — macOS Launcher ==="
+
+# Python version check
+PYTHON_CMD=""
+for cmd in python3.12 python3.11 python3.10 python3; do
+    if command -v "$cmd" &>/dev/null; then
+        VERSION=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        MAJOR=$(echo "$VERSION" | cut -d. -f1)
+        MINOR=$(echo "$VERSION" | cut -d. -f2)
+        if [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 10 ]; then
+            PYTHON_CMD="$cmd"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: Python 3.10 or higher is required but was not found."
+    echo "Please install Python 3.10+ from https://www.python.org/downloads/"
     exit 1
 fi
 
-PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+echo "Using: $($PYTHON_CMD --version)"
 
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }; then
-    echo "ERROR: Python 3.10 or later is required. Found Python ${PY_VERSION}. Please upgrade from https://www.python.org/downloads/"
-    exit 1
-fi
-
-echo "Python ${PY_VERSION} detected. OK."
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
-VENV_DIR="$SCRIPT_DIR/.venv"
-
+# Setup virtual environment
+VENV_DIR="$(dirname "$0")/.venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv "$VENV_DIR"
+    "$PYTHON_CMD" -m venv "$VENV_DIR"
 fi
 
-echo "Activating virtual environment..."
+# Activate venv
 source "$VENV_DIR/bin/activate"
 
-echo "Installing dependencies..."
+# Install/upgrade requirements
+echo "Installing requirements..."
 pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
+pip install --quiet -r "$(dirname "$0")/requirements.txt"
 
+# Run the application
 echo "Starting Loan Manager..."
-python main.py
+cd "$(dirname "$0")"
+python -m loan_manager.main

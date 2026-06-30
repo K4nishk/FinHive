@@ -1,49 +1,54 @@
 @echo off
-REM Loan Manager launcher for Windows.
-REM Creates a virtual environment, installs dependencies, and starts the app.
+setlocal enabledelayedexpansion
 
-REM Check Python version (requires Python 3.10+)
-python --version >nul 2>&1
-IF ERRORLEVEL 1 (
-    echo ERROR: Python was not found. Please install Python 3.10 or later from https://www.python.org/downloads/
-    pause
-    exit /b 1
-)
-FOR /F "tokens=2 delims= " %%V IN ('python --version 2^>^&1') DO SET PY_VERSION=%%V
-FOR /F "tokens=1,2 delims=." %%A IN ("%PY_VERSION%") DO (
-    SET PY_MAJOR=%%A
-    SET PY_MINOR=%%B
-)
-IF %PY_MAJOR% LSS 3 (
-    echo ERROR: Python 3.10 or later is required. Found Python %PY_VERSION%. Please upgrade from https://www.python.org/downloads/
-    pause
-    exit /b 1
-)
-IF %PY_MAJOR% EQU 3 IF %PY_MINOR% LSS 10 (
-    echo ERROR: Python 3.10 or later is required. Found Python %PY_VERSION%. Please upgrade from https://www.python.org/downloads/
-    pause
-    exit /b 1
-)
-echo Python %PY_VERSION% detected. OK.
+echo === Loan Manager -- Windows Launcher ===
 
-SET SCRIPT_DIR=%~dp0
-cd /d "%SCRIPT_DIR%"
+:: Python version check
+set PYTHON_CMD=
+for %%p in (python3.12 python3.11 python3.10 python3 python) do (
+    where %%p >nul 2>&1
+    if !errorlevel! == 0 (
+        for /f "tokens=2 delims= " %%v in ('%%p --version 2^>^&1') do (
+            set VERSION=%%v
+        )
+        for /f "tokens=1,2 delims=." %%a in ("!VERSION!") do (
+            set MAJOR=%%a
+            set MINOR=%%b
+        )
+        if !MAJOR! GEQ 3 (
+            if !MINOR! GEQ 10 (
+                set PYTHON_CMD=%%p
+                goto :found_python
+            )
+        )
+    )
+)
 
-SET VENV_DIR=%SCRIPT_DIR%.venv
+echo ERROR: Python 3.10 or higher is required but was not found.
+echo Please install Python 3.10+ from https://www.python.org/downloads/
+pause
+exit /b 1
 
-IF NOT EXIST "%VENV_DIR%" (
+:found_python
+echo Using: !PYTHON_CMD!
+
+:: Setup virtual environment
+set VENV_DIR=%~dp0.venv
+if not exist "!VENV_DIR!" (
     echo Creating virtual environment...
-    python -m venv "%VENV_DIR%"
+    !PYTHON_CMD! -m venv "!VENV_DIR!"
 )
 
-echo Activating virtual environment...
-CALL "%VENV_DIR%\Scripts\activate.bat"
+:: Activate venv
+call "!VENV_DIR!\Scripts\activate.bat"
 
-echo Installing dependencies...
+:: Install requirements
+echo Installing requirements...
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r requirements.txt
+python -m pip install --quiet -r "%~dp0requirements.txt"
 
+:: Run application
 echo Starting Loan Manager...
-python main.py
-
+cd /d "%~dp0"
+python -m loan_manager.main
 pause
