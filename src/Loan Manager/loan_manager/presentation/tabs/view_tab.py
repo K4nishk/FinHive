@@ -2,7 +2,7 @@ from datetime import date
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableView, QPushButton, QMenu,
-    QMessageBox, QStyledItemDelegate, QHeaderView,
+    QMessageBox, QStyledItemDelegate, QHeaderView, QLabel, QFrame,
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QModelIndex
 
@@ -20,6 +20,9 @@ from loan_manager.presentation.dialogs.date_picker_dialog import DatePickerDialo
 from loan_manager.presentation.dialogs.extend_dialog import ExtendDialog
 from loan_manager.presentation.dialogs.paidoff_dialog import PaidOffDialog
 
+# Date column indices for prefix-based matching
+_DATE_COLUMNS = {COL_IDX["G Date"], COL_IDX["D Date"]}
+
 
 class DateDelegate(QStyledItemDelegate):
     """Delegate that opens DatePickerDialog for date columns."""
@@ -32,7 +35,7 @@ class DateDelegate(QStyledItemDelegate):
 
 
 class MultiColumnFilterProxy(QSortFilterProxyModel):
-    """Proxy model that supports per-column filtering."""
+    """Proxy model that supports per-column filtering with date prefix matching."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,6 +48,28 @@ class MultiColumnFilterProxy(QSortFilterProxyModel):
             self._column_filters.pop(column, None)
         self.invalidateFilter()
 
+    def clear_all_filters(self) -> None:
+        self._column_filters.clear()
+        self.invalidateFilter()
+
+    def get_active_filters(self) -> dict[int, list[str]]:
+        return dict(self._column_filters)
+
+    # Columns that should sort numerically
+    _NUMERIC_COLUMNS = {COL_IDX["SNo"], COL_IDX["Amt"]}
+
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        left_data = self.sourceModel().data(left, Qt.ItemDataRole.DisplayRole)
+        right_data = self.sourceModel().data(right, Qt.ItemDataRole.DisplayRole)
+
+        if left.column() in self._NUMERIC_COLUMNS:
+            try:
+                return int(left_data or 0) < int(right_data or 0)
+            except (ValueError, TypeError):
+                pass
+
+        return (left_data or "") < (right_data or "")
+
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         if not self._column_filters:
             return True
@@ -54,9 +79,35 @@ class MultiColumnFilterProxy(QSortFilterProxyModel):
                 continue
             index = model.index(source_row, col, source_parent)
             value = model.data(index, Qt.ItemDataRole.DisplayRole)
-            if value not in allowed:
-                return False
+            cell_str = str(value) if value is not None else ""
+
+            if col in _DATE_COLUMNS:
+                # Date columns use prefix matching
+                if not self._date_matches(cell_str, allowed):
+                    return False
+            else:
+                # Text columns use exact match
+                if cell_str not in allowed:
+                    return False
         return True
+
+    @staticmethod
+    def _date_matches(cell_value: str, allowed: list[str]) -> bool:
+        """Check if a cell date value matches any of the allowed filter selections.
+
+        Allowed values can be:
+        - "YYYY" (year): match if cell starts with "YYYY"
+        - "YYYY-MM" (month): match if cell starts with "YYYY-MM"
+        - "YYYY-MM-DD" (day): exact match
+        - "Unknown": match empty/Unknown/None values
+        """
+        for selection in allowed:
+            if selection == "Unknown":
+                if cell_value in ("", "Unknown", "None"):
+                    return True
+            elif cell_value.startswith(selection):
+                return True
+        return False
 
 
 class ViewTab(QWidget):
@@ -75,8 +126,15 @@ class ViewTab(QWidget):
         # Toolbar
         toolbar = QHBoxLayout()
         refresh_btn = QPushButton("Refresh")
+        refresh_btn.setAccessibleName("Refresh loan records")
         refresh_btn.clicked.connect(self.refresh)
         toolbar.addWidget(refresh_btn)
+
+        self._print_btn = QPushButton("Print")
+        self._print_btn.setAccessibleName("Print loan records")
+        self._print_btn.clicked.connect(self._on_print)
+        toolbar.addWidget(self._print_btn)
+
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
@@ -98,6 +156,21 @@ class ViewTab(QWidget):
             self._filter_widgets.append(fw)
         filter_bar.addStretch()
         layout.addLayout(filter_bar)
+
+        # Active filters summary
+        self._filter_summary_frame = QFrame()
+        summary_layout = QHBoxLayout(self._filter_summary_frame)
+        summary_layout.setContentsMargins(4, 2, 4, 2)
+        self._filter_summary_label = QLabel("")
+        self._filter_summary_label.setAccessibleName("Active filters summary")
+        summary_layout.addWidget(self._filter_summary_label)
+        summary_layout.addStretch()
+        self._clear_all_btn = QPushButton("Clear All")
+        self._clear_all_btn.setAccessibleName("Clear all filters")
+        self._clear_all_btn.clicked.connect(self._clear_all_filters)
+        summary_layout.addWidget(self._clear_all_btn)
+        self._filter_summary_frame.setVisible(False)
+        layout.addWidget(self._filter_summary_frame)
 
         # Table
         self._model = LoanTableModel(self._theme)
@@ -127,12 +200,21 @@ class ViewTab(QWidget):
 
         layout.addWidget(self._table)
 
+        # Empty results label
+        self._empty_label = QLabel("No matching records found.")
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setAccessibleName("No matching records found")
+        self._empty_label.setStyleSheet("color: gray; font-size: 14px; padding: 20px;")
+        self._empty_label.setVisible(False)
+        layout.addWidget(self._empty_label)
+
     def refresh(self) -> None:
         try:
             get_loans = GetAllLoans(self._container.get_uow)
             loans = get_loans.execute()
             self._model.load(loans)
             self._update_filters(loans)
+            self._update_empty_state()
         except Exception as e:
             if self._main_window:
                 self._main_window.show_status(f"Error loading loans: {e}")
@@ -148,6 +230,69 @@ class ViewTab(QWidget):
 
     def _on_filter_changed(self, column: int, values: list[str]) -> None:
         self._proxy.set_column_filter(column, values)
+        self._update_filter_summary()
+        self._update_empty_state()
+
+    def _update_filter_summary(self) -> None:
+        active = self._proxy.get_active_filters()
+        if not active:
+            self._filter_summary_frame.setVisible(False)
+            return
+
+        parts = []
+        for col, values in active.items():
+            col_name = COLUMNS[col] if col < len(COLUMNS) else f"Col {col}"
+            # Find matching filter widget for display name
+            for fw in self._filter_widgets:
+                if fw._col == col:
+                    col_name = fw.column_name
+                    break
+            parts.append(f"{col_name}: {', '.join(values)}")
+
+        self._filter_summary_label.setText("Active Filters:  " + "  |  ".join(parts))
+        self._filter_summary_frame.setVisible(True)
+
+    def _clear_all_filters(self) -> None:
+        self._proxy.clear_all_filters()
+        for fw in self._filter_widgets:
+            fw.clear_filter()
+        self._update_filter_summary()
+        self._update_empty_state()
+
+    def _update_empty_state(self) -> None:
+        visible_rows = self._proxy.rowCount()
+        self._empty_label.setVisible(visible_rows == 0)
+
+    def get_active_filters_dict(self) -> dict[str, list[str]]:
+        """Return active filters as {column_name: [values]} for printing."""
+        active = self._proxy.get_active_filters()
+        result = {}
+        for col, values in active.items():
+            col_name = COLUMNS[col] if col < len(COLUMNS) else f"Col {col}"
+            for fw in self._filter_widgets:
+                if fw._col == col:
+                    col_name = fw.column_name
+                    break
+            result[col_name] = values
+        return result
+
+    def get_visible_loans(self) -> list[LoanDTO]:
+        """Return all currently visible loans in proxy sort order."""
+        loans = []
+        for row in range(self._proxy.rowCount()):
+            source_index = self._proxy.mapToSource(self._proxy.index(row, 0))
+            loan = self._model.loan_at(source_index.row())
+            if loan is not None:
+                loans.append(loan)
+        return loans
+
+    def _on_print(self) -> None:
+        from loan_manager.presentation.widgets.report_printer import LoanReportPrinter
+
+        loans = self.get_visible_loans()
+        filters = self.get_active_filters_dict()
+        printer = LoanReportPrinter()
+        printer.print_loans(loans, filters, self)
 
     def _on_double_click(self, proxy_index: QModelIndex) -> None:
         source_index = self._proxy.mapToSource(proxy_index)

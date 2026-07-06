@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtGui import QTextDocument
 
 from loan_manager.application.dtos.report_dto import (
     ReportDTO, ReportRecordUpdateDTO,
@@ -82,16 +81,19 @@ class PendingApprovalTab(QWidget):
         btn_layout.addStretch()
 
         self._print_btn = QPushButton("Print/PDF")
+        self._print_btn.setAccessibleName("Print approval report")
         self._print_btn.clicked.connect(self._on_print)
         self._print_btn.setEnabled(False)
         btn_layout.addWidget(self._print_btn)
 
         self._decline_btn = QPushButton("Decline")
+        self._decline_btn.setAccessibleName("Decline selected report")
         self._decline_btn.clicked.connect(self._on_decline)
         self._decline_btn.setEnabled(False)
         btn_layout.addWidget(self._decline_btn)
 
         self._approve_btn = QPushButton("Approve")
+        self._approve_btn.setAccessibleName("Approve selected report")
         self._approve_btn.clicked.connect(self._on_approve)
         self._approve_btn.setEnabled(False)
         btn_layout.addWidget(self._approve_btn)
@@ -318,59 +320,7 @@ class PendingApprovalTab(QWidget):
         if self._selected_report is None:
             return
 
-        html = self._build_print_html()
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-            doc = QTextDocument()
-            doc.setHtml(html)
-            doc.print_(printer)
+        from loan_manager.presentation.widgets.report_printer import ApprovalReportPrinter
 
-    def _build_print_html(self) -> str:
-        if self._selected_report is None:
-            return ""
-
-        report = self._selected_report
-        rows_html = ""
-        for rec in report.records:
-            rows_html += (
-                f"<tr>"
-                f"<td>{rec.reference_id}</td>"
-                f"<td>{rec.borrower_name}</td>"
-                f"<td>{rec.depositor_name}</td>"
-                f"<td>{rec.amount}</td>"
-                f"<td>{rec.giving_date}</td>"
-                f"<td>{rec.due_date or 'N/A'}</td>"
-                f"<td>{rec.interest_rate}</td>"
-                f"<td>{rec.commission_rate}</td>"
-                f"<td>{rec.extension_period} {rec.extension_period_unit.value}</td>"
-                f"<td>{rec.interest_amount or 0}</td>"
-                f"<td>{rec.commission_amount or 0}</td>"
-                f"<td>{rec.tds_amount or 0}</td>"
-                f"<td>{rec.chq_amount or 0}</td>"
-                f"</tr>"
-            )
-
-        return f"""
-        <html>
-        <head><style>
-            body {{ font-family: Arial, sans-serif; }}
-            table {{ border-collapse: collapse; width: 100%; }}
-            th, td {{ border: 1px solid black; padding: 4px 8px; text-align: left; font-size: 10px; }}
-            th {{ background-color: lightgray; }}
-            h2 {{ margin-bottom: 5px; }}
-        </style></head>
-        <body>
-            <h2>Report: {report.report_id}</h2>
-            <p>Mode: {report.report_mode.value} | Created: {report.created_at.strftime('%Y-%m-%d %H:%M')}</p>
-            <table>
-                <tr>
-                    <th>Ref ID</th><th>Borrower</th><th>Depositor</th><th>Amount</th>
-                    <th>G Date</th><th>D Date</th><th>Rate%</th><th>Comm%</th>
-                    <th>Period</th><th>Interest</th><th>Commission</th><th>TDS</th><th>CHQ</th>
-                </tr>
-                {rows_html}
-            </table>
-        </body>
-        </html>
-        """
+        printer = ApprovalReportPrinter()
+        printer.print_report(self._selected_report, self)
