@@ -96,7 +96,7 @@ class CsvToSqliteMigration:
                 due_date = raw.get("due_date")
                 status = StatusEngine.compute(giving_date, due_date, today)
 
-                now = datetime.utcnow()
+                now = datetime.now()
                 existing = self._session.query(LoanModel).filter_by(reference_id=ref_id).first()
 
                 if existing:

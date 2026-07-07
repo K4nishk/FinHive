@@ -21,7 +21,8 @@ from loan_manager.domain.value_objects.status import CalculationMode, ExtensionP
 
 REPORT_COLUMNS = ["Report ID", "Mode", "Records", "Created", "Updated"]
 RECORD_COLUMNS = [
-    "Ref ID", "B Name", "D Name", "Amount", "G Date", "D Date",
+    "Ref ID", "B Name", "D Name", "Amount",
+    "Orig G.Date", "Orig D.Date", "New G.Date", "New D.Date",
     "Rate %", "Comm %", "Period", "Unit", "TDS",
     "Interest", "Commission", "TDS Amt", "CHQ Amt",
 ]
@@ -150,22 +151,30 @@ class PendingApprovalTab(QWidget):
             self._set_readonly(row, 3, str(rec.amount))
             self._set_readonly(row, 4, str(rec.giving_date))
             self._set_readonly(row, 5, str(rec.due_date) if rec.due_date else "N/A")
-
-            # Editable fields
-            self._record_table.setItem(row, 6, QTableWidgetItem(str(rec.interest_rate)))
-            self._record_table.setItem(row, 7, QTableWidgetItem(str(rec.commission_rate)))
-            self._record_table.setItem(row, 8, QTableWidgetItem(str(rec.extension_period)))
-            self._record_table.setItem(
-                row, 9, QTableWidgetItem(rec.extension_period_unit.value)
+            self._set_readonly(
+                row, 6,
+                str(rec.post_extension_giving_date) if rec.post_extension_giving_date else "N/A",
             )
-            self._record_table.setItem(
-                row, 10, QTableWidgetItem("Yes" if rec.tds_flag else "No")
+            self._set_readonly(
+                row, 7,
+                str(rec.post_extension_due_date) if rec.post_extension_due_date else "N/A",
             )
 
-            self._set_readonly(row, 11, str(rec.interest_amount or 0))
-            self._set_readonly(row, 12, str(rec.commission_amount or 0))
-            self._set_readonly(row, 13, str(rec.tds_amount or 0))
-            self._set_readonly(row, 14, str(rec.chq_amount or 0))
+            # Editable fields (columns 8-12)
+            self._record_table.setItem(row, 8, QTableWidgetItem(str(rec.interest_rate)))
+            self._record_table.setItem(row, 9, QTableWidgetItem(str(rec.commission_rate)))
+            self._record_table.setItem(row, 10, QTableWidgetItem(str(rec.extension_period)))
+            self._record_table.setItem(
+                row, 11, QTableWidgetItem(rec.extension_period_unit.value)
+            )
+            self._record_table.setItem(
+                row, 12, QTableWidgetItem("Yes" if rec.tds_flag else "No")
+            )
+
+            self._set_readonly(row, 13, str(rec.interest_amount or 0))
+            self._set_readonly(row, 14, str(rec.commission_amount or 0))
+            self._set_readonly(row, 15, str(rec.tds_amount or 0))
+            self._set_readonly(row, 16, str(rec.chq_amount or 0))
 
         self._record_table.blockSignals(False)
 
@@ -175,7 +184,7 @@ class PendingApprovalTab(QWidget):
         self._record_table.setItem(row, col, item)
 
     def _on_record_edited(self, row: int, col: int) -> None:
-        if col not in (6, 7, 8, 9, 10):
+        if col not in (8, 9, 10, 11, 12):
             return
         if self._selected_report is None:
             return
@@ -188,18 +197,18 @@ class PendingApprovalTab(QWidget):
 
         try:
             update = {}
-            if col == 6:
-                update["interest_rate"] = Decimal(self._record_table.item(row, 6).text())
-            elif col == 7:
-                update["commission_rate"] = Decimal(self._record_table.item(row, 7).text())
-            elif col == 8:
-                update["extension_period"] = int(self._record_table.item(row, 8).text())
+            if col == 8:
+                update["interest_rate"] = Decimal(self._record_table.item(row, 8).text())
             elif col == 9:
-                update["extension_period_unit"] = ExtensionPeriodUnit(
-                    self._record_table.item(row, 9).text()
-                )
+                update["commission_rate"] = Decimal(self._record_table.item(row, 9).text())
             elif col == 10:
-                text = self._record_table.item(row, 10).text().lower()
+                update["extension_period"] = int(self._record_table.item(row, 10).text())
+            elif col == 11:
+                update["extension_period_unit"] = ExtensionPeriodUnit(
+                    self._record_table.item(row, 11).text()
+                )
+            elif col == 12:
+                text = self._record_table.item(row, 12).text().lower()
                 update["tds_flag"] = text in ("yes", "true", "1")
 
             dto = ReportRecordUpdateDTO(**update)
@@ -208,12 +217,23 @@ class PendingApprovalTab(QWidget):
                 self._selected_report.report_id, rec.id, dto
             )
 
-            # Update display
+            # Update computed display columns
             self._record_table.blockSignals(True)
-            self._record_table.item(row, 11).setText(str(updated_rec.interest_amount or 0))
-            self._record_table.item(row, 12).setText(str(updated_rec.commission_amount or 0))
-            self._record_table.item(row, 13).setText(str(updated_rec.tds_amount or 0))
-            self._record_table.item(row, 14).setText(str(updated_rec.chq_amount or 0))
+            # Update post-extension dates (recalculated by the use case)
+            self._set_readonly(
+                row, 6,
+                str(updated_rec.post_extension_giving_date)
+                if updated_rec.post_extension_giving_date else "N/A",
+            )
+            self._set_readonly(
+                row, 7,
+                str(updated_rec.post_extension_due_date)
+                if updated_rec.post_extension_due_date else "N/A",
+            )
+            self._record_table.item(row, 13).setText(str(updated_rec.interest_amount or 0))
+            self._record_table.item(row, 14).setText(str(updated_rec.commission_amount or 0))
+            self._record_table.item(row, 15).setText(str(updated_rec.tds_amount or 0))
+            self._record_table.item(row, 16).setText(str(updated_rec.chq_amount or 0))
             self._record_table.blockSignals(False)
 
             if self._main_window:

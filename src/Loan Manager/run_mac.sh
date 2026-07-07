@@ -5,7 +5,8 @@ echo "=== Loan Manager — macOS Launcher ==="
 
 # Python version check
 PYTHON_CMD=""
-for cmd in python3.12 python3.11 python3.10 python3; do
+# Python 3.13+ recommended; 3.10 minimum
+for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$cmd" &>/dev/null; then
         VERSION=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
         MAJOR=$(echo "$VERSION" | cut -d. -f1)

@@ -442,19 +442,22 @@ class ApprovalReportPrinter:
 
     # Table column definitions for the per-borrower table
     _TABLE_HEADERS = [
-        "Amount", "Giving Date", "Depositor", "Ext", "Unit",
-        "Due Date", "Interest", "TDS", "CHQ", "Commission",
+        "Amount", "Depositor", "Orig G.Date", "Orig D.Date",
+        "New G.Date", "New D.Date", "Ext", "Unit",
+        "Interest", "TDS", "CHQ", "Commission",
     ]
     # Proportional weights for column widths
-    _COL_WEIGHTS = [8, 10, 10, 4, 5, 10, 8, 6, 6, 8]
+    _COL_WEIGHTS = [7, 9, 8, 8, 8, 8, 4, 5, 7, 6, 6, 7]
     # Per-column alignment
     _COL_ALIGNS = [
         Qt.AlignmentFlag.AlignRight,    # Amount
-        Qt.AlignmentFlag.AlignHCenter,  # Giving Date
         Qt.AlignmentFlag.AlignLeft,     # Depositor
+        Qt.AlignmentFlag.AlignHCenter,  # Orig G.Date
+        Qt.AlignmentFlag.AlignHCenter,  # Orig D.Date
+        Qt.AlignmentFlag.AlignHCenter,  # New G.Date
+        Qt.AlignmentFlag.AlignHCenter,  # New D.Date
         Qt.AlignmentFlag.AlignRight,    # Ext
         Qt.AlignmentFlag.AlignLeft,     # Unit
-        Qt.AlignmentFlag.AlignHCenter,  # Due Date
         Qt.AlignmentFlag.AlignRight,    # Interest
         Qt.AlignmentFlag.AlignRight,    # TDS
         Qt.AlignmentFlag.AlignRight,    # CHQ
@@ -572,15 +575,23 @@ class ApprovalReportPrinter:
 
                 cells = [
                     _truncate(str(rec.amount), 0),
-                    _truncate(str(rec.giving_date), 1),
-                    _truncate(rec.depositor_name or "Unknown", 2),
-                    _truncate(str(rec.extension_period), 3),
-                    _truncate(rec.extension_period_unit.value, 4),
-                    _truncate(str(rec.due_date) if rec.due_date else "N/A", 5),
-                    _truncate(str(rec.interest_amount or 0), 6),
-                    _truncate(str(rec.tds_amount or 0), 7),
-                    _truncate(str(rec.chq_amount or 0), 8),
-                    _truncate(str(rec.commission_amount or 0), 9),
+                    _truncate(rec.depositor_name or "Unknown", 1),
+                    _truncate(str(rec.giving_date), 2),
+                    _truncate(str(rec.due_date) if rec.due_date else "N/A", 3),
+                    _truncate(
+                        str(rec.post_extension_giving_date)
+                        if rec.post_extension_giving_date else "N/A", 4
+                    ),
+                    _truncate(
+                        str(rec.post_extension_due_date)
+                        if rec.post_extension_due_date else "N/A", 5
+                    ),
+                    _truncate(str(rec.extension_period), 6),
+                    _truncate(rec.extension_period_unit.value, 7),
+                    _truncate(str(rec.interest_amount or 0), 8),
+                    _truncate(str(rec.tds_amount or 0), 9),
+                    _truncate(str(rec.chq_amount or 0), 10),
+                    _truncate(str(rec.commission_amount or 0), 11),
                 ]
                 tp.draw_row_aligned(
                     cells, col_widths, self._COL_ALIGNS,

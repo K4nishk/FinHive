@@ -5,7 +5,8 @@ echo === Loan Manager -- Windows Launcher ===
 
 :: Python version check
 set PYTHON_CMD=
-for %%p in (python3.12 python3.11 python3.10 python3 python) do (
+:: Python 3.13+ recommended; 3.10 minimum
+for %%p in (python3.14 python3.13 python3.12 python3.11 python3.10 python3 python) do (
     where %%p >nul 2>&1
     if !errorlevel! == 0 (
         for /f "tokens=2 delims= " %%v in ('%%p --version 2^>^&1') do (

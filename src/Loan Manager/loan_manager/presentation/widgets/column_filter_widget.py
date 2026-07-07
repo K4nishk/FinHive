@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem,
     QPushButton, QCheckBox, QFrame,
 )
-from PySide6.QtCore import Signal, Qt, QPoint
+from PySide6.QtCore import Signal, Qt, QPoint, QTimer
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,9 @@ class TextFilterPopup(QFrame):
 
         self._list.blockSignals(False)
         self._sync_select_all_visual(all_values, selected)
+        # Force synchronous repaint — macOS defers repaints more aggressively
+        self._list.repaint()
+        self._list.viewport().repaint()
 
     def set_item_checked(self, value: str, checked: bool) -> None:
         """Update a single item's visual state."""
@@ -144,6 +147,7 @@ class TextFilterPopup(QFrame):
                 self._list.item(i).setCheckState(state)
                 break
         self._list.blockSignals(False)
+        self._list.viewport().repaint()
 
     def set_all_checked(self, checked: bool) -> None:
         """Set all items to checked/unchecked."""
@@ -155,7 +159,8 @@ class TextFilterPopup(QFrame):
         self._select_all.blockSignals(True)
         self._select_all.setCheckState(state)
         self._select_all.blockSignals(False)
-        self._list.viewport().update()
+        self._list.repaint()
+        self._list.viewport().repaint()
 
     def update_select_all_visual(self, all_count: int, selected_count: int) -> None:
         """Update the Select All checkbox based on counts."""
@@ -491,17 +496,29 @@ class ColumnFilterWidget(QWidget):
     # -- Popup lifecycle --
 
     def _open_popup(self) -> None:
-        """Open popup — always renders fresh from committed state."""
+        """Open popup — always renders fresh from committed state.
+
+        Render is deferred to the next event-loop tick via QTimer.singleShot(0)
+        so that the macOS compositor finishes the initial window paint before
+        we set checkbox states.  This approach works correctly on all platforms.
+        """
         self._state.pending = self._state.committed.copy()
         logger.debug(
             "[FilterState col=%d] popup_open: pending=%s",
             self._state.column, self._state.pending,
         )
-        self._popup.render(self._state.all_values, self._state.pending)
         pos = self._btn.mapToGlobal(QPoint(0, self._btn.height()))
         self._popup.move(pos)
         self._popup.show()
         self._popup.raise_()
+        self._popup.activateWindow()
+        # Defer render to next event loop tick — ensures macOS compositor
+        # has finished initial paint before we set checkbox states
+        pending_snapshot = self._state.pending.copy()
+        all_values_snapshot = list(self._state.all_values)
+        QTimer.singleShot(
+            0, lambda: self._popup.render(all_values_snapshot, pending_snapshot)
+        )
 
     # -- Signal handlers --
 

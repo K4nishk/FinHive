@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Callable
+
+from dateutil.relativedelta import relativedelta
 
 from loan_manager.application.dtos.report_dto import (
     ReportDTO,
@@ -107,6 +110,20 @@ class UpdateReportRecord:
             record_model.commission_amount = commission_amount
             record_model.tds_amount = tds_amount
             record_model.chq_amount = chq_amount
+
+            # Recalculate post-extension dates when period or unit changes
+            if record_model.due_date is not None:
+                record_model.post_extension_giving_date = record_model.due_date
+                if unit == ExtensionPeriodUnit.MONTHS:
+                    record_model.post_extension_due_date = (
+                        record_model.due_date
+                        + relativedelta(months=record_model.extension_period)
+                    )
+                else:
+                    record_model.post_extension_due_date = (
+                        record_model.due_date
+                        + timedelta(days=record_model.extension_period)
+                    )
 
             uow.session.flush()
 
