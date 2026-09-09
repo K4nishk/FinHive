@@ -128,8 +128,33 @@ returned zero blocking findings; no logs at all or a final round that errored/hi
 both count as failure, not success. No Claude involved — bash, `git`, `gh`, and the logs
 already on disk, so it still runs when spend is capped.
 
-Make it required, once, with admin access to the repo (needs branch protection already
-enabled on `development`):
+### Drafts, re-gating, and clearing the backlog
+
+A PR the builder opens while the gate is unclean opens as a **draft**, and nothing used
+to promote it afterwards — so one bad gate left the PR a draft forever. `pr_gate.sh`
+now clears the draft itself when the verdict is success (`--no-promote` opts out). A
+draft is a statement about the gate, never a stale flag.
+
+```bash
+ops/pr_gate.sh KCH-78              # publish the trail, set the status, clear the draft if clean
+ops/pr_gate.sh --regate KCH-78     # re-review the WHOLE branch vs development first
+ops/pr_gate.sh --stack             # walk every open PR bottom-up, stopping at the first blocked one
+```
+
+`--regate` exists because the builder reviews each branch against the branch *below* it
+— the right diff while stacking, but it means the bottom PR's full contents are never
+reviewed as one unit. It reviews `feature/<issue>` against `development` and **appends**
+a round rather than overwriting one, so the fix history survives. It runs in a
+throwaway **detached** worktree, so it is safe while a build is in flight: the shared
+checkout is untouched, and leaving the branch unclaimed keeps the builder's own
+`git checkout` of it from failing with "already used by worktree".
+
+`--stack` stops at the first PR whose gate is not clean. That is deliberate — a stack
+merges bottom-up, so a blocked PR blocks everything above it and publishing the rest is
+noise.
+
+Make the check required, once, with admin access to the repo (needs branch protection
+already enabled on `development`):
 
 ```bash
 ops/pr_gate.sh --require-check

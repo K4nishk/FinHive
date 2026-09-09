@@ -477,6 +477,16 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
     if [ "$verdict" = "ALREADY_DONE" ]; then
       say "  $issue needs no change — the agent reports it already implemented"
       say "    (evidence in $LOG_DIR/${issue}_agent.log — verify before trusting it)"
+      # The branch was created before the agent ran and carries no commits of its
+      # own. Leaving it behind litters `git branch` with empty branches that look
+      # like real work — and one of them pinned to a stack tip is exactly the
+      # kind of thing someone later mistakes for an unpushed change.
+      # $base may be a remote-only stack tip, so step off onto BASE_BRANCH, which
+      # always exists locally. If that fails, keep the branch — a stray branch is
+      # harmless, deleting one while it is checked out is not.
+      if git checkout -q "$BASE_BRANCH" 2>/dev/null; then
+        git branch -q -D "$branch" 2>/dev/null || true
+      fi
       return 4
     fi
     fail "$issue produced no commits (agent rc=$rc, verdict=${verdict:-none}) — see $LOG_DIR/${issue}_agent.log"

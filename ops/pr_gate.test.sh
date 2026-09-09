@@ -148,6 +148,44 @@ assert_contains "clean report calls out the passing verdict" "$report_clean" "�
 report_none="$(build_report KCH-777 "$LOGS" "$FIX_REPO")"
 assert_contains "no-run report says unreviewed" "$report_none" "Unreviewed — cannot merge"
 
+# ── issue_branch ─────────────────────────────────────────────────────────
+assert_eq "issue_branch matches the orchestrator's naming" "feature/kch-78" "$(issue_branch KCH-78)"
+
+# ── next_round_file ──────────────────────────────────────────────────────
+# A re-gate appends; it must never overwrite the earlier rounds, which are the
+# record of what CodeRabbit found and which commit answered it.
+RF="$FIX_DIR/rounds"; mkdir -p "$RF"
+assert_eq "first round when nothing has run" "$RF/KCH-90_cr_round0.txt" "$(next_round_file KCH-90 "$RF")"
+: > "$RF/KCH-90_cr_round0.txt"
+assert_eq "appends after round 0" "$RF/KCH-90_cr_round1.txt" "$(next_round_file KCH-90 "$RF")"
+: > "$RF/KCH-90_cr_round1.txt"; : > "$RF/KCH-90_cr_round2.txt"; : > "$RF/KCH-90_cr_round10.txt"
+assert_eq "takes the numeric max, not the lexical one" "$RF/KCH-90_cr_round11.txt" "$(next_round_file KCH-90 "$RF")"
+assert_eq "another issue's rounds do not shift it" "$RF/KCH-91_cr_round0.txt" "$(next_round_file KCH-91 "$RF")"
+
+# ── pr_stack_order ───────────────────────────────────────────────────────
+# gh returns PRs newest-first, and PR numbers do not track stack depth (an issue
+# retried after a failure gets a higher number than the branch above it), so the
+# order has to come from following baseRefName up from development.
+STACK="$(printf '%s\n' \
+  "9	feature/kch-80	feature/kch-81" \
+  "2	development	feature/kch-78" \
+  "7	feature/kch-78	feature/kch-80")"
+assert_eq "orders a stack bottom-up by base, not by number" "2
+7
+9" "$(pr_stack_order development "$STACK")"
+assert_eq "empty when nothing bases on development" "" \
+  "$(pr_stack_order development "$(printf '%s\n' "5	feature/orphan	feature/other")")"
+assert_eq "ignores malformed rows" "2" \
+  "$(pr_stack_order development "$(printf '%s\n' "2	development	feature/kch-78" "garbage" "")")"
+# Two PRs on the same base is a fork in the stack, not a chain — both belong.
+assert_eq "handles a branch point" "2
+3" "$(pr_stack_order development "$(printf '%s\n' \
+  "2	development	feature/kch-78" "3	development	feature/kch-79")")"
+# A base pointing back into the stack must not spin forever.
+assert_eq "a cycle terminates" "2
+4" "$(pr_stack_order development "$(printf '%s\n' \
+  "2	development	feature/a" "4	feature/a	feature/b" "4	feature/b	feature/a")")"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
