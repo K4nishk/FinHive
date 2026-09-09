@@ -82,6 +82,7 @@ strict_equality = true
 # (see .github/workflows/ci.yml) and fails the build on a violating import.
 [tool.importlinter]
 root_package = "finhive"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "calc-service is pure"

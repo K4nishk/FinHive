@@ -1,14 +1,16 @@
-"""Import-linter architecture boundary contracts (KCH-85) — ARD v2.0.0 §5 says the
-service boundaries are enforced by CI, not just drawn in a diagram. This pins the
-three contracts down: calc-service stays pure, agent-service never touches SQL
-directly, and domain never reaches into infrastructure or presentation.
+"""Import-linter architecture boundary contracts (KCH-85) — ARD v2.0.0 §5
+says the service boundaries are enforced by CI, not just drawn in a
+diagram. This pins the three contracts down: calc-service stays pure,
+agent-service never touches SQL directly, and domain never reaches into
+infrastructure or presentation.
 
-The behavioural tests actually run `lint-imports` against a throwaway package that
-mirrors the shape of a contract, so a violating import is proven to fail the gate
-and a compliant one is proven not to -- not just "the toml has the right keys".
-They skip (not fail) when `lint-imports` is not on PATH, e.g. offline dev sandboxes
-without network access to install it; CI installs it via `pip install -e ".[dev]"`
-and always runs them for real.
+The behavioural tests actually run `lint-imports` against a throwaway
+package that mirrors the shape of a contract, so a violating import is
+proven to fail the gate and a compliant one is proven not to -- not just
+"the toml has the right keys". They skip (not fail) when `lint-imports`
+is not on PATH, e.g. offline dev sandboxes without network access to
+install it; CI installs it via `pip install -e ".[dev]"` and always runs
+them for real.
 """
 
 from __future__ import annotations
@@ -16,10 +18,10 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
@@ -27,7 +29,10 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 requires_import_linter = pytest.mark.skipif(
     shutil.which("lint-imports") is None,
-    reason="import-linter not installed (no network access to install it here)",
+    reason=(
+        "import-linter not installed "
+        "(no network access to install it here)"
+    ),
 )
 
 
@@ -62,7 +67,9 @@ def test_agent_never_touches_sql_directly_contract() -> None:
 
 
 def test_domain_boundary_contract() -> None:
-    contract = _contract("domain does not depend on infrastructure or presentation")
+    contract = _contract(
+        "domain does not depend on infrastructure or presentation"
+    )
     assert contract["type"] == "forbidden"
     assert contract["source_modules"] == ["finhive.domain"]
     for forbidden in ["finhive.db", "api"]:
@@ -75,15 +82,16 @@ def test_ci_runs_lint_imports() -> None:
 
 
 def test_lint_imports_runs_before_the_node_toolchain() -> None:
-    """Cheapest-first tier (KCH-82): a Python static-analysis gate must not wait
-    on npm ci / node setup to fail fast.
+    """Cheapest-first tier (KCH-82): a Python static-analysis gate must
+    not wait on npm ci / node setup to fail fast.
     """
     text = WORKFLOW.read_text()
     assert text.index("lint-imports") < text.index("setup-node")
 
 
 def _write_pkg(tmp_path: Path, root: str, modules: dict[str, str]) -> None:
-    """Lay out `root/<dotted module>.py` files with the given source for each entry."""
+    """Lay out `root/<dotted module>.py` files with the given source for
+    each entry."""
     (tmp_path / root).mkdir()
     (tmp_path / root / "__init__.py").write_text("")
     for dotted, source in modules.items():
@@ -98,7 +106,9 @@ def _write_pkg(tmp_path: Path, root: str, modules: dict[str, str]) -> None:
         (pkg_dir / f"{parts[-1]}.py").write_text(source)
 
 
-def _run_lint_imports(tmp_path: Path, config: str) -> subprocess.CompletedProcess[str]:
+def _run_lint_imports(
+    tmp_path: Path, config: str
+) -> subprocess.CompletedProcess[str]:
     (tmp_path / "pyproject.toml").write_text(config)
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
     return subprocess.run(
@@ -114,6 +124,7 @@ def _run_lint_imports(tmp_path: Path, config: str) -> subprocess.CompletedProces
 CALC_CONFIG = """
 [tool.importlinter]
 root_package = "pkg"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "calc-service is pure"
@@ -153,9 +164,29 @@ def test_calc_without_forbidden_imports_passes(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout
 
 
+@requires_import_linter
+def test_calc_importing_httpx_is_blocked(tmp_path: Path) -> None:
+    """Regression for KCH-85 round 2: without
+    include_external_packages = true, import-linter excludes external
+    packages from the graph and this forbidden import would pass
+    incorrectly."""
+    _write_pkg(
+        tmp_path,
+        "pkg",
+        {
+            "calc.client": "import httpx\n",
+            "db": "",
+            "agent": "",
+        },
+    )
+    result = _run_lint_imports(tmp_path, CALC_CONFIG)
+    assert result.returncode != 0, result.stdout
+
+
 AGENT_CONFIG = """
 [tool.importlinter]
 root_package = "pkg"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "agent never touches SQL directly"
@@ -172,6 +203,24 @@ def test_agent_importing_db_raw_is_blocked(tmp_path: Path) -> None:
         "pkg",
         {
             "agent.tool": "import pkg.db.raw\n",
+            "db.raw": "",
+        },
+    )
+    result = _run_lint_imports(tmp_path, AGENT_CONFIG)
+    assert result.returncode != 0, result.stdout
+
+
+@requires_import_linter
+def test_agent_importing_asyncpg_is_blocked(tmp_path: Path) -> None:
+    """Regression for KCH-85 round 2: without
+    include_external_packages = true, import-linter excludes external
+    packages from the graph and this forbidden import would pass
+    incorrectly."""
+    _write_pkg(
+        tmp_path,
+        "pkg",
+        {
+            "agent.tool": "import asyncpg\n",
             "db.raw": "",
         },
     )
@@ -227,7 +276,8 @@ def test_domain_staying_pure_passes(tmp_path: Path) -> None:
         "pkg",
         {
             "domain.entity": (
-                "from dataclasses import dataclass\n\n\n@dataclass\nclass Loan:\n    pass\n"
+                "from dataclasses import dataclass\n\n\n"
+                "@dataclass\nclass Loan:\n    pass\n"
             ),
             "db": "",
         },
