@@ -54,6 +54,7 @@ DONE="$OPS_DIR/.completed_issues"
 WT_LOCK="$OPS_DIR/.worktree.lock"
 ESCALATIONS="$OPS_DIR/.escalations.tsv"
 STUCK="$OPS_DIR/.stuck_issues.tsv"
+DEBT="$OPS_DIR/.review_debt.tsv"
 mkdir -p "$LOG_DIR"
 cd "$REPO_DIR" || exit 1
 
@@ -186,6 +187,23 @@ except Exception: pass" "$jf" >> "$LOG_DIR/${issue}_agent.log" 2>/dev/null
 # Consecutive no-commit failures per issue. An issue the agent cannot move is a
 # human's problem; without this it is re-attempted on every pass at full token
 # cost and blocks nothing but the budget.
+# ── review debt ──────────────────────────────────────────────────────────────
+# Issues whose PR is open but whose gate is not clean: quota, a dropped review,
+# or blocking findings that survived. They are NOT queue work — rebuilding one
+# discards its PR — so they are drained first, in place, before any new feature.
+debt_add() {
+  local issue="$1" reason="${2:-findings}"
+  debt_clear "$issue"
+  printf '%s\t%s\t%s\n' "$issue" "$reason" "$(date -u +%FT%TZ)" >> "$DEBT"
+}
+debt_clear() {
+  [ -f "$DEBT" ] || return 0
+  grep -v "^$1	" "$DEBT" > "$DEBT.tmp" 2>/dev/null && mv "$DEBT.tmp" "$DEBT"
+  return 0
+}
+debt_issues() { [ -f "$DEBT" ] && cut -f1 "$DEBT" 2>/dev/null | grep -v '^$' || true; }
+debt_reason() { awk -F'\t' -v i="$1" '$1 == i { r = $2 } END { print r }' "$DEBT" 2>/dev/null; }
+
 stuck_count() { awk -F'\t' -v i="$1" '$1 == i { n = $2 } END { print n + 0 }' "$STUCK" 2>/dev/null || echo 0; }
 stuck_clear() { [ -f "$STUCK" ] && grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null && mv "$STUCK.tmp" "$STUCK"; return 0; }
 stuck_bump() {
@@ -299,7 +317,9 @@ wind_down() {
     echo "- issues completed: $(comm -12 <(sort "$DONE" 2>/dev/null) <(printf '%s\n' "$SESSION_BUILT" | tr ' ' '\n' | sort) 2>/dev/null | grep -c . || true)"
     echo "- built this session: ${SESSION_BUILT:-none}"
     echo "- still pending: $(pending_issues | grep -c . || true)"
-    [ -n "$SESSION_STUCK" ] && echo "- parked (no commits after $STUCK_MAX tries):$SESSION_STUCK"
+    [ -n "${SESSION_FIXED:-}" ] && echo "- review debt cleared:${SESSION_FIXED}"
+    [ -s "$DEBT" ] && { echo "- review debt still open:"; sed 's/^/  - /' "$DEBT"; }
+    [ -n "${SESSION_STUCK:-}" ] && echo "- parked (no commits after $STUCK_MAX tries):$SESSION_STUCK"
     [ -s "$ESCALATIONS" ] && { echo "- escalations:"; sed 's/^/  - /' "$ESCALATIONS"; }
     echo
     echo '```'
@@ -438,6 +458,77 @@ run_gate() {
 }
 
 # ── one issue, end to end ────────────────────────────────────────────────────
+# Fix an open PR in place: same branch, same PR, no reset and no new branch.
+#
+# The difference from run_issue is the whole point. run_issue starts a branch from
+# the stack tip; this checks out what is already there and adds to it, so the PR's
+# history, its review trail and its position in the stack all survive.
+#
+# 0 = clean now (debt cleared) · 1 = still not clean · 3 = platform limit
+remediate_issue() {
+  local issue="$1"
+  local branch; branch="feature/$(printf '%s' "$issue" | tr '[:upper:]' '[:lower:]')"
+  local title; title="$(issue_title "$issue")"
+  say "── $issue · $title  [remediating $(debt_reason "$issue")]"
+
+  local prbase
+  prbase="$(gh pr view "$branch" --json baseRefName -q .baseRefName 2>/dev/null)"
+  if [ -z "$prbase" ]; then
+    fail "  no open PR for $branch — not remediable; clearing the debt entry"
+    debt_clear "$issue"; return 1
+  fi
+
+  take_lock || return 1
+  trap "drop_lock" RETURN
+
+  git fetch -q origin "$branch" 2>/dev/null
+  git checkout -q "$branch" 2>/dev/null || { fail "  could not check out $branch"; return 1; }
+  # Fast-forward only. A rebase or a merge here would rewrite or fork the PR.
+  git merge -q --ff-only "origin/$branch" 2>/dev/null || true
+  if [ -n "$(git status --porcelain)" ]; then
+    fail "  $branch has uncommitted changes — refusing to remediate over them"; return 1
+  fi
+
+  # The findings to answer are whatever the LAST round recorded.
+  local last; last="$(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -n | tail -1)"
+  local lastlog="$LOG_DIR/${issue}_cr_round${last}.txt"
+  if [ ! -f "$lastlog" ]; then
+    say "  no gate log to answer — re-gating from scratch"
+  fi
+
+  local before; before="$(git rev-parse HEAD)"
+  run_agent "$issue" "mediate" "$IMPL_MODEL" \
+    "$(printf '%s\n\n%s\n' \
+       "You are fixing an OPEN pull request in the FinHive repository, on branch $branch. Follow CLAUDE.md. Address the CodeRabbit findings below with the smallest correct change, add or update tests, and commit. Do not merge, do not push, do not rebase, and do not create a branch — you are already on the right one. If a finding is wrong, say why instead of changing code.
+
+End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT=BLOCKED on its own line." \
+       "$(cat "$lastlog" 2>/dev/null | head -400)")"
+  if [ "$AGENT_KIND" = "limit" ]; then say "  usage limit during remediation"; return 3; fi
+
+  git add -A 2>/dev/null || true
+  git commit -q -m "fix($issue): address CodeRabbit round $((last + 1))" >/dev/null 2>&1 || true
+  if [ "$(git rev-parse HEAD)" = "$before" ]; then
+    say "  no changes made — leaving the debt open for a human"
+    return 1
+  fi
+
+  run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
+  local gate=$?
+
+  # Push to the SAME branch. The PR updates; the stack does not deepen.
+  git push -q --force-with-lease origin "$branch" 2>/dev/null || {
+    fail "  push failed for $branch — the fix is committed locally only"; return 1; }
+
+  if [ "$gate" -eq 0 ]; then
+    say "  $issue is clean now — debt cleared"
+    debt_clear "$issue"
+    grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
+    return 0
+  fi
+  say "  $issue still not clean — debt stays open"
+  return 1
+}
+
 run_issue() {
   local issue="$1"
   local branch="feature/$(echo "$issue" | tr '[:upper:]' '[:lower:]')"
@@ -460,6 +551,19 @@ run_issue() {
     base="$BASE_BRANCH"; say "  branching from $BASE_BRANCH"
   fi
 
+  # An issue whose PR is already open is not a build, it is a remediation. Rebuilding
+  # it resets the branch onto the current stack tip and force-pushes, so the PR's
+  # commits, its review history and every comment on them are replaced by unrelated
+  # work. KCH-84 and KCH-85 sat in exactly this state — PRs open, never recorded
+  # complete because their gates hit quota and a dropped connection — one pass away
+  # from being overwritten. Send them to the debt ledger instead.
+  if gh pr view "$branch" --json number -q .number >/dev/null 2>&1; then
+    fail "$issue already has an open PR — refusing to rebuild over it"
+    fail "  banked as review debt; the next pass will remediate it in place"
+    debt_add "$issue" "pr-open"
+    return 1
+  fi
+
   # `checkout -B` RESETS an existing local branch to the start point, which silently
   # discards commits that were never pushed. That destroyed a commit on 2026-09-08,
   # including the helper the loop itself depends on. Refuse instead.
@@ -468,7 +572,11 @@ run_issue() {
     if git rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
       unpushed="$(git rev-list --count "origin/$branch..$branch" 2>/dev/null || echo 0)"
     else
-      unpushed="$(git rev-list --count "origin/$BASE_BRANCH..$branch" 2>/dev/null || echo 0)"
+      # No remote branch: only commits not already contained in SOME remote branch
+      # are at risk. Counting origin/BASE..branch instead swept in every commit the
+      # branch inherited from the pushed stack below it, so a freshly created branch
+      # looked like it carried 13 unpushed commits and the build refused to start.
+      unpushed="$(git rev-list --count "$branch" --not --remotes=origin 2>/dev/null || echo 0)"
     fi
     if [ "${unpushed:-0}" -gt 0 ]; then
       fail "$branch has $unpushed unpushed commit(s) — refusing to reset and lose them"
@@ -560,8 +668,16 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
     return 1
   fi
 
-  # Only a fully successful run is recorded, so a failure retries on the next pass.
-  [ "$gate" -eq 0 ] && echo "$issue" >> "$DONE"
+  # Only a clean gate records the issue as done. An unclean one used to record
+  # nothing at all, which meant the next pass treated an issue with an OPEN PR as
+  # unbuilt and rebuilt it from scratch over that PR. Bank it as debt instead:
+  # the PR exists, so the work left is remediation, not a build.
+  if [ "$gate" -eq 0 ]; then
+    echo "$issue" >> "$DONE"
+  else
+    debt_add "$issue" "$([ "$gate" -eq 2 ] && echo gate-unavailable || echo findings)"
+    say "  banked as review debt — next pass remediates in place, it does not rebuild"
+  fi
   return 0
 }
 
@@ -584,7 +700,35 @@ say "Budget: \$$SESSION_BUDGET_USD, wind down at ${BUDGET_THRESHOLD_PCT}%  (sess
 built=0
 SESSION_BUILT=""
 SESSION_STUCK=""
+SESSION_FIXED=""
 ENDED=""
+
+# ── review debt first ────────────────────────────────────────────────────────
+# Open PRs whose gate is not clean block the whole stack: it merges bottom-up, so
+# an unclean PR near the bottom stops everything above it from landing however
+# many features get built on top. Clearing debt before starting anything new is
+# what keeps the stack shallow enough to actually merge.
+DEBT_RUN="$LOG_DIR/.debt.$$"
+debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
+trap 'rm -f "$QUEUE_RUN" "$DEBT_RUN"' EXIT
+DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
+if [ "${DEBT_N:-0}" -gt 0 ]; then
+  say ""
+  say "══ REVIEW DEBT · $DEBT_N open PR(s) to clear before any new feature"
+  while IFS= read -r issue; do
+    [ -n "$issue" ] || continue
+    budget_state; bstate=$?
+    if [ "$bstate" -ne 0 ]; then ENDED="budget reached during remediation"; break; fi
+    remediate_issue "$issue"; rrc=$?
+    case "$rrc" in
+      0) SESSION_FIXED="$SESSION_FIXED $issue" ;;
+      3) ENDED="platform usage limit mid-remediation"; break ;;
+    esac
+  done < "$DEBT_RUN"
+  say ""
+fi
+
+[ -n "$ENDED" ] && { say "Pass ended before the queue — $ENDED"; wind_down "$ENDED"; exit 0; }
 
 while IFS= read -r issue; do
   [ -n "$issue" ] || continue

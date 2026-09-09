@@ -162,6 +162,37 @@ ops/pr_gate.sh --require-check
 
 ---
 
+## Review debt — cleared before any new feature
+
+`ops/.review_debt.tsv` holds issues whose **PR is open but whose gate is not clean**:
+quota, a dropped review, or blocking findings that survived. A pass drains it first,
+before it touches the queue.
+
+That ordering is not cosmetic. The stack merges bottom-up, so one unclean PR near the
+bottom blocks everything above it no matter how many features get built on top —
+building more only makes the eventual merge walk longer.
+
+Debt is **remediated in place, never rebuilt**. `remediate_issue()` checks out the
+existing branch (fast-forward only), feeds the last round's findings to the agent,
+commits `fix(ISSUE): address CodeRabbit round N`, re-gates against the **PR's own
+base**, and pushes to the same branch. The PR updates; the stack does not deepen and
+the review trail survives.
+
+Two guards keep an open PR from being overwritten:
+
+- `run_issue` refuses an issue that already has an open PR and banks it as debt.
+- A PR that opens with an unclean gate is banked as debt immediately, instead of
+  being left unrecorded — which used to make the next pass treat it as unbuilt and
+  rebuild it from scratch over the PR. KCH-84 and KCH-85 sat one pass away from
+  exactly that.
+
+```bash
+cat ops/.review_debt.tsv            # what is queued
+ops/pr_gate.sh --regate KCH-84      # re-review one PR by hand
+```
+
+---
+
 ## Reviewing a stack
 
 **Approve and squash-merge strictly bottom-up.** The first PR targets `development`, the
