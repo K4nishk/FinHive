@@ -212,6 +212,16 @@ returns0="$(printf '%s' "$body" | grep -c 'return 0')"
 publishes="$(printf '%s' "$body" | grep -c 'publish_gate')"
 assert_eq "every remediate_issue success path publishes the gate" "$returns0" "$publishes"
 
+# run_issue's clean-gate path is the one every NEW PR takes. It recorded the
+# issue done and published nothing, so with the status required no fresh PR
+# could merge without someone running pr_gate.sh by hand.
+clean_path="$(sed -n '/^run_issue()/,/^}/p' "$ORCH" \
+  | sed -n '/if \[ "\$gate" -eq 0 \]; then/,/^  else$/p')"
+if [ -z "$clean_path" ]; then
+  fail=$((fail+1)); echo "FAIL: could not locate run_issue's clean-gate branch"
+elif printf '%s' "$clean_path" | grep -q 'publish_gate'; then pass=$((pass+1)); else
+  fail=$((fail+1)); echo "FAIL: run_issue's clean-gate path must publish the gate status"; fi
+
 # A merged PR must not be mistaken for an open one: `gh pr view <branch>`
 # resolves merged and closed PRs, which would make the rebuild guard bank an
 # already-merged issue as debt that can never clear.

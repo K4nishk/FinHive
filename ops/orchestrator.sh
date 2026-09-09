@@ -785,6 +785,13 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
   # the PR exists, so the work left is remediation, not a build.
   if [ "$gate" -eq 0 ]; then
     echo "$issue" >> "$DONE"
+    # The PR opened non-draft because the gate was clean, but nothing had put the
+    # coderabbit/cli-gate status or the findings trail on it. This is the path
+    # every NEW PR takes, so once `pr_gate.sh --require-check` makes the context
+    # required, none of them could merge until someone published by hand.
+    # remediate_issue already publishes on both of its success paths; this was
+    # the one success path left that did not.
+    publish_gate "$issue"
   else
     debt_add "$issue" "$([ "$gate" -eq 2 ] && echo gate-unavailable || echo findings)"
     say "  banked as review debt — next pass remediates in place, it does not rebuild"
