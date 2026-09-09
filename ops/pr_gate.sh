@@ -68,8 +68,14 @@ round_files() {
 
 # A round that errored or hit CodeRabbit's quota never actually reviewed the
 # diff — it must not be read as clean just because it has no blocking lines.
+#
+# Quota is not the only way a round can fail to happen. A CLI usage error
+# ("unknown option '--plain'") or a signed-out session prints a help screen or
+# a one-line hint and exits — text containing no severity keyword at all, which
+# scored as "0 blocking findings" and published a green gate for a branch
+# CodeRabbit never looked at. Treat every not-a-review outcome the same.
 round_unavailable() {
-  grep -qiE 'rate.?limit|quota|too many requests' "$1" 2>/dev/null
+  grep -qiE 'rate.?limit|quota|too many requests|unknown option|unknown command|Usage: coderabbit|not logged in|unauthorized|authentication failed' "$1" 2>/dev/null
 }
 
 round_blocking_count() { grep -icE "$CR_BLOCKING" "$1" 2>/dev/null || true; }

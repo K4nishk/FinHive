@@ -221,6 +221,8 @@ ops/queue.tsv
 ops/.completed_issues
 ops/.review_debt.tsv
 ops/.issue_map.tsv
+ops/.escalations.tsv
+ops/.stuck_issues.tsv
 ops/.agent_contracts.md
 
 # ── MVP2 scaffold (KCH-75) ──────────────────────────────────────────────────

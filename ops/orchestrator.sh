@@ -53,6 +53,7 @@ QUEUE="$OPS_DIR/queue.tsv"
 DONE="$OPS_DIR/.completed_issues"
 WT_LOCK="$OPS_DIR/.worktree.lock"
 ESCALATIONS="$OPS_DIR/.escalations.tsv"
+STUCK="$OPS_DIR/.stuck_issues.tsv"
 mkdir -p "$LOG_DIR"
 cd "$REPO_DIR" || exit 1
 
@@ -67,6 +68,7 @@ CR_MAX_ROUNDS="${CR_MAX_ROUNDS:-2}"
 CR_BLOCKING="${CR_BLOCKING:-critical|major|blocker|high}"
 PERM_MODE="${PERM_MODE:-acceptEdits}"
 MAX_ISSUES="${MAX_ISSUES:-0}"          # 0 = drain the queue (or until the budget)
+STUCK_MAX="${STUCK_MAX:-2}"            # consecutive no-commit failures before an issue is parked
 
 # Budget. There is no API for the remaining balance of a 5-hour window, so this
 # meters what THIS LOOP spends, not the window itself — anything you spend in an
@@ -160,6 +162,9 @@ stack_tip() {
 run_agent() {
   local issue="$1" phase="$2" model="$3" prompt="$4"
   local jf="$LOG_DIR/${issue}_${phase}_$(date +%s).json"
+  # Published so the caller can read THIS call's answer. The _agent.log is
+  # appended across passes, so grepping it would match a previous run's verdict.
+  AGENT_JSON="$jf"
 
   claude -p --output-format json --model "$model" --max-turns "$MAX_TURNS" \
          --permission-mode "$PERM_MODE" "$prompt" > "$jf" 2>>"$LOG_DIR/${issue}_agent.log"
@@ -176,6 +181,29 @@ except Exception: pass" "$jf" >> "$LOG_DIR/${issue}_agent.log" 2>/dev/null
 
   say "    agent[$phase] $line"
   [ "$AGENT_KIND" = "ok" ]
+}
+
+# Consecutive no-commit failures per issue. An issue the agent cannot move is a
+# human's problem; without this it is re-attempted on every pass at full token
+# cost and blocks nothing but the budget.
+stuck_count() { awk -F'\t' -v i="$1" '$1 == i { n = $2 } END { print n + 0 }' "$STUCK" 2>/dev/null || echo 0; }
+stuck_clear() { [ -f "$STUCK" ] && grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null && mv "$STUCK.tmp" "$STUCK"; return 0; }
+stuck_bump() {
+  local n; n="$(stuck_count "$1")"
+  stuck_clear "$1"
+  printf '%s\t%s\t%s\n' "$1" "$((n + 1))" "$(date -u +%FT%TZ)" >> "$STUCK"
+}
+
+# The VERDICT= line from the last agent call, or empty. Reads the JSON of THIS
+# call, never the appended log, so a previous pass's verdict cannot leak in.
+agent_verdict() {
+  [ -n "${AGENT_JSON:-}" ] && [ -f "$AGENT_JSON" ] || return 0
+  python3 -c "
+import json,re,sys
+try: txt = json.load(open(sys.argv[1])).get('result','') or ''
+except Exception: sys.exit(0)
+m = re.findall(r'^\s*VERDICT=([A-Z_]+)', txt, re.M)
+print(m[-1] if m else '')" "$AGENT_JSON" 2>/dev/null
 }
 
 # 0 = room left · 1 = at/over threshold · 2 = platform said stop
@@ -234,9 +262,10 @@ wind_down() {
     echo
     echo "- ended: $reason"
     echo "- duration: $(( ($(date +%s) - SESSION_START) / 60 )) min"
-    echo "- issues completed: $(comm -12 <(sort "$DONE" 2>/dev/null) <(printf '%s\n' "$SESSION_BUILT" | tr ' ' '\n' | sort) 2>/dev/null | grep -c . || echo 0)"
+    echo "- issues completed: $(comm -12 <(sort "$DONE" 2>/dev/null) <(printf '%s\n' "$SESSION_BUILT" | tr ' ' '\n' | sort) 2>/dev/null | grep -c . || true)"
     echo "- built this session: ${SESSION_BUILT:-none}"
-    echo "- still pending: $(pending_issues | grep -c . || echo 0)"
+    echo "- still pending: $(pending_issues | grep -c . || true)"
+    [ -n "$SESSION_STUCK" ] && echo "- parked (no commits after $STUCK_MAX tries):$SESSION_STUCK"
     [ -s "$ESCALATIONS" ] && { echo "- escalations:"; sed 's/^/  - /' "$ESCALATIONS"; }
     echo
     echo '```'
@@ -423,7 +452,13 @@ run_issue() {
   say "  implementing with $IMPL_MODEL"
   run_agent "$issue" "impl" "$IMPL_MODEL" \
     "$(printf '%s\n\n%s\n' \
-       "Implement this Linear issue in the FinHive repository. Follow CLAUDE.md. Make the smallest correct change, add tests, and commit. Do not merge anything, do not push, and do not modify files under ops/ unless the issue says to." \
+       "Implement this Linear issue in the FinHive repository. Follow CLAUDE.md. Make the smallest correct change, add tests, and commit. Do not merge anything, do not push, and do not modify files under ops/ unless the issue says to.
+
+End your final message with exactly one of these lines, on a line of its own:
+VERDICT=IMPLEMENTED   — you committed the work
+VERDICT=ALREADY_DONE  — the repository already satisfies this issue; name the commit that did it
+VERDICT=BLOCKED       — you could not proceed; say why
+The loop reads this line to decide whether to open a PR. Without it, work that is already finished is retried on every pass forever." \
        "$spec")"
   local rc=$?
   if [ "$AGENT_KIND" = "limit" ]; then
@@ -434,8 +469,17 @@ run_issue() {
   git add -A 2>/dev/null || true
   git commit -q -m "$issue: ${title:-implement}" >/dev/null 2>&1 || true
 
+  # No commits is ambiguous: the agent may have failed, or the work may already
+  # exist. Read as failure, KCH-78 sat at the head of the queue and was rebuilt
+  # every pass — 144 issues behind it never started. The agent says which.
   if [ "$(git rev-parse HEAD)" = "$before" ]; then
-    fail "$issue produced no commits (agent rc=$rc) — see $LOG_DIR/${issue}_agent.log"
+    local verdict; verdict="$(agent_verdict)"
+    if [ "$verdict" = "ALREADY_DONE" ]; then
+      say "  $issue needs no change — the agent reports it already implemented"
+      say "    (evidence in $LOG_DIR/${issue}_agent.log — verify before trusting it)"
+      return 4
+    fi
+    fail "$issue produced no commits (agent rc=$rc, verdict=${verdict:-none}) — see $LOG_DIR/${issue}_agent.log"
     return 1
   fi
 
@@ -499,6 +543,7 @@ say "Queue: $TOTAL issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$
 say "Budget: \$$SESSION_BUDGET_USD, wind down at ${BUDGET_THRESHOLD_PCT}%  (session $FH_SESSION_ID)"
 built=0
 SESSION_BUILT=""
+SESSION_STUCK=""
 ENDED=""
 
 while IFS= read -r issue; do
@@ -510,10 +555,25 @@ while IFS= read -r issue; do
   if [ "$bstate" -eq 2 ]; then ENDED="platform usage limit"; break; fi
   if [ "$bstate" -eq 1 ]; then ENDED="reached ${BUDGET_THRESHOLD_PCT}% of \$$SESSION_BUDGET_USD budget"; break; fi
 
+  nstuck="$(stuck_count "$issue")"
+  if [ "${nstuck:-0}" -ge "$STUCK_MAX" ]; then
+    say "── $issue · SKIPPED — ${nstuck} failed attempts with no commits; needs a human"
+    say "   unpark it with: grep -v '^$issue	' $STUCK > $STUCK.tmp && mv $STUCK.tmp $STUCK"
+    SESSION_STUCK="$SESSION_STUCK $issue"
+    continue
+  fi
+
   run_issue "$issue"; irc=$?
   if [ "$irc" -eq 0 ]; then
     built=$((built + 1))
     SESSION_BUILT="$SESSION_BUILT $issue"
+    stuck_clear "$issue"
+  elif [ "$irc" -eq 4 ]; then
+    # Already satisfied by work in the repo. Record it so the queue advances;
+    # rebuilding it would produce nothing, forever.
+    echo "$issue" >> "$DONE"
+    SESSION_BUILT="$SESSION_BUILT $issue(already-done)"
+    stuck_clear "$issue"
   elif [ "$irc" -eq 3 ]; then
     # The agent itself was cut off by the platform. Stop now — every further
     # call would fail the same way and burn the wind-down budget.
@@ -521,7 +581,12 @@ while IFS= read -r issue; do
     ENDED="platform usage limit mid-issue"
     break
   else
-    say "  $issue did not complete — will retry next pass"
+    stuck_bump "$issue"
+    if [ "$(stuck_count "$issue")" -ge "$STUCK_MAX" ]; then
+      say "  $issue has now failed $STUCK_MAX times — skipping it from the next pass"
+    else
+      say "  $issue did not complete — will retry next pass"
+    fi
   fi
 
   if [ "$MAX_ISSUES" -gt 0 ] && [ "$built" -ge "$MAX_ISSUES" ]; then
@@ -531,5 +596,5 @@ done < "$QUEUE_RUN"
 
 [ -n "$ENDED" ] || ENDED="queue drained"
 say ""
-say "Pass complete — $built issue(s) built, $(pending_issues | grep -c . || echo 0) still pending."
+say "Pass complete — $built issue(s) built, $(pending_issues | grep -c . || true) still pending."
 wind_down "$ENDED"

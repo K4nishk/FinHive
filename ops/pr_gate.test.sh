@@ -75,6 +75,22 @@ echo "1 issue found: Major - missing null check" > "$LOGS/findings.txt"
 if round_unavailable "$LOGS/quota.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag quota text"; fi
 if round_unavailable "$LOGS/findings.txt"; then fail=$((fail+1)); echo "FAIL: round_unavailable should not flag ordinary findings"; else pass=$((pass+1)); fi
 
+# Verbatim from ops/logs/KCH-78_cr_round0.txt on 2026-09-08: a CLI usage error
+# carries no severity keyword, so it counted as a clean review and published a
+# green gate for a branch CodeRabbit never read.
+cat > "$LOGS/badflag.txt" <<'EOF'
+error: unknown option '--plain'
+
+Usage: coderabbit review [options] [command]
+EOF
+echo "Not logged in. Run: coderabbit auth login" > "$LOGS/signedout.txt"
+if round_unavailable "$LOGS/badflag.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a CLI usage error"; fi
+if round_unavailable "$LOGS/signedout.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a signed-out session"; fi
+cp "$LOGS/badflag.txt" "$LOGS/KCH-98_cr_round0.txt"
+gate_verdict KCH-98 "$LOGS"
+assert_eq "a CLI usage error is never the clean final verdict" "failure" "$VERDICT_STATE"
+rm -f "$LOGS/KCH-98_cr_round0.txt"
+
 # ── round_blocking_count / round_blocking_lines ──────────────────────────
 cat > "$LOGS/mixed.txt" <<'EOF'
 1. Nit: rename variable for clarity
