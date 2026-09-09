@@ -194,6 +194,19 @@ stuck_bump() {
   printf '%s\t%s\t%s\n' "$1" "$((n + 1))" "$(date -u +%FT%TZ)" >> "$STUCK"
 }
 
+# Delete a branch that never received a commit. Refuses on anything with work on
+# it, so a mistaken call cannot lose code: `git branch -d` (not -D) declines a
+# branch that is not already contained in its upstream.
+drop_empty_branch() {
+  local branch="$1"
+  git rev-parse --verify --quiet "$branch" >/dev/null 2>&1 || return 0
+  # $base may be a remote-only stack tip, so step off onto BASE_BRANCH, which
+  # always exists locally. If that fails, keep the branch — a stray branch is
+  # harmless; deleting the one you are standing on is not.
+  git checkout -q "$BASE_BRANCH" 2>/dev/null || return 0
+  git branch -q -d "$branch" 2>/dev/null || say "  kept $branch — it has commits on it"
+}
+
 # The VERDICT= line from the last agent call, or empty. Reads the JSON of THIS
 # call, never the appended log, so a previous pass's verdict cannot leak in.
 agent_verdict() {
@@ -474,22 +487,18 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
   # every pass — 144 issues behind it never started. The agent says which.
   if [ "$(git rev-parse HEAD)" = "$before" ]; then
     local verdict; verdict="$(agent_verdict)"
+    # Either way the branch was created before the agent ran and carries no
+    # commits of its own. Leaving it behind litters `git branch` with empty
+    # branches pinned to a stack tip — which is exactly what someone later
+    # mistakes for unpushed work.
+    drop_empty_branch "$branch"
     if [ "$verdict" = "ALREADY_DONE" ]; then
       say "  $issue needs no change — the agent reports it already implemented"
       say "    (evidence in $LOG_DIR/${issue}_agent.log — verify before trusting it)"
-      # The branch was created before the agent ran and carries no commits of its
-      # own. Leaving it behind litters `git branch` with empty branches that look
-      # like real work — and one of them pinned to a stack tip is exactly the
-      # kind of thing someone later mistakes for an unpushed change.
-      # $base may be a remote-only stack tip, so step off onto BASE_BRANCH, which
-      # always exists locally. If that fails, keep the branch — a stray branch is
-      # harmless, deleting one while it is checked out is not.
-      if git checkout -q "$BASE_BRANCH" 2>/dev/null; then
-        git branch -q -D "$branch" 2>/dev/null || true
-      fi
       return 4
     fi
     fail "$issue produced no commits (agent rc=$rc, verdict=${verdict:-none}) — see $LOG_DIR/${issue}_agent.log"
+    [ "$verdict" = "BLOCKED" ] && fail "  the agent reported it is blocked — read the log before re-queuing"
     return 1
   fi
 
