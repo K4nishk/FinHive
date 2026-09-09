@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import http.client
 import json
 import os
 import sys
@@ -84,6 +85,18 @@ def gql(query: str, variables: dict | None = None, *, key: str, retries: int = 3
                 time.sleep(2 ** attempt)
                 continue
             raise LinearError(f"network error: {exc}") from exc
+        # A truncated chunked response raises IncompleteRead, and a dropped socket
+        # raises a bare OSError — neither is a URLError, so without this branch the
+        # retry loop is bypassed entirely and the traceback escapes to the user.
+        except (http.client.IncompleteRead, http.client.HTTPException, OSError) as exc:
+            last = exc
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"{YEL}  truncated response ({type(exc).__name__}) — retrying in {wait}s{RST}",
+                      file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise LinearError(f"connection failed after {retries} attempts: {exc}") from exc
     raise LinearError(f"exhausted retries: {last}")
 
 
@@ -109,9 +122,12 @@ query($teamId: String!) {
 }
 """
 
+# Page size is a variable because it is environment-dependent, not a constant we can
+# pick once: against this workspace, first:50 succeeds and first:100 reliably returns a
+# truncated chunked body (IncompleteRead). fetch_existing_titles halves on failure.
 Q_ISSUE_TITLES = """
-query($teamId: ID!, $after: String) {
-  issues(filter: { team: { id: { eq: $teamId } } }, first: 250, after: $after) {
+query($teamId: ID!, $after: String, $first: Int!) {
+  issues(filter: { team: { id: { eq: $teamId } } }, first: $first, after: $after) {
     nodes { id title }
     pageInfo { hasNextPage endCursor }
   }
@@ -141,16 +157,30 @@ mutation($input: IssueCreateInput!) {
 """
 
 
-def fetch_existing_titles(key: str, team_id: str) -> set[str]:
+def fetch_existing_titles(key: str, team_id: str, page: int = 50) -> set[str]:
+    """Read every issue title in the team, halving the page size when a body truncates.
+
+    Large chunked responses fail in some network paths (proxies, VPNs) while smaller
+    ones succeed, and the failure looks like a dead connection rather than a size
+    problem. Backing off on page size recovers instead of aborting the whole run.
+    """
     titles: set[str] = set()
     after = None
     while True:
-        data = gql(Q_ISSUE_TITLES, {"teamId": team_id, "after": after}, key=key)
-        page = data["issues"]
-        titles.update(n["title"].strip() for n in page["nodes"])
-        if not page["pageInfo"]["hasNextPage"]:
+        try:
+            data = gql(Q_ISSUE_TITLES, {"teamId": team_id, "after": after, "first": page},
+                       key=key, retries=2)
+        except LinearError:
+            if page <= 10:
+                raise
+            page = max(10, page // 2)
+            print(f"{YEL}  large page truncated — retrying at first:{page}{RST}", file=sys.stderr)
+            continue
+        node = data["issues"]
+        titles.update(n["title"].strip() for n in node["nodes"])
+        if not node["pageInfo"]["hasNextPage"]:
             return titles
-        after = page["pageInfo"]["endCursor"]
+        after = node["pageInfo"]["endCursor"]
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
