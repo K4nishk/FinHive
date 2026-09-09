@@ -46,10 +46,7 @@ jobs:
 
       - name: Install web lint/format deps
         working-directory: web
-        # package-lock.json isn't fully in sync with the new eslint/prettier
-        # devDependencies yet (no registry access when they were added) — use
-        # `install` rather than `ci` until a follow-up regenerates the lockfile.
-        run: npm install
+        run: npm ci
 
       - name: prettier
         working-directory: web
