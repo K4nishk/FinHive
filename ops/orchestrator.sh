@@ -234,7 +234,14 @@ debt_add() {
 }
 debt_clear() {
   [ -f "$DEBT" ] || return 0
-  grep -v "^$1	" "$DEBT" > "$DEBT.tmp" 2>/dev/null && mv "$DEBT.tmp" "$DEBT"
+  # `grep -v` exits 1 when it prints NOTHING, so `&& mv` silently skipped the
+  # move whenever the row being cleared was the last one — the ledger kept it.
+  # Every consequence pointed the wrong way: remediation said "debt cleared"
+  # while the entry stood, DEBT_ONLY reported it still open, and debt_add's
+  # clear-then-append duplicated the row so the next pass remediated it twice.
+  # stuck_clear was already written this way; this was not.
+  grep -v "^$1	" "$DEBT" > "$DEBT.tmp" 2>/dev/null || true
+  mv "$DEBT.tmp" "$DEBT" 2>/dev/null || true
   return 0
 }
 debt_issues() { [ -f "$DEBT" ] && cut -f1 "$DEBT" 2>/dev/null | grep -v '^$' || true; }
@@ -518,6 +525,36 @@ run_gate() {
 }
 
 # ── one issue, end to end ────────────────────────────────────────────────────
+# Tell GitHub the gate passed. Without this the fix lands and the PR stays exactly
+# as the failing gate left it — draft, with a stale or absent commit status. PR #2
+# sat drafted from 2026-09-08 for that reason.
+#
+# Called from BOTH of remediate_issue's success paths. It used to sit inline on
+# the agent-fix path only, so quota-banked debt — which re-gates without calling
+# an agent, and is the most common debt reason — cleared its ledger and never
+# published a thing.
+publish_gate() {
+  local issue="$1"
+  if [ -x "$PR_GATE" ]; then
+    say "  publishing the gate result and clearing the draft"
+    GATE_LOG_DIR="$LOG_DIR" GATE_REPO_DIR="$REPO_DIR" "$PR_GATE" "$issue" \
+      || fail "  publish failed — run by hand: ops/pr_gate.sh $issue"
+  else
+    fail "  pr_gate.sh not found — the PR keeps its draft state; run: ops/pr_gate.sh $issue"
+  fi
+}
+
+# An issue's OPEN PR number, empty when there is none.
+#
+# `gh pr view <branch>` resolves closed and merged PRs too. After a branch is
+# merged, the rebuild guard would read its merged PR, refuse to build, and bank
+# the issue as debt — then remediation would read the same merged PR and push
+# fixes to a branch whose PR can no longer receive them, so the debt never
+# cleared. A merged PR would have blocked its issue permanently.
+open_pr_field() {
+  gh pr list --state open --head "$1" --limit 1 --json "$2" -q ".[0].$2" 2>/dev/null
+}
+
 # Fix an open PR in place: same branch, same PR, no reset and no new branch.
 #
 # The difference from run_issue is the whole point. run_issue starts a branch from
@@ -532,7 +569,7 @@ remediate_issue() {
   say "── $issue · $title  [remediating $(debt_reason "$issue")]"
 
   local prbase
-  prbase="$(gh pr view "$branch" --json baseRefName -q .baseRefName 2>/dev/null)"
+  prbase="$(open_pr_field "$branch" baseRefName)"
   if [ -z "$prbase" ]; then
     fail "  no open PR for $branch — not remediable; clearing the debt entry"
     debt_clear "$issue"; return 1
@@ -562,6 +599,7 @@ remediate_issue() {
       say "  $issue is clean now — debt cleared"
       debt_clear "$issue"
       grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
+      publish_gate "$issue"
       return 0
     fi
     say "  $issue still not clean — debt stays open"
@@ -595,17 +633,7 @@ End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT
     say "  $issue is clean now — debt cleared"
     debt_clear "$issue"
     grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
-    # Tell GitHub. Without this the fix lands and the PR stays exactly as the
-    # failing gate left it — draft, with a stale or absent commit status. PR #2
-    # sat drafted from 2026-09-08 for that reason: the loop cleared its own
-    # ledger and nothing ever published the result.
-    if [ -x "$PR_GATE" ]; then
-      say "  publishing the gate result and clearing the draft"
-      GATE_LOG_DIR="$LOG_DIR" GATE_REPO_DIR="$REPO_DIR" "$PR_GATE" "$issue" \
-        || fail "  publish failed — run by hand: ops/pr_gate.sh $issue"
-    else
-      fail "  pr_gate.sh not found — the PR keeps its draft state; run: ops/pr_gate.sh $issue"
-    fi
+    publish_gate "$issue"
     return 0
   fi
   say "  $issue still not clean — debt stays open"
@@ -640,7 +668,7 @@ run_issue() {
   # work. KCH-84 and KCH-85 sat in exactly this state — PRs open, never recorded
   # complete because their gates hit quota and a dropped connection — one pass away
   # from being overwritten. Send them to the debt ledger instead.
-  if gh pr view "$branch" --json number -q .number >/dev/null 2>&1; then
+  if [ -n "$(open_pr_field "$branch" number)" ]; then
     fail "$issue already has an open PR — refusing to rebuild over it"
     fail "  banked as review debt; the next pass will remediate it in place"
     debt_add "$issue" "pr-open"

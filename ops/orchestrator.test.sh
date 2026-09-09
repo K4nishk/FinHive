@@ -22,12 +22,24 @@ assert_eq() {
     fail=$((fail + 1)); printf 'FAIL: %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"; fi
 }
 
-# ── the ledger helpers, copied verbatim from orchestrator.sh ────────────────
+# ── the ledger helpers, EXTRACTED from orchestrator.sh ──────────────────────
+# Not copied. A copy went stale once already: debt_clear was fixed in the script
+# while this file kept exercising the buggy version — and passing. orchestrator.sh
+# cannot be sourced (it re-execs and runs a preflight), so lift the functions out
+# of it and eval them. Drift becomes impossible rather than merely detectable.
+ORCH_SRC="$(cd "$(dirname "$0")" && pwd)/orchestrator.sh"
+[ -f "$ORCH_SRC" ] || { echo "FAIL: cannot find $ORCH_SRC"; exit 1; }
+
+extract_fn() { sed -n "/^$1() {/,/^}/p" "$ORCH_SRC"; }
+for fn in debt_add debt_clear debt_issues debt_reason stuck_count stuck_clear stuck_bump next_gate_round; do
+  src="$(extract_fn "$fn")"
+  [ -n "$src" ] || { echo "FAIL: $fn() not found in orchestrator.sh"; exit 1; }
+  eval "$src"
+done
+
 DEBT="$FIX/.review_debt.tsv"
-debt_add() { local i="$1" r="${2:-findings}"; debt_clear "$i"; printf '%s\t%s\t%s\n' "$i" "$r" "ts" >> "$DEBT"; }
-debt_clear() { [ -f "$DEBT" ] || return 0; grep -v "^$1	" "$DEBT" > "$DEBT.tmp" 2>/dev/null && mv "$DEBT.tmp" "$DEBT"; return 0; }
-debt_issues() { [ -f "$DEBT" ] && cut -f1 "$DEBT" 2>/dev/null | grep -v '^$' || true; }
-debt_reason() { awk -F'\t' -v i="$1" '$1 == i { r = $2 } END { print r }' "$DEBT" 2>/dev/null; }
+STUCK="$FIX/.stuck_issues.tsv"
+LOG_DIR="$FIX/logs"; mkdir -p "$LOG_DIR"
 
 assert_eq "empty ledger lists nothing" "" "$(debt_issues)"
 debt_add KCH-78 findings
@@ -42,10 +54,26 @@ assert_eq "clear removes only its own entry" "KCH-84" "$(debt_issues | tr '\n' '
 debt_clear KCH-999
 assert_eq "clearing an absent issue is a no-op, rc 0" "0" "$?"
 
+# THE LAST ROW. `grep -v` exits 1 when it prints nothing, so `... && mv` skipped
+# the move whenever the row being cleared was the only one left, and the ledger
+# kept it. Every consequence pointed the wrong way: remediation announced "debt
+# cleared" while the entry stood, DEBT_ONLY reported it still open, and
+# debt_add's clear-then-append duplicated the row so the next pass remediated
+# the same issue twice.
+debt_clear KCH-84
+assert_eq "clearing the LAST row actually empties the ledger" "" "$(debt_issues)"
+assert_eq "and the file is empty, not merely unlisted" "0" "$(grep -c . "$DEBT" || true)"
+debt_add KCH-84 findings
+debt_clear KCH-84
+debt_add KCH-84 findings
+assert_eq "re-banking after clearing the last row does not duplicate" "1" "$(debt_issues | grep -c '^KCH-84$')"
+debt_clear KCH-84
+
 # ── the snapshot the debt phase actually loops over ─────────────────────────
 # The 2026-09-09 regression: DEBT_RUN was declared, trapped, counted and read,
 # but never written, so DEBT_N was 0 and the phase was skipped while the stop
 # message — reading $DEBT directly — still reported the debt as open.
+debt_add KCH-84 findings          # the clears above emptied the ledger
 DEBT_RUN="$FIX/.debt.run"
 debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
 DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
@@ -123,25 +151,15 @@ assert_eq "clearing one of several rows keeps the rest" "KCH-84	1	ts" "$(cat "$S
 # the last round by NUMBER. A KCH-78 remediation went clean at round 1 while a
 # stale round 2 from an earlier regate survived, so the publisher would have
 # failed a PR from a log three commits out of date.
-GLOG="$FIX/gl"; mkdir -p "$GLOG"
-next_gate_round() {
-  local issue="$1" f n max=-1
-  for f in "$GLOG/${issue}_cr_round"*.txt; do
-    [ -e "$f" ] || continue
-    n="$(basename "$f" | sed 's/.*_cr_round//;s/\.txt$//')"
-    case "$n" in ''|*[!0-9]*) continue ;; esac
-    [ "$n" -gt "$max" ] && max="$n"
-  done
-  echo "$((max + 1))"
-}
+GLOG="$LOG_DIR"
 assert_eq "first gate starts at round 0" "0" "$(next_gate_round KCH-78)"
-: > "$GLOG/KCH-78_cr_round0.txt"; : > "$GLOG/KCH-78_cr_round1.txt"
+: > "$LOG_DIR/KCH-78_cr_round0.txt"; : > "$LOG_DIR/KCH-78_cr_round1.txt"
 assert_eq "a second pass continues, never restarts at 0" "2" "$(next_gate_round KCH-78)"
-: > "$GLOG/KCH-78_cr_round2.txt"
+: > "$LOG_DIR/KCH-78_cr_round2.txt"
 assert_eq "a regate round is counted too" "3" "$(next_gate_round KCH-78)"
-: > "$GLOG/KCH-78_cr_round10.txt"
+: > "$LOG_DIR/KCH-78_cr_round10.txt"
 assert_eq "numeric max, not lexical" "11" "$(next_gate_round KCH-78)"
-: > "$GLOG/KCH-78_cr_roundXX.txt"
+: > "$LOG_DIR/KCH-78_cr_roundXX.txt"
 assert_eq "a non-numeric round name is ignored" "11" "$(next_gate_round KCH-78)"
 assert_eq "another issue is unaffected" "0" "$(next_gate_round KCH-84)"
 
@@ -180,6 +198,27 @@ resolve_log_dir() { echo "${GATE_LOG_DIR:-$1/logs}"; }
 assert_eq "no override -> the script's own ops dir" "/repo/ops/logs" "$(GATE_LOG_DIR= resolve_log_dir /repo/ops)"
 assert_eq "relocated with no override -> the wrong, empty dir" "/tmp/ops.9/logs" "$(GATE_LOG_DIR= resolve_log_dir /tmp/ops.9)"
 assert_eq "override wins, so the relocated copy reads the repo" "/repo/ops/logs" "$(GATE_LOG_DIR=/repo/ops/logs resolve_log_dir /tmp/ops.9)"
+
+# ── structural guards: things unit tests cannot reach, but greps can ────────
+# These two defects are invisible to behavioural tests here (both need a live
+# gh), and both were shipped once already, so assert the shape directly.
+ORCH="$(cd "$(dirname "$0")" && pwd)/orchestrator.sh"
+
+# Every success path out of remediate_issue must publish. The re-gate-only path
+# — taken by quota-banked debt, the most common reason — cleared its ledger and
+# left the PR drafted with a stale status.
+body="$(sed -n '/^remediate_issue()/,/^}/p' "$ORCH")"
+returns0="$(printf '%s' "$body" | grep -c 'return 0')"
+publishes="$(printf '%s' "$body" | grep -c 'publish_gate')"
+assert_eq "every remediate_issue success path publishes the gate" "$returns0" "$publishes"
+
+# A merged PR must not be mistaken for an open one: `gh pr view <branch>`
+# resolves merged and closed PRs, which would make the rebuild guard bank an
+# already-merged issue as debt that can never clear.
+assert_eq "no unfiltered gh pr view survives in the loop" "0" \
+  "$(grep -c '^[^#]*gh pr view' "$ORCH" || true)"
+assert_eq "the PR lookup filters to open" "1" \
+  "$(grep -c 'gh pr list --state open --head' "$ORCH" || true)"
 
 echo
 echo "$pass passed, $fail failed"
