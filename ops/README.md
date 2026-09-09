@@ -9,7 +9,7 @@ and open stacked PRs, CodeRabbit reviews every branch. **Nothing merges without 
 | `seed_linear.py` | parses `linear_import.csv` → creates Linear issues (idempotent) | ✅ built |
 | `orchestrator.sh` | the build loop: implement → CodeRabbit gate → mediate → PR | ⬜ ticketed |
 | `run_builder.sh` | guard wrapper: skips if running / in flight / queue done | ⬜ ticketed |
-| `pr_gate.sh` | publishes the CLI gate's findings trail and sets `coderabbit/cli-gate` | ⬜ ticketed |
+| `pr_gate.sh` | publishes the CLI gate's findings trail and sets `coderabbit/cli-gate` | ✅ built |
 | `remediate_prs.sh` | answers CodeRabbit's PR comments in place | ⬜ ticketed |
 | `review_sweeper.sh` | settles deferred reviews from the debt ledger | ⬜ ticketed |
 
@@ -116,6 +116,24 @@ Passing one does not answer the others.
 
 A green `coderabbit/cli-gate` means *no **blocking** findings* — not *no findings*. Read
 the round detail in the PR comment for the rest.
+
+### Publishing the CLI gate result
+
+The CLI gate runs pre-push inside `orchestrator.sh`, so from GitHub's side its result
+is just a claim — the findings sit in gitignored logs under `ops/logs/`. Run
+`ops/pr_gate.sh ISSUE` to re-publish that trail as evidence on the PR: every round's
+blocking findings, the commit that answered each one, and the final round's verdict —
+then set the `coderabbit/cli-gate` commit status. Success only when the final round
+returned zero blocking findings; no logs at all or a final round that errored/hit quota
+both count as failure, not success. No Claude involved — bash, `git`, `gh`, and the logs
+already on disk, so it still runs when spend is capped.
+
+Make it required, once, with admin access to the repo (needs branch protection already
+enabled on `development`):
+
+```bash
+ops/pr_gate.sh --require-check
+```
 
 ---
 
