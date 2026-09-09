@@ -64,6 +64,14 @@ say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
 
 # ── preflight ────────────────────────────────────────────────────────────────
+# macOS ships bash 3.2 (2007). Everything below is written to run on it — no
+# mapfile, no associative arrays, no ${x,,}. This check exists so that if someone
+# later adds a bash-4 construct, the failure names the cause instead of surfacing
+# as "command not found" three hundred lines in.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 3 ]; then
+  fail "bash 3.2 or newer required (found ${BASH_VERSION:-unknown})"; exit 1
+fi
+
 for t in git gh claude coderabbit python3; do
   command -v "$t" >/dev/null 2>&1 || { fail "$t not found on PATH"; exit 1; }
 done
@@ -290,15 +298,30 @@ run_issue() {
 }
 
 # ── main ─────────────────────────────────────────────────────────────────────
-mapfile -t QUEUED < <(next_issues)
-if [ "${#QUEUED[@]}" -eq 0 ]; then
+# No arrays here on purpose. macOS ships bash 3.2, which has no `mapfile`, and
+# under `set -u` expanding an empty array is itself an error there. A plain file
+# plus `while read` works on every bash and keeps the loop in the parent shell so
+# the counter survives (a pipeline would put it in a subshell).
+QUEUE_RUN="$LOG_DIR/.pending.$$"
+next_issues > "$QUEUE_RUN"
+trap 'rm -f "$QUEUE_RUN"' EXIT
+
+TOTAL="$(grep -c . "$QUEUE_RUN" 2>/dev/null || echo 0)"
+if [ "${TOTAL:-0}" -eq 0 ]; then
   say "Queue exhausted — nothing to build."; exit 0
 fi
 
-say "Queue: ${#QUEUED[@]} issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$CR_MAX_ROUNDS"
+say "Queue: $TOTAL issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$CR_MAX_ROUNDS"
 built=0
-for issue in "${QUEUED[@]}"; do
-  if run_issue "$issue"; then built=$((built + 1)); else say "  $issue did not complete — will retry next pass"; fi
-  [ "$MAX_ISSUES" -gt 0 ] && [ "$built" -ge "$MAX_ISSUES" ] && { say "MAX_ISSUES=$MAX_ISSUES reached."; break; }
-done
+while IFS= read -r issue; do
+  [ -n "$issue" ] || continue
+  if run_issue "$issue"; then
+    built=$((built + 1))
+  else
+    say "  $issue did not complete — will retry next pass"
+  fi
+  if [ "$MAX_ISSUES" -gt 0 ] && [ "$built" -ge "$MAX_ISSUES" ]; then
+    say "MAX_ISSUES=$MAX_ISSUES reached."; break
+  fi
+done < "$QUEUE_RUN"
 say "Pass complete — $built issue(s) built, $(pending_issues | grep -c . || echo 0) still pending."
