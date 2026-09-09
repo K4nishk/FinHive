@@ -23,8 +23,10 @@ PYPROJECT = ROOT / "pyproject.toml"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
-def _ruff_check(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
-    target = tmp_path / "sample.py"
+def _ruff_check(
+    dest_dir: Path, code: str, filename: str = "sample.py"
+) -> subprocess.CompletedProcess[str]:
+    target = dest_dir / filename
     target.write_text(code)
     return subprocess.run(
         ["ruff", "check", "--config", str(PYPROJECT), str(target)],
@@ -34,12 +36,33 @@ def _ruff_check(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_s608_is_selected_and_not_ignored() -> None:
+def test_s608_is_selected_in_the_static_config() -> None:
     lint = tomllib.loads(PYPROJECT.read_text())["tool"]["ruff"]["lint"]
     assert "S" in lint["select"], (
         "flake8-bandit rules (incl. S608) must stay selected"
     )
     assert "S608" not in lint.get("ignore", []), "S608 must not be silenced"
+
+
+def test_s608_is_not_suppressed_for_the_finhive_ci_target() -> None:
+    """Check ruff's *effective* configuration for a path inside the CI target
+    (``finhive/``), not just the top-level ``[tool.ruff.lint]`` table -- a
+    ``per-file-ignores`` entry keyed on e.g. ``finhive/**/*.py`` would silence
+    S608 for the package ruff actually lints without changing that table.
+    """
+    fixture = ROOT / "finhive" / "_kch84_sql_injection_gate_probe.py"
+    assert not fixture.exists(), f"refusing to overwrite unexpected file: {fixture}"
+    try:
+        result = _ruff_check(
+            fixture.parent,
+            'from __future__ import annotations\n\n\n'
+            'def q(uid):\n    return f"SELECT * FROM users WHERE id = {uid}"\n',
+            filename=fixture.name,
+        )
+    finally:
+        fixture.unlink(missing_ok=True)
+    assert result.returncode != 0
+    assert "S608" in result.stdout
 
 
 def test_ci_runs_the_rule_set_against_finhive() -> None:
@@ -50,6 +73,7 @@ def test_ci_runs_the_rule_set_against_finhive() -> None:
 def test_fstring_sql_constant_is_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
+        'from __future__ import annotations\n\n\n'
         'def q(uid):\n    return f"SELECT * FROM users WHERE id = {uid}"\n',
     )
     assert result.returncode != 0
@@ -59,6 +83,7 @@ def test_fstring_sql_constant_is_blocked(tmp_path: Path) -> None:
 def test_percent_formatted_sql_constant_is_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
+        'from __future__ import annotations\n\n\n'
         'def q(uid):\n    return "SELECT * FROM users WHERE id = %s" % (uid,)\n',
     )
     assert result.returncode != 0
@@ -68,6 +93,7 @@ def test_percent_formatted_sql_constant_is_blocked(tmp_path: Path) -> None:
 def test_dot_format_sql_constant_is_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
+        'from __future__ import annotations\n\n\n'
         'def q(uid):\n    return "SELECT * FROM users WHERE id = {}".format(uid)\n',
     )
     assert result.returncode != 0
@@ -81,6 +107,8 @@ def test_parameterised_sql_constant_is_not_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
         (
+            "from __future__ import annotations\n"
+            "\n\n"
             "def q(conn, uid):\n"
             '    query = "SELECT * FROM users WHERE id = $1"\n'
             "    return conn.execute(query, uid)\n"
