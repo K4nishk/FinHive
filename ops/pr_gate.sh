@@ -89,6 +89,24 @@ round_unavailable() {
   grep -qiE '^[[:space:]]*Error:|rate.?limit|quota|too many requests|unknown option|unknown command|Usage: coderabbit|not logged in|unauthorized|authentication failed|connection error|connection failed|websocket closed' "$1" 2>/dev/null
 }
 
+# The base a re-gate should diff against: the PR's OWN base, not BASE_BRANCH.
+#
+# A stacked PR contains only the commits above the branch below it. Reviewing an
+# upper branch against development instead diffs in every PR underneath —
+# feature/kch-84 is 1 commit as a PR and 13 against development — so findings
+# from PRs #2-#5 would be reported against #6 and fail it for someone else's
+# code. Only the bottom PR's base IS development, which is why this was invisible
+# when the first re-gate happened to be KCH-78's.
+#
+# Falls back to BASE_BRANCH when there is no PR yet (nothing to be consistent
+# with) and honours GATE_REVIEW_BASE for a deliberate whole-stack review.
+pr_base_for_branch() {
+  local branch="$1" base
+  [ -n "${GATE_REVIEW_BASE:-}" ] && { printf '%s' "$GATE_REVIEW_BASE"; return 0; }
+  base="$(gh pr view "$branch" --json baseRefName -q .baseRefName 2>/dev/null)"
+  printf '%s' "${base:-$BASE_BRANCH}"
+}
+
 # The commit a round reviewed, recorded beside its log by regate(). Empty for
 # rounds the builder wrote (it gates pre-push, so there is no PR head to compare
 # against yet) — absence means "cannot verify", never "verified".
@@ -313,9 +331,10 @@ regate() {
 
   local out; out="$(next_round_file "$issue" "$LOG_DIR")"
   mkdir -p "$LOG_DIR"
-  say "Reviewing $ref @ $(printf '%s' "$sha" | cut -c1-7) against $BASE_BRANCH — round $(round_number "$out")"
-  say "  (a full-branch review; the builder's rounds compared against the branch below)"
-  ( cd "$wt" && coderabbit review --committed --base "$BASE_BRANCH" ) > "$out" 2>&1
+  local rbase; rbase="$(pr_base_for_branch "$branch")"
+  say "Reviewing $ref @ $(printf '%s' "$sha" | cut -c1-7) against $rbase — round $(round_number "$out")"
+  say "  (the PR's own diff; set GATE_REVIEW_BASE=development to review the whole stack)"
+  ( cd "$wt" && coderabbit review --committed --base "$rbase" ) > "$out" 2>&1
   local rc=$?
   # Record WHAT was reviewed next to the log, so publishing can prove the verdict
   # belongs to the commit the PR is actually at.
