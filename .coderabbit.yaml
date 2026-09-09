@@ -5,13 +5,14 @@
 # (finhive/, web/). Conventions below restate CLAUDE.md; if the two ever
 # disagree, CLAUDE.md is authoritative and this file is stale.
 #
-# Blocking vs advisory: `reviews.request_changes_workflow` makes CodeRabbit
-# submit an actual GitHub "Request changes" review for high-confidence,
-# high-severity findings — combined with branch protection requiring review
-# approval, that blocks merge until resolved. Lower-severity findings post as
-# plain comments (advisory) and do not block. This mirrors the local CLI gate
-# (ops/pr_gate.sh, CR_BLOCKING="critical|major|blocker|high") so a finding
-# reads as blocking the same way on both surfaces.
+# `reviews.request_changes_workflow` makes CodeRabbit submit an actual GitHub
+# "Request changes" review whenever it posts any actionable comment — combined
+# with branch protection requiring review approval, that blocks merge until
+# every actionable comment is resolved. It is not a severity filter: there is
+# no low-severity/advisory-only lane on this surface, unlike the local CLI gate
+# (ops/pr_gate.sh, CR_BLOCKING="critical|major|blocker|high"), which only
+# blocks on that severity band. A finding that the CLI gate would treat as
+# advisory can still block merge here.
 language: "en-US"
 early_access: false
 

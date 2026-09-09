@@ -110,11 +110,11 @@ retargeted mid-review.
   GitHub and can be made a required check.
 - `.coderabbit.yaml` — the repo-root config the CodeRabbit GitHub App and CLI both read:
   path filters, per-layer review instructions restating CLAUDE.md, and
-  `reviews.request_changes_workflow: true`, which is what turns a high-severity SaaS
-  finding into a blocking GitHub review rather than an advisory comment. Step 4's CLI
-  gate and this SaaS review use the same blocking/advisory line
-  (`critical|major|blocker|high`) so a finding reads as blocking the same way on both
-  surfaces.
+  `reviews.request_changes_workflow: true`, which turns any actionable SaaS finding
+  into a blocking GitHub review rather than an advisory comment — it has no severity
+  threshold. Step 4's CLI gate is narrower: it only blocks on
+  `CR_BLOCKING` (`critical|major|blocker|high`). A finding the CLI gate would treat
+  as advisory can still block the SaaS review.
 - `ops/README.md` — operational rules for running the toolchain (locking, worktree
   safety, review surfaces). This contract describes *what* the loop must do; that file
   describes *how to operate it safely*.

@@ -123,11 +123,11 @@ the round detail in the PR comment for the rest.
 Repo-root config shared by the CLI and the SaaS app: path filters keep noise directories
 (`output/`, `bkp/`, lockfiles, `web/dist/`) out of review, `path_instructions` restate the
 CLAUDE.md conventions per layer (Decimal money, no `giving_date` in interest math, no
-`QTableWidget`, no raw SQL), and `reviews.request_changes_workflow: true` is the blocking
-half of the split — CodeRabbit submits an actual GitHub "Request changes" review for
-high-severity findings, which blocks merge under branch protection requiring review
-approval, the same way `CR_BLOCKING` (`critical|major|blocker|high`) blocks the CLI gate.
-Everything below that severity posts as an advisory comment and does not block.
+`QTableWidget`, no raw SQL), and `reviews.request_changes_workflow: true` makes CodeRabbit
+submit an actual GitHub "Request changes" review whenever it posts any actionable
+comment, which blocks merge under branch protection requiring review approval. This has
+no severity threshold, unlike the CLI gate's `CR_BLOCKING` (`critical|major|blocker|high`):
+a finding the CLI gate treats as advisory can still block merge on the SaaS surface.
 
 ### Publishing the CLI gate result
 
