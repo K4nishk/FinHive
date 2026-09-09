@@ -10,6 +10,8 @@ and open stacked PRs, CodeRabbit reviews every branch. **Nothing merges without 
 | `orchestrator.sh` | the build loop: implement → CodeRabbit gate → mediate → PR | ⬜ ticketed |
 | `run_builder.sh` | guard wrapper: skips if running / in flight / queue done | ⬜ ticketed |
 | `pr_gate.sh` | publishes the CLI gate's findings trail and sets `coderabbit/cli-gate` | ✅ built |
+| `orchestrator.test.sh` | ledger + phase-selection tests for the loop | ✅ built |
+| `pr_gate.test.sh` | unit tests for the gate publisher's pure helpers | ✅ built |
 | `remediate_prs.sh` | answers CodeRabbit's PR comments in place | ⬜ ticketed |
 | `review_sweeper.sh` | settles deferred reviews from the debt ledger | ⬜ ticketed |
 

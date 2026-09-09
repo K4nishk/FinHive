@@ -721,7 +721,19 @@ ENDED=""
 # queue read first would still list it after remediation cleared it, so the pass
 # would try to BUILD an issue it had just fixed. run_issue's open-PR guard would
 # refuse, but only after logging a failure and counting a strike toward parking.
+debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
 DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
+
+# Two readers, one truth. The stop message below reads $DEBT directly while this
+# phase reads the $DEBT_RUN snapshot, and when the snapshot was silently never
+# written the pass reported "debt still open" for work it had never looked at.
+# A disagreement between them is a bug in this script, not a state to skip past.
+if [ "${DEBT_N:-0}" -eq 0 ] && [ -s "$DEBT" ]; then
+  fail "$DEBT has $(grep -c . "$DEBT" || echo 0) row(s) but the snapshot is empty — debt_issues failed"
+  fail "  refusing to continue; the debt would be silently skipped"
+  exit 1
+fi
+
 if [ "${DEBT_N:-0}" -gt 0 ]; then
   say ""
   say "══ REVIEW DEBT · $DEBT_N open PR(s) to clear before any new feature"
