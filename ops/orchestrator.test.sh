@@ -171,6 +171,16 @@ Critical 1
 EOF
 assert_eq "two findings plus two tally lines counts as two" "2" "$(blocking_count "$FIX/two.txt")"
 
+# ── the publisher must read the REPO's logs, not the relocated copy's ───────
+# orchestrator.sh runs a $TMPDIR copy of pr_gate.sh (rule 1). Resolved from the
+# copy's own location, LOG_DIR points at an empty $TMPDIR/logs and every gate
+# reads "no run found — unreviewed", so wiring the publisher in without the
+# override would publish a FAILURE on a PR that had just passed.
+resolve_log_dir() { echo "${GATE_LOG_DIR:-$1/logs}"; }
+assert_eq "no override -> the script's own ops dir" "/repo/ops/logs" "$(GATE_LOG_DIR= resolve_log_dir /repo/ops)"
+assert_eq "relocated with no override -> the wrong, empty dir" "/tmp/ops.9/logs" "$(GATE_LOG_DIR= resolve_log_dir /tmp/ops.9)"
+assert_eq "override wins, so the relocated copy reads the repo" "/repo/ops/logs" "$(GATE_LOG_DIR=/repo/ops/logs resolve_log_dir /tmp/ops.9)"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -32,8 +32,12 @@
 set -uo pipefail
 
 OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$OPS_DIR/.." && pwd)"
-LOG_DIR="$OPS_DIR/logs"
+# Overridable because the orchestrator runs a copy of this script relocated to
+# $TMPDIR (rule 1). Resolved from the copy's own location, LOG_DIR would point at
+# an empty $TMPDIR/logs and every gate would read as "no run found — unreviewed".
+# That is exactly how usage.py stranded its ledger; same trap, same fix.
+REPO_DIR="${GATE_REPO_DIR:-$(cd "$OPS_DIR/.." && pwd)}"
+LOG_DIR="${GATE_LOG_DIR:-$OPS_DIR/logs}"
 
 CR_BLOCKING="${CR_BLOCKING:-critical|major|blocker|high}"
 GATE_CONTEXT="${GATE_CONTEXT:-coderabbit/cli-gate}"

@@ -93,6 +93,8 @@ SESSION_START="$(date +%s)"
 # Run the relocated copy — the in-repo one can vanish when the worktree resets.
 USAGE="${FH_TMP_OPS:-$OPS_DIR}/usage.py"
 [ -f "$USAGE" ] || USAGE="$OPS_DIR/usage.py"
+PR_GATE="${FH_TMP_OPS:-$OPS_DIR}/pr_gate.sh"
+[ -f "$PR_GATE" ] || PR_GATE="$OPS_DIR/pr_gate.sh"
 
 say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
@@ -593,6 +595,17 @@ End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT
     say "  $issue is clean now — debt cleared"
     debt_clear "$issue"
     grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
+    # Tell GitHub. Without this the fix lands and the PR stays exactly as the
+    # failing gate left it — draft, with a stale or absent commit status. PR #2
+    # sat drafted from 2026-09-08 for that reason: the loop cleared its own
+    # ledger and nothing ever published the result.
+    if [ -x "$PR_GATE" ]; then
+      say "  publishing the gate result and clearing the draft"
+      GATE_LOG_DIR="$LOG_DIR" GATE_REPO_DIR="$REPO_DIR" "$PR_GATE" "$issue" \
+        || fail "  publish failed — run by hand: ops/pr_gate.sh $issue"
+    else
+      fail "  pr_gate.sh not found — the PR keeps its draft state; run: ops/pr_gate.sh $issue"
+    fi
     return 0
   fi
   say "  $issue still not clean — debt stays open"
