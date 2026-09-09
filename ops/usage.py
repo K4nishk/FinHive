@@ -32,7 +32,17 @@ import sys
 import time
 from pathlib import Path
 
-OPS = Path(__file__).resolve().parent
+# The ledger belongs to the REPOSITORY, not to this file's location.
+#
+# ops/orchestrator.sh copies this script into $TMPDIR and runs the copy (rule 1:
+# a script that rewrites its own worktree must re-exec from outside it). Resolved
+# from __file__, the ledger then lands in $TMPDIR/finhive-ops.$$/logs/ — so
+# `report` in the repo showed nothing while a real session was recording, and the
+# accounting died with the temp directory. $21.17 across 18 calls was stranded
+# that way on 2026-09-09. FH_REAL_OPS is the repo's ops/, exported by the
+# orchestrator before it re-execs; falling back to __file__ keeps a standalone
+# `python3 ops/usage.py` working.
+OPS = Path(os.environ.get("FH_REAL_OPS") or Path(__file__).resolve().parent)
 LEDGER = OPS / "logs" / "usage.jsonl"
 
 DIM, RED, GRN, YEL, RST = "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m"

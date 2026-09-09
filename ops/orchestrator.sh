@@ -204,7 +204,8 @@ drop_empty_branch() {
   # always exists locally. If that fails, keep the branch — a stray branch is
   # harmless; deleting the one you are standing on is not.
   git checkout -q "$BASE_BRANCH" 2>/dev/null || return 0
-  git branch -q -d "$branch" 2>/dev/null || say "  kept $branch — it has commits on it"
+  git branch -q -d "$branch" 2>/dev/null \
+    || say "  kept $branch — git declined the delete (not merged into $BASE_BRANCH)"
 }
 
 # The VERDICT= line from the last agent call, or empty. Reads the JSON of THIS
@@ -252,21 +253,41 @@ wind_down() {
 
   # 1. Back up in-flight work. Commit whatever is uncommitted and push the
   #    branch so nothing lives only on this machine.
-  local br; br="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    say "  uncommitted work on $br — committing as WIP"
-    git add -A 2>/dev/null || true
-    git commit -q -m "WIP: wind-down backup ($reason)" 2>/dev/null || true
+  #
+  #    Under the lock (rule 3). run_issue drops WT_LOCK through its RETURN trap,
+  #    so this ran unlocked while staging `git add -A` and force-pushing in the
+  #    SHARED checkout. A review pane moving the branch mid-backup would have
+  #    this commit an unrelated tree onto whatever branch it landed on. If the
+  #    lock cannot be taken, skip the backup and say so: leaving work uncommitted
+  #    is recoverable, committing the wrong tree to the wrong branch is not.
+  local br backed_up=0
+  if take_lock; then
+    br="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      say "  uncommitted work on $br — committing as WIP"
+      git add -A 2>/dev/null || true
+      git commit -q -m "WIP: wind-down backup ($reason)" 2>/dev/null || true
+    fi
+    backed_up=1
+  else
+    br="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    fail "  could not take $WT_LOCK — NOT committing or pushing"
+    fail "  in-flight work is left uncommitted on $br; back it up by hand"
   fi
   case "$br" in
     feature/*)
-      if git push -q --force-with-lease -u origin "$br" 2>/dev/null; then
+      if [ "$backed_up" -eq 0 ]; then
+        say "  skipped pushing $br (no lock)"
+      elif git push -q --force-with-lease -u origin "$br" 2>/dev/null; then
         say "  pushed $br"
       else
         say "  WARNING: could not push $br — the work is committed locally only"
       fi ;;
     *) say "  on $br — nothing to push" ;;
   esac
+  # Held only across the checkout-touching work above; the summary reads state
+  # files, not the worktree, so nothing below needs it.
+  [ "$backed_up" -eq 1 ] && drop_lock
 
   # 2. Session summary, to stdout and to a file the tmux pane leaves behind.
   local summary="$LOG_DIR/SESSION_${FH_SESSION_ID}.md"

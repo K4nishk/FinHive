@@ -84,6 +84,25 @@ error: unknown option '--plain'
 Usage: coderabbit review [options] [command]
 EOF
 echo "Not logged in. Run: coderabbit auth login" > "$LOGS/signedout.txt"
+# Verbatim from ops/logs/KCH-85_cr_round1.txt: the review connected, ran 5m14s,
+# then dropped. No severity keyword anywhere, so it scored clean and would have
+# greened PR #7 on a review that never finished.
+cat > "$LOGS/wsdrop.txt" <<'EOF'
+Writing review comments... 5m 14s elapsed - still working
+
+  ✗ Connection error
+
+  Connection failed: WebSocket closed
+
+Error: WebSocket closed
+EOF
+if round_unavailable "$LOGS/wsdrop.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a dropped connection"; fi
+# ...but a finding that merely mentions an error must still count as a review.
+cat > "$LOGS/mentions_error.txt" <<'EOF'
+CodeRabbit Review
+1. Major: swallowed error in the retry path — log it before returning
+EOF
+if round_unavailable "$LOGS/mentions_error.txt"; then fail=$((fail+1)); echo "FAIL: a finding mentioning 'error' is not an unavailable round"; else pass=$((pass+1)); fi
 if round_unavailable "$LOGS/badflag.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a CLI usage error"; fi
 if round_unavailable "$LOGS/signedout.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a signed-out session"; fi
 cp "$LOGS/badflag.txt" "$LOGS/KCH-98_cr_round0.txt"
@@ -151,6 +170,15 @@ assert_contains "no-run report says unreviewed" "$report_none" "Unreviewed — c
 # ── issue_branch ─────────────────────────────────────────────────────────
 assert_eq "issue_branch matches the orchestrator's naming" "feature/kch-78" "$(issue_branch KCH-78)"
 
+# ── round_sha ────────────────────────────────────────────────────────────
+# The verdict has to be attributable to a commit; absence must read as "cannot
+# verify", never as proof.
+SH="$FIX_DIR/sha"; mkdir -p "$SH"
+: > "$SH/KCH-70_cr_round0.txt"
+assert_eq "no sidecar -> empty, not an error" "" "$(round_sha "$SH/KCH-70_cr_round0.txt")"
+echo "abc1234def" > "$SH/KCH-70_cr_round0.sha"
+assert_eq "sidecar is read back" "abc1234def" "$(round_sha "$SH/KCH-70_cr_round0.txt")"
+
 # ── next_round_file ──────────────────────────────────────────────────────
 # A re-gate appends; it must never overwrite the earlier rounds, which are the
 # record of what CodeRabbit found and which commit answered it.
@@ -185,6 +213,12 @@ assert_eq "handles a branch point" "2
 assert_eq "a cycle terminates" "2
 4" "$(pr_stack_order development "$(printf '%s\n' \
   "2	development	feature/a" "4	feature/a	feature/b" "4	feature/b	feature/a")")"
+# Distinct PR numbers on each row of the cycle — the dedup-by-number check alone
+# would not stop this one; only the revisit of an already-processed base does.
+assert_eq "a cycle with distinct numbers terminates" "2
+4
+5" "$(pr_stack_order development "$(printf '%s\n' \
+  "2	development	feature/a" "4	feature/a	feature/b" "5	feature/b	feature/a")")"
 
 echo
 echo "$pass passed, $fail failed"
