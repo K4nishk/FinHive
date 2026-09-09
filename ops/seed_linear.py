@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import http.client
 import json
 import os
 import sys
@@ -84,6 +85,18 @@ def gql(query: str, variables: dict | None = None, *, key: str, retries: int = 3
                 time.sleep(2 ** attempt)
                 continue
             raise LinearError(f"network error: {exc}") from exc
+        # A truncated chunked response raises IncompleteRead, and a dropped socket
+        # raises a bare OSError — neither is a URLError, so without this branch the
+        # retry loop is bypassed entirely and the traceback escapes to the user.
+        except (http.client.IncompleteRead, http.client.HTTPException, OSError) as exc:
+            last = exc
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"{YEL}  truncated response ({type(exc).__name__}) — retrying in {wait}s{RST}",
+                      file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise LinearError(f"connection failed after {retries} attempts: {exc}") from exc
     raise LinearError(f"exhausted retries: {last}")
 
 
@@ -103,15 +116,25 @@ query($teamId: String!) {
 }
 """
 
+# first:250 trips Linear's query-complexity ceiling (max 10000) on a team with many
+# labels, so page at 100 and follow the cursor.
 Q_LABELS = """
-query($teamId: String!) {
-  team(id: $teamId) { labels(first: 250) { nodes { id name } } }
+query($teamId: String!, $after: String) {
+  team(id: $teamId) {
+    labels(first: 100, after: $after) {
+      nodes { id name }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
 }
 """
 
+# Page size is a variable because it is environment-dependent, not a constant we can
+# pick once: against this workspace, first:50 succeeds and first:100 reliably returns a
+# truncated chunked body (IncompleteRead). fetch_existing_titles halves on failure.
 Q_ISSUE_TITLES = """
-query($teamId: ID!, $after: String) {
-  issues(filter: { team: { id: { eq: $teamId } } }, first: 250, after: $after) {
+query($teamId: ID!, $after: String, $first: Int!) {
+  issues(filter: { team: { id: { eq: $teamId } } }, first: $first, after: $after) {
     nodes { id title }
     pageInfo { hasNextPage endCursor }
   }
@@ -140,17 +163,93 @@ mutation($input: IssueCreateInput!) {
 }
 """
 
+Q_QUEUE = """
+query($teamId: ID!, $after: String, $first: Int!) {
+  issues(filter: { team: { id: { eq: $teamId } },
+                   project: { name: { startsWith: "FinHive" } },
+                   state: { type: { nin: ["completed", "canceled"] } } },
+         first: $first, after: $after, orderBy: createdAt) {
+    nodes { identifier title estimate project { name } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
 
-def fetch_existing_titles(key: str, team_id: str) -> set[str]:
+
+def write_queue(key: str, team_id: str, path: Path) -> int:
+    """Write ops/queue.tsv in build order.
+
+    Creation order IS build order — issues were seeded top-to-bottom from a CSV that
+    was already sorted by milestone and dependency, so Linear's own ordering is the
+    queue. Column 2 is the identifier; run_builder.sh and orchestrator.sh both cut -f2.
+    """
+    # These nodes carry title and project, so the body is much larger per row than the
+    # id+title pager — it truncates well below first:50. Halve on failure, same as
+    # fetch_existing_titles.
+    rows, after, page = [], None, 25
+    while True:
+        try:
+            node = gql(Q_QUEUE, {"teamId": team_id, "after": after, "first": page},
+                       key=key, retries=2)["issues"]
+        except LinearError:
+            if page <= 5:
+                raise
+            page = max(5, page // 2)
+            print(f"{YEL}  large page truncated — retrying at first:{page}{RST}", file=sys.stderr)
+            continue
+        rows.extend(node["nodes"])
+        if not node["pageInfo"]["hasNextPage"]:
+            break
+        after = node["pageInfo"]["endCursor"]
+    rows.sort(key=lambda r: int(r["identifier"].rsplit("-", 1)[1]))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write("# order\tissue\testimate\tproject\ttitle\n")
+        fh.write("# regenerate: python3 ops/seed_linear.py --write-queue\n")
+        for i, r in enumerate(rows, 1):
+            proj = (r["project"] or {}).get("name", "-").replace("\t", " ")
+            title = r["title"].replace("\t", " ")
+            fh.write(f"{i}\t{r['identifier']}\t{r['estimate'] or 0}\t{proj}\t{title}\n")
+    return len(rows)
+
+
+def fetch_labels(key: str, team_id: str) -> dict[str, str]:
+    """name -> id for every label the team can use, following the cursor."""
+    out: dict[str, str] = {}
+    after = None
+    while True:
+        node = gql(Q_LABELS, {"teamId": team_id, "after": after}, key=key)["team"]["labels"]
+        out.update({l["name"]: l["id"] for l in node["nodes"]})
+        if not node["pageInfo"]["hasNextPage"]:
+            return out
+        after = node["pageInfo"]["endCursor"]
+
+
+def fetch_existing_titles(key: str, team_id: str, page: int = 50) -> set[str]:
+    """Read every issue title in the team, halving the page size when a body truncates.
+
+    Large chunked responses fail in some network paths (proxies, VPNs) while smaller
+    ones succeed, and the failure looks like a dead connection rather than a size
+    problem. Backing off on page size recovers instead of aborting the whole run.
+    """
     titles: set[str] = set()
     after = None
     while True:
-        data = gql(Q_ISSUE_TITLES, {"teamId": team_id, "after": after}, key=key)
-        page = data["issues"]
-        titles.update(n["title"].strip() for n in page["nodes"])
-        if not page["pageInfo"]["hasNextPage"]:
+        try:
+            data = gql(Q_ISSUE_TITLES, {"teamId": team_id, "after": after, "first": page},
+                       key=key, retries=2)
+        except LinearError:
+            if page <= 10:
+                raise
+            page = max(10, page // 2)
+            print(f"{YEL}  large page truncated — retrying at first:{page}{RST}", file=sys.stderr)
+            continue
+        node = data["issues"]
+        titles.update(n["title"].strip() for n in node["nodes"])
+        if not node["pageInfo"]["hasNextPage"]:
             return titles
-        after = page["pageInfo"]["endCursor"]
+        after = node["pageInfo"]["endCursor"]
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -161,6 +260,8 @@ def main() -> int:
     ap.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     ap.add_argument("--milestone", help="only import rows in this Milestone (substring match, e.g. M1)")
     ap.add_argument("--limit", type=int, help="cap the number of issues (useful for a first smoke import)")
+    ap.add_argument("--write-queue", action="store_true",
+                    help="write ops/queue.tsv from Linear (build order) and exit")
     args = ap.parse_args()
 
     key = os.environ.get("LINEAR_API_KEY", "").strip()
@@ -173,9 +274,19 @@ def main() -> int:
         print(f"{RED}LINEAR_TEAM_KEY is not set.{RST}", file=sys.stderr)
         print("  This is the issue-id PREFIX (e.g. FIN for FIN-1), not the team name.", file=sys.stderr)
         return 2
-    if not args.csv.exists():
+    if not args.write_queue and not args.csv.exists():
         print(f"{RED}CSV not found: {args.csv}{RST}", file=sys.stderr)
         return 2
+
+    if args.write_queue:
+        teams = gql(Q_TEAM, {"key": team_key}, key=key)["teams"]["nodes"]
+        if not teams:
+            print(f"{RED}No team with key '{team_key}'.{RST}", file=sys.stderr)
+            return 2
+        out = REPO / "ops" / "queue.tsv"
+        n = write_queue(key, teams[0]["id"], out)
+        print(f"  {GRN}wrote{RST} {out.relative_to(REPO)} — {n} open issue(s) in build order")
+        return 0
 
     with args.csv.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
@@ -209,7 +320,7 @@ def main() -> int:
     team_id = team["id"]
 
     projects = {p["name"]: p["id"] for p in gql(Q_PROJECTS, {"teamId": team_id}, key=key)["team"]["projects"]["nodes"]}
-    labels = {l["name"]: l["id"] for l in gql(Q_LABELS, {"teamId": team_id}, key=key)["team"]["labels"]["nodes"]}
+    labels = fetch_labels(key, team_id)
     existing = fetch_existing_titles(key, team_id)
 
     # Milestones become Linear projects, in first-appearance (build) order.
@@ -272,13 +383,27 @@ def main() -> int:
         projects[name] = res["project"]["id"]
         print(f"  {GRN}+{RST} project  {name}")
 
+    # Label creation can collide with a name the team query did not return — Linear also
+    # has workspace-scoped labels, and names are matched case-insensitively. A collision
+    # must never abort a 147-issue import, so re-read and carry on.
     for name in new_labels:
-        res = gql(M_LABEL, {"name": name, "teamId": team_id}, key=key)["issueLabelCreate"]
-        if not res["success"]:
-            print(f"  {YEL}!{RST} label    {name} — not created, continuing without it")
-            continue
-        labels[name] = res["issueLabel"]["id"]
-        print(f"  {GRN}+{RST} label    {name}")
+        try:
+            res = gql(M_LABEL, {"name": name, "teamId": team_id}, key=key)["issueLabelCreate"]
+            if res["success"]:
+                labels[name] = res["issueLabel"]["id"]
+                print(f"  {GRN}+{RST} label    {name}")
+                continue
+            raise LinearError("issueLabelCreate returned success=false")
+        except LinearError as exc:
+            labels = fetch_labels(key, team_id)                      # something else owns it
+            hit = labels.get(name) or next(
+                (v for k, v in labels.items() if k.lower() == name.lower()), None)
+            if hit:
+                labels[name] = hit
+                print(f"  {DIM}={RST} label    {name} {DIM}(already existed){RST}")
+            else:
+                print(f"  {YEL}!{RST} label    {name} — {exc}; continuing without it",
+                      file=sys.stderr)
 
     created, failed = 0, 0
     for row in to_create:

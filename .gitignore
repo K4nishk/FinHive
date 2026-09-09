@@ -222,3 +222,25 @@ ops/.completed_issues
 ops/.review_debt.tsv
 ops/.issue_map.tsv
 ops/.agent_contracts.md
+
+# ── MVP2 scaffold (KCH-75) ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+web/node_modules/
+web/dist/
+web/.vite/
+
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+.env
+.env.local
