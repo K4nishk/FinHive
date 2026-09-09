@@ -1,124 +1,203 @@
 # FinHive
 
-## Key Input
-`/input/REQUIREMENTS.md`: The high-level human defined requirements for the Product.
+## Project
 
-### Input Structure:
+- **What**: One-Stop shop for custom finance solutions
+- **Active product**: Loan Manager MVP1 — single-user desktop loan management app.
+- **Branch**: `development`
+- **Input**: `/input/REQUIREMENTS.md` (authoritative business spec), `/input/prompt*.md` (build/fix prompts)
+- **Output**: `/output/YYYY/MM/DD/stdout_HHMMSS.md` (design artifacts, ARD, WIKI, FINAL_REVIEW)
+- **Source**: `/src/Loan Manager/loan_manager/` (Python package)
+- **WIKI**: `/output/Loan Manager/run_8/WIKI.md` — full repository knowledge base with file index, data flows, and business rules. Read it before making architectural decisions.
+- **ARD**: `/output/Loan Manager/run_8/ARD.md` — architecture reference for onboarding context.
+
+---
+
+## Language & Framework Constraints
+
+- Python >= 3.10. Target compatibility: 3.10–3.13.
+- PySide6 >= 6.8.0 for GUI.
+- SQLAlchemy >= 2.0 ORM with SQLite backend. No raw SQL outside migrations.
+- Alembic for schema migrations.
+- Pydantic >= 2.5 for all DTOs. Use `BaseModel`, field validators, model validators.
+- `python-dateutil` for date arithmetic (`relativedelta`). No manual month math.
+- `openpyxl` for XLSX. No other Excel library.
+- `Decimal` (not `float`) for all monetary calculations. Use `ROUND_HALF_UP`. Quantize to two decimal places.
+- All dates stored and compared as `datetime.date` objects in ISO 8601 format.
+- Enums via `str, Enum` for serialisation compatibility (see `domain/value_objects/status.py`).
+
+---
+
+## Architecture Rules
+
+Four-layer Clean Architecture. Dependency flows inward only.
+
 ```
-[Title]
-[Overview]
-[Requirements]
-[Prototype - Phase estimates]
-[Usage Scope]
+Presentation → Application → Domain ← Infrastructure
 ```
-`Title` = `[Title]` from input file
 
-## Core Project Information
-- **Goal**: Leverage Claude Skills to simulate Multi-Agent Coordination over parallel orchestration workflows to generate deterministic outputs.
-- **Idea**: Compare run outputs as skills enhance.
-- **Git Branch**: `development`
+- **Domain** (`domain/`): Pure Python. No imports from `infrastructure/`, `presentation/`, `PySide6`, or `sqlalchemy`. Entities, value objects, domain services, repository interfaces, domain events.
+- **Application** (`application/`): Use cases and DTOs only. Imports `domain/` only. No DB queries, no UI code.
+- **Infrastructure** (`infrastructure/`): Implements domain repository interfaces. Imports `domain/` and `sqlalchemy`. No `PySide6`.
+- **Presentation** (`presentation/`): PySide6 UI. Calls application use cases. No business logic. No direct repository access.
 
-## Core Principles
-1. **Security First**: Never hardcode API keys. Use `.env` files.
-2. **Type Safety**: Always use TypeScript definitions. Avoid `any`.
-3. **Small units of work**: Parse requirements into small units of work which can be assigned to specific skill experts. Focus on action items rather comprehension.
-4. **Test before Commits**: Make atomic changes with testing and clear commit messages.
-5. **Iterative**: Explore -> Plan -> Code. Do not implement complex features immediately.
-6. **Modular**: Code design should be modular and unit-tested.
+When adding new code, place it in the correct layer. If a piece of logic requires imports that cross layer boundaries in the wrong direction, restructure.
 
-## Available agents
-- `./claude/agents/architect.md`
-- `./claude/agents/build-error-resolver.md`
-- `./claude/agents/code-reviewer.md`
-- `./claude/agents/doc-updater.md`
-- `./claude/agents/loop-operator.md` = The starter agent for orchestrating child agents and skills.
-- `./claude/agents/planner.md`
-- `./claude/agents/python-reviewer.md`
-- `./claude/agents/refactor-cleaner.md`
-- `./claude/agents/security-reviewer.md`
-- `./claude/agents/tdd-guide.md`
+### Dependency Injection
 
-## Skills
-- `./claude/skills/backend-dev-agent/SKILL.md`: Backend Developer skills
-- `./claude/skills/backend-qa-agent/SKILL.md`: Backend Quality Assurance skills
-- `./claude/skills/bsa-agent/SKILL.md`: Business System Analyst skills
-- `./claude/skills/dev-lead-agent/SKILL.md`: Developer Lead skills
-- `./claude/skills/dm-agent/SKILL.md`: Data Modeller skills
-- `./claude/skills/frontend-dev-agent/SKILL.md`: Frontend Developer skills
-- `./claude/skills/frontend-qa-agent/SKILL.md`: Frontend Quality Assurance skills
-- `./claude/skills/pm-agent/SKILL.md`: Product Manager skills
-- `./claude/skills/po-agent/SKILL.md`: Product Owner skills
-- `./claude/skills/sa-agent/SKILL.md`: Solution Architect skills
-- `./claude/skills/sre-agent/SKILL.md`: Site Reliability Engineer skills
-- `./claude/skills/qa-lead-agent/SKILL.md`: Quality Assurance Lead skills
-- `./claude/skills/uat-agent/SKILL.md`: User Acceptance Tester skills
-- `./claude/skills/agentic-engineering/SKILL.md`: Agentic Engineering skills
-- `./claude/skills/ai-first-engineering/SKILL.md`: AI first engineering skills
-- `./claude/skills/backend-patterns/SKILL.md`: Backend patterns skills
-- `./claude/skills/coding-standards/SKILL.md`: Coding Standards skills
-- `./claude/skills/deployment-patterns/SKILL.md`: Deployment Pattern skills
-- `./claude/skills/frontend-patterns/SKILL.md`: Frontend Patterns skills
-- `./claude/skills/python-patterns/SKILL.md`: Python Patterns
-- `./claude/skills/python-testing/SKILL.md`: Python Testing skills
-- `./claude/skills/tdd-workflow/SKILL.md`: Test Driven Development workflow
+Constructor injection via `Container` (`container.py`). No DI framework. No service locator pattern beyond `Container`.
 
+### Table Model
 
-## Architecture
+Use `QAbstractTableModel` + `QSortFilterProxyModel` for all data tables. Never use `QTableWidget`.
 
-The project is organized into several core components:
+### Filter State
 
-- **agents/** - Specialized subagents for delegation (planner, code-reviewer, tdd-guide, etc.)
-- **skills/** - Workflow definitions and domain knowledge (coding standards, patterns, testing)
-- **commands/** - Slash commands invoked by users (/tdd, /plan, /e2e, etc.)
-- **hooks/** - Trigger-based automations (session persistence, pre/post-tool hooks)
-- **rules/** - Always-follow guidelines (security, coding style, testing requirements)
-- **scripts/** - Cross-platform Node.js utilities for hooks and setup
-- **tests/** - Test suite for scripts and utilities
+`ColumnFilterWidget` owns a single-source-of-truth `FilterState`. The popup is a pure view — it holds no permanent state. Read `src/Loan Manager/docs/filter_architecture.md` before touching filter code.
 
-## Key Commands
+### Date Picker
 
-- `/tdd` - Test-driven development workflow
-- `/plan` - Implementation planning
-- `/code-review` - Quality review
-- `/build-fix` - Fix build errors
-- `/learn` - Extract patterns from sessions
-- `/skill-create` - Generate skills from git history
+Use `setCalendarPopup(True)` + `QTimer.singleShot(0, showPopup)` for date picker activation. Never call `showCalendarWidget()` — it does not exist in PySide6.
 
-## Development Notes
+### Theme
 
-- Package manager detection: npm, pnpm, yarn, bun (configurable via `CLAUDE_PACKAGE_MANAGER` env var or project config)
-- Cross-platform: Windows, macOS, Linux support via Node.js scripts
-- Agent format: Markdown with YAML frontmatter (name, description, tools, model)
-- Skill format: Markdown with clear sections for when to use, how it works, examples
-- Hook format: JSON with matcher conditions and command/notification hooks
+All colours come from `ThemeManager` + JSON config files (`dark_config.json`, `light_config.json`). Never hardcode hex colour values in UI code.
 
-## Contributing
+---
 
-Follow the formats in CONTRIBUTING.md:
-- Agents: Markdown with frontmatter (name, description, tools, model)
-- Skills: Clear sections (When to Use, How It Works, Examples)
-- Commands: Markdown with description frontmatter
-- Hooks: JSON with matcher and hooks array
+## Coding Conventions
 
-File naming: lowercase with hyphens (e.g., `python-reviewer.md`, `tdd-workflow.md`)
+- PEP 8 style. 
+- File naming: lowercase with underscores (`interest_calculator.py`, `loan_table_model.py`).
+- Agent/skill file naming: lowercase with hyphens (`python-reviewer.md`, `tdd-workflow.md`).
+- Normalise `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group` to lowercase at write time.
+- All monetary amounts are non-negative integers (whole INR rupees). Enforce via `Money` value object or Pydantic `Field(ge=0)`.
+- Use `from __future__ import annotations` at the top of every module.
+- Use `Optional[X]` or `X | None` consistently — prefer `Optional[X]` for dataclass fields, `X | None` for type hints in function signatures.
+- Dataclasses for domain entities. Pydantic `BaseModel` for DTOs. Do not mix.
+- Frozen dataclasses for value objects (`@dataclass(frozen=True)`).
+- Use cases are classes with an `execute()` method. One use case per file.
+- Repository methods return domain entities, not ORM models. Map in the repository implementation.
+- Log via `get_logger(__name__)` from `infrastructure/logging/logger.py`. No `print()` in production code.
 
+---
+
+## Business Rules (Authoritative)
+
+These override any conflicting implementation. If code disagrees with these, the code is wrong.
+
+- `giving_date` is **never** used in interest or time-period calculations. Only `extension_period` counts.
+- Monthly interest: `(amount * rate * months) / 1200`
+- Daily interest: `(amount * rate * days) / 36500`
+- Commission uses the same formula as interest but with `commission_rate`.
+- TDS: `0.1 * interest_amount` (when `tds_flag` is true).
+- CHQ: `interest_amount - tds_amount`.
+- Status on startup: `RecomputeAllStatuses` runs on every app launch, overriding persisted status.
+- Status rules (evaluated in order): `giving_date > today` → Pending; `due_date is None` → Overdue; `today < due_date` → Active; else → Overdue.
+- Extend overwrites the record: `new giving_date = old due_date`, `new due_date = old due_date + extension_period`. History loss is accepted.
+- Paidoff: `extension_period(days) = paidoff_date - due_date`. Report generated in Daily mode. On approval, loan archived to `loan_history`, marked `is_active=False`.
+- ByMonth filter excludes records without `due_date`. All other filters include them if matching.
+- `report_records` stores snapshots of loan data at report time, not live references.
+
+---
+
+## Testing Requirements
+
+- **Coverage target**: 85% minimum. Current: 89%.
+- Run tests: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
+- Domain services must have 100% unit test coverage.
+- Test against in-memory SQLite (`sqlite:///:memory:`) for integration tests.
+- Validate filter logic with sample data checkpoints: `bg3` → 2 records (b3, b4); `dg3` → 4 records (b6, b7, b8, b9).
+- Every new use case must have a corresponding test file.
+- Every bug fix must include a regression test that would have caught the bug.
+- No UI tests in prototype scope — verify UI changes manually or via code review.
+- Run the full test suite before any commit. Do not commit with failing tests.
+
+---
+
+## Explicit Prohibitions
+
+- **Do not** hardcode API keys or secrets. Use `.env` files.
+- **Do not** modify files under `.claude/skills/tools/*`.
+- **Do not** use `QTableWidget` for data tables. Use `QAbstractTableModel`.
+- **Do not** call `showCalendarWidget()`. It does not exist.
+- **Do not** hardcode hex colours in presentation code. Use `ThemeManager`.
+- **Do not** use `float` for monetary values. Use `Decimal`.
+- **Do not** use `giving_date` in any interest or time calculation.
+- **Do not** import `PySide6` in domain or application layers.
+- **Do not** import `sqlalchemy` in domain or presentation layers.
+- **Do not** put business logic in presentation layer code.
+- **Do not** access repositories directly from presentation — go through use cases.
+- **Do not** use `datetime.utcnow()` — it is deprecated in Python 3.12+. Use `datetime.now(timezone.utc)`.
+- **Do not** leverage previous run's output as context for a new run.
+- **Do not** make assumptions without evidence. Mark uncertain decisions as `[REVIEW REQUIRED]`.
+- **Do not** skip the stage-gate approval process. Every stage must STOP and await `PROCEED` or `PROCEED WITH MODIFICATIONS`.
+- **Do not** commit `.DS_Store`, `__pycache__/`, `.coverage`, `*.pyc`, or `data/loans.db` to git.
+
+---
 
 ## File Structure
-- `/input/*`: Inputs for reaching a deterministic output.
-- `/output/*`: Outputs stored here.
-- `/output/<Title>/<run_order>/*`: Audit report outputs stored for each run on the input for `[Title]` as per `/input/REQUIREMENTS.md`.
-- `/output/<Title>/<run_order>/skill_outputs/*`: The outputs generated by skill experts.
-- `./claude/tools/*`: Reference snippets and documentations.
-- `/src/<Title>/*`: Core codebase for the requirement (should populate only when in Implement Stage).
-- `/src/main.py`: The main agent loop basic.
 
-## Development Commands
-- **Dev**: `python`
+```
+/input/*                          Requirements and prompt specs (read-only reference)
+/output/<Title>/<run_order>/*     Design artifacts per run (ARD, WIKI, FINAL_REVIEW, docs/)
+/src/<Title>/*                    Source code (populated during implementation stages)
+/.claude/agents/*                 Subagent definitions (markdown + YAML frontmatter)
+/.claude/skills/*                 Skill definitions (markdown)
+/.claude/tools/*                  Reference snippets (do not modify)
+```
 
-## Coding Conventions:
-- Use PEP8 for python styling
+### Loan Manager Source (`/src/Loan Manager/loan_manager/`)
 
-## Constraints
-- Do not modify any code in `./claude/skills/tools/*`
-- Do not make unnecessary assumptions, whenever in doubt always mark the decision as [REVIEW REQUIRED] 
-- Do not leverage previous run's output into the context.
+```
+main.py              Entry point: logging → recovery check → DB init → status recompute → UI launch
+config.py            All path constants: DATA_DIR, DB_PATH, LOG_FILE, RECOVERY_FILE, etc.
+container.py         DI wiring: Container class
+domain/              Layer 1: entities, value_objects, services, repositories (interfaces), events
+application/         Layer 2: use_cases/, dtos/, interfaces/unit_of_work.py, event_bus.py
+infrastructure/      Layer 3: database/ (ORM models, session, UoW), repositories/ (implementations),
+                              csv/ (import/export), recovery/, logging/, migrations/
+presentation/        Layer 4: main_window, tabs/, dialogs/, widgets/, view_models/, themes/
+```
+
+---
+
+## Available Agents
+
+- `.claude/agents/architect.md` — Architecture decisions
+- `.claude/agents/build-error-resolver.md` — Fix build errors
+- `.claude/agents/code-reviewer.md` — Code quality review
+- `.claude/agents/doc-updater.md` — Documentation updates
+- `.claude/agents/loop-operator.md` — Orchestrates child agents and skills (starter agent)
+- `.claude/agents/planner.md` — Implementation planning
+- `.claude/agents/python-reviewer.md` — Python-specific review
+- `.claude/agents/refactor-cleaner.md` — Refactoring and cleanup
+- `.claude/agents/security-reviewer.md` — Security review
+- `.claude/agents/tdd-guide.md` — Test-driven development guidance
+
+## Skills
+
+See `.claude/skills/*/SKILL.md` for full list. Key categories:
+- **Role agents**: pm, po, bsa, sa, dev-lead, backend-dev, frontend-dev, backend-qa, frontend-qa, qa-lead, uat, sre, dm
+- **Pattern skills**: backend-patterns, frontend-patterns, python-patterns, coding-standards, deployment-patterns
+- **Process skills**: tdd-workflow, python-testing, agentic-engineering, ai-first-engineering
+
+## Commands
+
+- `/tdd` — Test-driven development workflow
+- `/plan` — Implementation planning
+- `/code-review` — Quality review
+- `/build-fix` — Fix build errors
+- `/learn` — Extract patterns from sessions
+- `/skill-create` — Generate skills from git history
+
+---
+
+## Development Workflow
+
+1. **Explore** → Read WIKI, ARD, and relevant source before changing anything.
+2. **Plan** → For non-trivial changes, use `/plan` or enter plan mode. Get approval.
+3. **Implement** → Small, atomic changes. One concern per commit.
+4. **Test** → Run full suite. Add regression test for every fix.
+5. **Review** → Run `/code-review` before requesting human review.
+6. **Stage-gate** → If working within a staged run, STOP after each stage. Await approval.

@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; background: #0b0e13; font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #e0a336; text-decoration: none; }
+    a:hover { color: #f0b850; }
+    .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  </style>
+</helmet>
+
+<div style="display: flex; flex-direction: column; width: 1440px; min-height: 1180px; background: #0b0e13; color: #e8eef5;">
+
+  <!-- HEADER -->
+  <header style="display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 28px; border-bottom: 1px solid #1b2430; background: #0d1117;">
+    <div style="display: flex; align-items: center; gap: 11px;">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.8"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="3.4"/></svg>
+      <h1 style="margin: 0; font-size: 15.5px; font-weight: 600; letter-spacing: -0.2px;">Ask FinHive</h1>
+      <span style="font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 5px; background: rgba(74,222,128,0.12); color: #4ade80; border: 1px solid rgba(74,222,128,0.28);">Read-only tools run instantly · writes need approval</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 11px; color: #5f6f80;">Today</span>
+        <span class="num" style="font-size: 11.5px; color: #97a4b4;">18 turns</span>
+        <span style="color: #2e3948;">·</span>
+        <span class="num" style="font-size: 11.5px; color: #97a4b4;">$0.0041</span>
+      </div>
+      <div style="width: 27px; height: 27px; border-radius: 50%; background: #2a3644; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 600; color: #9fb0c2;">KC</div>
+    </div>
+  </header>
+
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+
+    <!-- CONVERSATION -->
+    <div style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0;">
+      <div style="display: flex; flex-direction: column; gap: 18px; padding: 24px 40px; flex-grow: 1; min-height: 0;">
+
+        <!-- USER MESSAGE -->
+        <div style="display: flex; justify-content: flex-end;">
+          <div style="max-width: 520px; padding: 11px 15px; border-radius: 12px 12px 3px 12px; background: #1d2632; font-size: 13.5px; line-height: 1.5;">
+            what's due this quarter for the sharma group?
+          </div>
+        </div>
+
+        <!-- AGENT REACT TRACE -->
+        <div style="display: flex; gap: 13px;">
+          <div style="flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; background: rgba(224,163,54,0.13); border: 1px solid rgba(224,163,54,0.3); display: flex; align-items: center; justify-content: center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.9"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="3.4"/></svg>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px; flex-grow: 1; min-width: 0;">
+
+            <!-- STEP 1 -->
+            <div style="display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; border-radius: 9px; background: #101620; border: 1px solid #1c2531;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="num" style="font-size: 10px; font-weight: 600; color: #4f5d6e; letter-spacing: 0.5px;">STEP 1</span>
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(147,164,180,0.1); color: #97a4b4;">THOUGHT</span>
+              </div>
+              <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #b8c4d2;">I need loans with a due date in the current quarter, filtered by borrower group. I don't know today's date or the exact group spelling yet.</p>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(74,144,226,0.13); color: #6aa9f0;">ACTION</span>
+                <span class="mono" style="font-size: 11.5px; color: #8b99aa;">get_current_context()</span>
+              </div>
+              <div class="mono" style="font-size: 11px; line-height: 1.6; color: #6b7a8c; padding: 8px 10px; border-radius: 6px; background: #0c1118; border: 1px solid #18202b;">→ { today: "2026-09-07", quarter: "2026-Q3", range: ["2026-07-01", "2026-09-30"] }</div>
+            </div>
+
+            <!-- STEP 2 -->
+            <div style="display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; border-radius: 9px; background: #101620; border: 1px solid #1c2531;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="num" style="font-size: 10px; font-weight: 600; color: #4f5d6e; letter-spacing: 0.5px;">STEP 2</span>
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(147,164,180,0.1); color: #97a4b4;">THOUGHT</span>
+              </div>
+              <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #b8c4d2;">"sharma group" isn't a stored value. I'll resolve it to a canonical borrower group before querying, otherwise the filter returns nothing.</p>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(74,144,226,0.13); color: #6aa9f0;">ACTION</span>
+                <span class="mono" style="font-size: 11.5px; color: #8b99aa;">resolve_entity(field="borrower_group", query="sharma")</span>
+              </div>
+              <div class="mono" style="font-size: 11px; line-height: 1.6; color: #6b7a8c; padding: 8px 10px; border-radius: 6px; background: #0c1118; border: 1px solid #18202b;">→ { matches: ["sharma_traders"], confidence: 0.94 }</div>
+            </div>
+
+            <!-- STEP 3 -->
+            <div style="display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; border-radius: 9px; background: #101620; border: 1px solid #1c2531;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="num" style="font-size: 10px; font-weight: 600; color: #4f5d6e; letter-spacing: 0.5px;">STEP 3</span>
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(147,164,180,0.1); color: #97a4b4;">THOUGHT</span>
+              </div>
+              <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #b8c4d2;">I have both filters now. Querying.</p>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                <span style="font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(74,144,226,0.13); color: #6aa9f0;">ACTION</span>
+                <span class="mono" style="font-size: 11.5px; color: #8b99aa;">query_loans(borrower_group="sharma_traders", due_date_from="2026-07-01", due_date_to="2026-09-30")</span>
+              </div>
+              <div class="mono" style="font-size: 11px; line-height: 1.6; color: #6b7a8c; padding: 8px 10px; border-radius: 6px; background: #0c1118; border: 1px solid #18202b;">→ { count: 4, total_amount: 185000, overdue: 2 }</div>
+            </div>
+
+            <!-- FINAL ANSWER -->
+            <div style="display: flex; flex-direction: column; gap: 11px; padding: 15px 16px; border-radius: 9px; background: #12171f; border: 1px solid #232c38;">
+              <p style="margin: 0; font-size: 13.5px; line-height: 1.6;">Sharma Traders has <strong style="font-weight: 600;">4 loans</strong> due in Q3 2026, totalling <strong class="num" style="font-weight: 600;">₹1,85,000</strong>. Two are already overdue:</p>
+
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: grid; grid-template-columns: 108px minmax(0,1fr) 92px 84px; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 7px; background: #0f141b; border: 1px solid #1a222d;">
+                  <span class="num" style="font-size: 11.5px; color: #8b99aa;">2026_03_004</span>
+                  <span style="font-size: 12.5px;">Meera Iyer</span>
+                  <span class="num" style="font-size: 12px; text-align: right;">₹45,000</span>
+                  <span style="font-size: 10.5px; font-weight: 600; text-align: center; padding: 3px 8px; border-radius: 5px; background: rgba(179,22,29,0.16); color: #f87171; border: 1px solid rgba(179,22,29,0.42);">12 Aug</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 108px minmax(0,1fr) 92px 84px; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 7px; background: #0f141b; border: 1px solid #1a222d;">
+                  <span class="num" style="font-size: 11.5px; color: #8b99aa;">2026_03_009</span>
+                  <span style="font-size: 12.5px;">Anil Kapoor</span>
+                  <span class="num" style="font-size: 12px; text-align: right;">₹60,000</span>
+                  <span style="font-size: 10.5px; font-weight: 600; text-align: center; padding: 3px 8px; border-radius: 5px; background: rgba(179,22,29,0.16); color: #f87171; border: 1px solid rgba(179,22,29,0.42);">28 Aug</span>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 4px; border-top: 1px solid #1b2430;">
+                <div style="display: flex; align-items: center; gap: 11px;">
+                  <span class="num" style="font-size: 10.5px; color: #4f5d6e;">4 steps · 2,840 + 310 tok · $0.00019 · 2.1s</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: #5f6f80;">Helpful?</span>
+                  <button style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid #232c38; background: #151b23; cursor: pointer;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b7a8c" stroke-width="1.9"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4.5-7a2.5 2.5 0 0 1 3.6 3.2L14 10h5.2a2 2 0 0 1 2 2.4l-1.4 7a2 2 0 0 1-2 1.6H7"/></svg>
+                  </button>
+                  <button style="display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid #232c38; background: #151b23; cursor: pointer;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b7a8c" stroke-width="1.9" transform="rotate(180)"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4.5-7a2.5 2.5 0 0 1 3.6 3.2L14 10h5.2a2 2 0 0 1 2 2.4l-1.4 7a2 2 0 0 1-2 1.6H7"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECOND USER MESSAGE -->
+        <div style="display: flex; justify-content: flex-end;">
+          <div style="max-width: 520px; padding: 11px 15px; border-radius: 12px 12px 3px 12px; background: #1d2632; font-size: 13.5px; line-height: 1.5;">
+            extend those two by one month
+          </div>
+        </div>
+
+        <!-- PROPOSAL CARD -->
+        <div style="display: flex; gap: 13px;">
+          <div style="flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; background: rgba(224,163,54,0.13); border: 1px solid rgba(224,163,54,0.3); display: flex; align-items: center; justify-content: center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.9"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="3.4"/></svg>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 11px; flex-grow: 1; padding: 15px 16px; border-radius: 9px; background: #16140f; border: 1px solid rgba(224,163,54,0.32);">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="1.9"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+              <span style="font-size: 13px; font-weight: 600;">2 changes prepared — nothing has been saved</span>
+            </div>
+            <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #b8c4d2;">I've queued these as a proposal. Review the exact before-and-after, then approve to apply both together.</p>
+
+            <div style="display: flex; flex-direction: column; gap: 7px;">
+              <div style="display: grid; grid-template-columns: 108px minmax(0,1fr) 20px minmax(0,1fr); align-items: center; gap: 10px; padding: 9px 12px; border-radius: 7px; background: #0f141b; border: 1px solid #1a222d;">
+                <span class="num" style="font-size: 11.5px; color: #8b99aa;">2026_03_004</span>
+                <span class="num" style="font-size: 11.5px; color: #f87171; text-decoration: line-through;">due 2026-08-12</span>
+                <span style="font-size: 12px; color: #4f5d6e; text-align: center;">→</span>
+                <span class="num" style="font-size: 11.5px; color: #4ade80;">due 2026-09-12</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 108px minmax(0,1fr) 20px minmax(0,1fr); align-items: center; gap: 10px; padding: 9px 12px; border-radius: 7px; background: #0f141b; border: 1px solid #1a222d;">
+                <span class="num" style="font-size: 11.5px; color: #8b99aa;">2026_03_009</span>
+                <span class="num" style="font-size: 11.5px; color: #f87171; text-decoration: line-through;">due 2026-08-28</span>
+                <span style="font-size: 12px; color: #4f5d6e; text-align: center;">→</span>
+                <span class="num" style="font-size: 11.5px; color: #4ade80;">due 2026-09-28</span>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 9px; padding-top: 3px;">
+              <button style="display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border-radius: 7px; border: none; background: {{accent}}; color: #17130a; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#17130a" stroke-width="2.4"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+                Review in Approvals
+              </button>
+              <button style="height: 32px; padding: 0 14px; border-radius: 7px; border: 1px solid #2b3543; background: transparent; color: #97a4b4; font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;">Discard</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPOSER -->
+      <div style="padding: 0 40px 22px 40px;">
+        <div style="display: flex; align-items: center; gap: 11px; height: 46px; padding: 0 8px 0 16px; border-radius: 10px; background: #12171f; border: 1px solid #232c38;">
+          <span style="flex-grow: 1; font-size: 13.5px; color: #4f5d6e;">Ask about your loans, or describe a change…</span>
+          <span style="font-size: 10.5px; color: #3d4854; padding-right: 4px;">PII masked before any model call</span>
+          <button style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 7px; border: none; background: {{accent}}; cursor: pointer;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#17130a" stroke-width="2.2"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- INSPECTOR -->
+    <aside style="display: flex; flex-direction: column; gap: 15px; width: 300px; flex-shrink: 0; padding: 22px 20px; border-left: 1px solid #1b2430; background: #0d1117;">
+
+      <div style="display: flex; flex-direction: column; gap: 11px;">
+        <span style="font-size: 10.5px; color: #5f6f80; letter-spacing: 0.5px; text-transform: uppercase;">This turn</span>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 13px; border-radius: 9px; background: #12171f; border: 1px solid #1e2733;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11.5px; color: #8b99aa;">Model</span>
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">groq/llama-3.3-70b</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11.5px; color: #8b99aa;">Steps</span>
+            <span class="num" style="font-size: 11.5px; color: #b8c4d2;">4 / 6</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11.5px; color: #8b99aa;">Tokens</span>
+            <span class="num" style="font-size: 11.5px; color: #b8c4d2;">3,150</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11.5px; color: #8b99aa;">Cost</span>
+            <span class="num" style="font-size: 11.5px; color: #b8c4d2;">$0.00019</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11.5px; color: #8b99aa;">Latency</span>
+            <span class="num" style="font-size: 11.5px; color: #4ade80;">2.1s</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 11px;">
+        <span style="font-size: 10.5px; color: #5f6f80; letter-spacing: 0.5px; text-transform: uppercase;">Tools available</span>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid #1e2733;">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">query_loans</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(74,222,128,0.12); color: #4ade80;">READ</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid #1e2733;">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">resolve_entity</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(74,222,128,0.12); color: #4ade80;">READ</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid #1e2733;">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">calculate_interest</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(74,222,128,0.12); color: #4ade80;">READ</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid rgba(224,163,54,0.24);">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">extend_loan</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(224,163,54,0.14); color: {{accent}};">PROPOSE</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid rgba(224,163,54,0.24);">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">create_loan</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(224,163,54,0.14); color: {{accent}};">PROPOSE</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-radius: 7px; background: #12171f; border: 1px solid rgba(224,163,54,0.24);">
+            <span class="mono" style="font-size: 11px; color: #b8c4d2;">generate_report</span>
+            <span style="font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(224,163,54,0.14); color: {{accent}};">PROPOSE</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 13px; border-radius: 9px; background: #0f141b; border: 1px solid #1a222d;">
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.9"><path d="M12 21s7-4 7-10V5.8L12 3 5 5.8V11c0 6 7 10 7 10Z"/></svg>
+          <span style="font-size: 11.5px; font-weight: 600; color: #4ade80;">Guardrails active</span>
+        </div>
+        <span style="font-size: 11px; line-height: 1.55; color: #6b7a8c;">Names and account numbers are tokenised before leaving your infrastructure. Write tools can only propose.</span>
+      </div>
+
+      <div style="flex-grow: 1;"></div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900},"accent":{"editor":"color","default":"#e0a336","options":["#e0a336","#3ecf8e","#4a90e2","#c084fc"],"section":"Brand"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#e0a336' };
+  }
+}
+</script>
+</body>
+</html>

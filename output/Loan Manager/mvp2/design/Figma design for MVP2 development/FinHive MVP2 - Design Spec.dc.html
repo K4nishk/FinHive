@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="./ds/styles.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    :root {
+      --dens: 1; --tsc: 1;
+      --s1: calc(5px * var(--dens));
+      --s2: calc(9px * var(--dens));
+      --s3: calc(15px * var(--dens));
+      --s4: calc(24px * var(--dens));
+      --s5: calc(38px * var(--dens));
+      --t-mono: calc(10.5px * var(--tsc));
+      --t-small: calc(11.5px * var(--tsc));
+      --t-body: calc(13.5px * var(--tsc));
+      --t-h3: calc(19px * var(--tsc));
+      --t-h2: calc(36px * var(--tsc));
+      --pbg: #0b0e13; --psurf: #12171f; --pline: #1e2733;
+      --pink: #e8eef5; --pmut: #6b7a8c; --pacc: #e0a336;
+    }
+    body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+    a { color: var(--color-accent-700); text-decoration: none; border-bottom: 1px solid var(--color-accent-300); }
+    a:hover { color: var(--color-accent-800); border-bottom-color: var(--color-accent-600); }
+    @media print {
+      body { background: #fff; }
+      .sheet { break-before: page; break-inside: avoid; }
+      .sheet:first-of-type { break-before: auto; }
+    }
+  </style>
+</helmet>
+
+<div style="width: 1720px; display: flex; flex-direction: column; gap: var(--s5); padding: var(--s5) 40px 80px 40px; box-sizing: border-box;">
+
+  <!-- ═══ COVER ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s5); padding-bottom: var(--s4); border-bottom: 2px solid var(--color-text);">
+      <div style="display: flex; flex-direction: column; gap: var(--s2); max-width: 900px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-feature-settings: 'tnum'; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Design specification · v2.0.0 · draft for review</span>
+        <h1 style="margin: 0; font-family: var(--font-heading); font-weight: 400; font-size: 64px; line-height: 1.02; letter-spacing: -0.01em;">FinHive Loan&nbsp;Manager<br>MVP2 — Interface &amp; Contract Map</h1>
+        <p style="margin: 0; font-size: 15px; line-height: 1.6; color: var(--color-neutral-800); max-width: 760px; text-wrap: pretty;">Three layers over the four pixel screens already built: an annotated screen inventory that names the endpoint and payload behind every visible field, a component map with props and variants, and the token sheet the React theme reads. Every binding cites the ARD section it derives from. Nothing here is code — it is the thing the code is generated from.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--s1); text-align: right; font-family: 'IBM Plex Mono', monospace; font-feature-settings: 'tnum'; font-size: var(--t-small); color: var(--color-neutral-700); white-space: nowrap;">
+        <span>7 screens · 38 bindings</span>
+        <span>31 components · 8 states</span>
+        <span>3 roles · owner / bookkeeper / viewer</span>
+        <span style="color: var(--color-accent-700);">source · mvp2_ard_v2.0.0.md</span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3);">
+      <div style="display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent-700);">§ A</span>
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: var(--t-h3);">Screens &amp; bindings</h3>
+        <p style="margin: 0; font-size: var(--t-small); line-height: 1.55; color: var(--color-neutral-700);">Each screen as a region diagram. Numbered pins resolve to endpoint, request shape, response shape and Pydantic model.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent-700);">§ B</span>
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: var(--t-h3);">Component map</h3>
+        <p style="margin: 0; font-size: var(--t-small); line-height: 1.55; color: var(--color-neutral-700);">The React tree per route — prop signature, owned state, variants, and the contract each component consumes.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent-700);">§ C</span>
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: var(--t-h3);">Token sheet</h3>
+        <p style="margin: 0; font-size: var(--t-small); line-height: 1.55; color: var(--color-neutral-700);">MVP1 status hues carried forward as Chakra semantic tokens, the type scale, and the full component inventory.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent-700);">§ D — E</span>
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: var(--t-h3);">States &amp; roles</h3>
+        <p style="margin: 0; font-size: var(--t-small); line-height: 1.55; color: var(--color-neutral-700);">Eight non-happy paths with their trigger and treatment, then the per-screen owner / bookkeeper / viewer divergence.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION A ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: baseline; gap: var(--s4); padding-bottom: var(--s2); border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-feature-settings: 'tnum'; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Section A</span>
+      <h2 style="margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: var(--t-h2); letter-spacing: -0.01em;">Screen inventory &amp; data bindings</h2>
+      <span style="margin-left: auto; font-size: var(--t-small); font-style: italic; color: var(--color-neutral-700);">Pins are stable identifiers — quote them in review comments.</span>
+    </div>
+
+    <sc-for list="{{ screens }}" as="sc" hint-placeholder-count="3">
+      <div style="display: flex; flex-direction: column; gap: var(--s3); padding-bottom: var(--s4); border-bottom: 1px solid var(--color-divider);">
+
+        <div style="display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;">
+          <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 24px;">{{ sc.title }}</h3>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-body); color: var(--color-accent-700);">{{ sc.route }}</span>
+          <span style="font-size: var(--t-small); color: var(--color-neutral-700);">{{ sc.roles }}</span>
+          <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-600);">{{ sc.ref }}</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 560px minmax(0, 1fr); gap: 32px; align-items: start;">
+
+          <!-- wireframe frame -->
+          <div style="display: flex; flex-direction: column; gap: var(--s2);">
+            <div style="display: flex; gap: 0; background: var(--pbg); border: 1px solid var(--pline); border-radius: var(--radius-md); overflow: hidden;">
+              <sc-if value="{{ sc.rail }}" hint-placeholder-val="{{ true }}">
+                <div style="width: 74px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 8px; background: #0e1218; border-right: 1px solid var(--pline);">
+                  <div style="height: 8px; border-radius: 2px; background: var(--pacc); opacity: 0.7;"></div>
+                  <div style="height: 6px; border-radius: 2px; background: var(--pline);"></div>
+                  <div style="height: 6px; border-radius: 2px; background: var(--pline);"></div>
+                  <div style="height: 6px; border-radius: 2px; background: var(--pline);"></div>
+                  <div style="height: 6px; border-radius: 2px; background: var(--pline);"></div>
+                </div>
+              </sc-if>
+              <div style="flex-grow: 1; min-width: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; padding: 12px;">
+                <sc-for list="{{ sc.blocks }}" as="bl" hint-placeholder-count="4">
+                  <div style="grid-column: span {{ bl.span }}; min-height: {{ bl.h }}px; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 9px; box-sizing: border-box; border: 1px dashed {{ bl.stroke }}; border-radius: 3px; background: var(--psurf);">
+                    <span style="font-size: 10.5px; font-weight: 500; line-height: 1.3; color: var(--pink);">{{ bl.label }}</span>
+                    <sc-if value="{{ bl.note }}" hint-placeholder-val="{{ true }}">
+                      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; line-height: 1.35; color: var(--pmut);">{{ bl.note }}</span>
+                    </sc-if>
+                    <sc-if value="{{ bl.pin }}" hint-placeholder-val="{{ true }}">
+                      <span style="position: absolute; top: -7px; right: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--pacc); color: #17130a; font-family: 'IBM Plex Mono', monospace; font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center;">{{ bl.pin }}</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <span style="font-size: var(--t-small); font-style: italic; line-height: 1.5; color: var(--color-neutral-700); text-wrap: pretty;">{{ sc.caption }}</span>
+          </div>
+
+          <!-- bindings -->
+          <div style="display: flex; flex-direction: column;">
+            <div style="display: grid; grid-template-columns: 26px 158px 214px minmax(0, 1fr) 176px; gap: 14px; padding: 0 0 6px 0; border-bottom: 1px solid var(--color-text);">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">#</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Element</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Endpoint</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Request → response</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Pydantic model</span>
+            </div>
+            <sc-for list="{{ sc.bindings }}" as="bd" hint-placeholder-count="5">
+              <div style="display: grid; grid-template-columns: 26px 158px 214px minmax(0, 1fr) 176px; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--color-divider); align-items: start;">
+                <span style="width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--color-accent); color: var(--color-accent-700); font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; font-weight: 600; display: flex; align-items: center; justify-content: center;">{{ bd.pin }}</span>
+                <span style="font-size: var(--t-small); line-height: 1.45; color: var(--color-text);">{{ bd.el }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.5; color: var(--color-accent-800); word-break: break-all;">{{ bd.ep }}</span>
+                <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.5; color: var(--color-neutral-800); word-break: break-word;">{{ bd.req }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.5; color: var(--color-neutral-600); word-break: break-word;">{{ bd.res }}</span>
+                </div>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.5; color: var(--color-text); word-break: break-word;">{{ bd.model }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; padding: var(--s3); border: 1px solid var(--color-accent-300); border-radius: var(--radius-md); background: var(--color-accent-100);">
+      <div style="display: flex; flex-direction: column; gap: var(--s2);">
+        <h4 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 17px;">SSE event contract — <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px;">POST /api/agent/stream</span></h4>
+        <sc-for list="{{ traceEvents }}" as="ev" hint-placeholder-count="6">
+          <div style="display: grid; grid-template-columns: 106px minmax(0, 1fr); gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--color-accent-200);">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); font-weight: 600; color: var(--color-accent-800);">{{ ev.name }}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.5; color: var(--color-neutral-800);">{{ ev.shape }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--s2);">
+        <h4 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 17px;">Agent tool registry — drives the approval gate</h4>
+        <sc-for list="{{ tools }}" as="tl" hint-placeholder-count="9">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 74px 82px; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--color-accent-200); align-items: baseline;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-text);">{{ tl.name }}</span>
+            <span style="font-size: var(--t-mono); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: {{ tl.mutColor }};">{{ tl.mut }}</span>
+            <span style="font-size: var(--t-mono); color: var(--color-neutral-700);">{{ tl.role }}</span>
+          </div>
+        </sc-for>
+        <span style="font-size: var(--t-small); font-style: italic; line-height: 1.55; color: var(--color-neutral-800); text-wrap: pretty;">A mutating tool never reaches the domain use case. The dispatcher writes a <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono);">proposed_mutations</span> row and returns a proposal receipt — §12.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION B ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: baseline; gap: var(--s4); padding-bottom: var(--s2); border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Section B</span>
+      <h2 style="margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: var(--t-h2); letter-spacing: -0.01em;">Component map</h2>
+      <span style="margin-left: auto; font-size: var(--t-small); font-style: italic; color: var(--color-neutral-700);">Shared components appear once, under the route that owns them.</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px;">
+      <sc-for list="{{ trees }}" as="tr" hint-placeholder-count="4">
+        <div style="display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+          <div style="display: flex; align-items: baseline; gap: var(--s2); padding-bottom: var(--s1); border-bottom: 1px solid var(--color-text);">
+            <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 20px;">{{ tr.title }}</h3>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-accent-700);">{{ tr.route }}</span>
+          </div>
+          <sc-for list="{{ tr.items }}" as="cp" hint-placeholder-count="5">
+            <div style="display: flex; flex-direction: column; gap: 3px; padding: 7px 0 7px {{ cp.indent }}px; border-bottom: 1px solid var(--color-divider);">
+              <div style="display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-body); font-weight: 600; color: var(--color-text);">{{ cp.name }}</span>
+                <sc-if value="{{ cp.variants }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-size: var(--t-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-accent-700);">{{ cp.variants }}</span>
+                </sc-if>
+              </div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.55; color: var(--color-neutral-800); word-break: break-word;">{{ cp.props }}</span>
+              <sc-if value="{{ cp.state }}" hint-placeholder-val="{{ true }}">
+                <span style="font-size: var(--t-mono); line-height: 1.5; color: var(--color-neutral-600);">{{ cp.state }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION C ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: baseline; gap: var(--s4); padding-bottom: var(--s2); border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Section C</span>
+      <h2 style="margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: var(--t-h2); letter-spacing: -0.01em;">Token sheet &amp; inventory</h2>
+      <span style="margin-left: auto; font-size: var(--t-small); font-style: italic; color: var(--color-neutral-700);">No hardcoded hex in components — the MVP1 rule, moved to Chakra tokens.</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; align-items: start;">
+
+      <div style="display: flex; flex-direction: column; gap: var(--s3);">
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 20px;">Status semantic tokens</h3>
+        <sc-for list="{{ statusTokens }}" as="st" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr) 96px 96px; gap: 14px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--color-divider);">
+            <span style="height: 26px; border-radius: var(--radius-sm); background: {{ st.dark }}; border: 1px solid var(--color-divider);"></span>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-small); color: var(--color-text);">{{ st.token }}</span>
+              <span style="font-size: var(--t-mono); color: var(--color-neutral-700);">{{ st.use }}</span>
+            </div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-neutral-800);">{{ st.light }}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-neutral-800);">{{ st.dark }}</span>
+          </div>
+        </sc-for>
+        <span style="font-size: var(--t-small); font-style: italic; line-height: 1.55; color: var(--color-neutral-800); text-wrap: pretty;">Left column is MVP1's <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono);">dark_config.json</span> value, kept as the light-mode default; right is the dark re-tint. Amber marks provenance, not status: anything the agent originated carries it.</span>
+
+        <h3 style="margin: var(--s3) 0 0 0; font-family: var(--font-heading); font-weight: 600; font-size: 20px;">Type scale</h3>
+        <sc-for list="{{ typeScale }}" as="ty" hint-placeholder-count="6">
+          <div style="display: grid; grid-template-columns: 130px 92px minmax(0, 1fr); gap: 14px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--color-divider);">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-accent-800);">{{ ty.token }}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-feature-settings: 'tnum'; font-size: var(--t-mono); color: var(--color-neutral-700);">{{ ty.spec }}</span>
+            <span style="font-size: var(--t-small); color: var(--color-neutral-800);">{{ ty.use }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: var(--s3);">
+        <h3 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 20px;">Component inventory</h3>
+        <sc-for list="{{ inventory }}" as="iv" hint-placeholder-count="10">
+          <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--color-divider);">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-small); font-weight: 500; color: var(--color-text);">{{ iv.name }}</span>
+            <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800);">{{ iv.variants }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION D ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: baseline; gap: var(--s4); padding-bottom: var(--s2); border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Section D</span>
+      <h2 style="margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: var(--t-h2); letter-spacing: -0.01em;">Non-happy states</h2>
+      <span style="margin-left: auto; font-size: var(--t-small); font-style: italic; color: var(--color-neutral-700);">Every one of these is a designed screen, not an exception handler.</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 148px 176px 250px minmax(0, 1fr) 250px; gap: 16px; padding-bottom: 6px; border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">State</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Screens</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Trigger</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Treatment</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Contract signal</span>
+    </div>
+    <sc-for list="{{ states }}" as="stt" hint-placeholder-count="8">
+      <div style="display: grid; grid-template-columns: 148px 176px 250px minmax(0, 1fr) 250px; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--color-divider); align-items: start;">
+        <span style="font-size: var(--t-body); font-weight: 500; line-height: 1.4; color: var(--color-text);">{{ stt.name }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.55; color: var(--color-accent-800);">{{ stt.screens }}</span>
+        <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800);">{{ stt.trigger }}</span>
+        <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800); text-wrap: pretty;">{{ stt.treatment }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.55; color: var(--color-neutral-800); word-break: break-word;">{{ stt.signal }}</span>
+      </div>
+    </sc-for>
+  </section>
+
+  <!-- ═══ SECTION E ═══ -->
+  <section class="sheet" style="display: flex; flex-direction: column; gap: var(--s4);">
+    <div style="display: flex; align-items: baseline; gap: var(--s4); padding-bottom: var(--s2); border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700);">Section E</span>
+      <h2 style="margin: 0; font-family: var(--font-heading); font-weight: 500; font-size: var(--t-h2); letter-spacing: -0.01em;">Role variants</h2>
+      <span style="margin-left: auto; font-size: var(--t-small); font-style: italic; color: var(--color-neutral-700);">The UI hides what RLS already refuses. The refusal is the control; the hiding is courtesy.</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 168px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 246px; gap: 18px; padding-bottom: 6px; border-bottom: 1px solid var(--color-text);">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Screen</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Owner</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Bookkeeper</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Viewer</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-700);">Server-side enforcement</span>
+    </div>
+    <sc-for list="{{ roleRows }}" as="rr" hint-placeholder-count="7">
+      <div style="display: grid; grid-template-columns: 168px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 246px; gap: 18px; padding: 11px 0; border-bottom: 1px solid var(--color-divider); align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: var(--t-body); font-weight: 500; color: var(--color-text);">{{ rr.screen }}</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); color: var(--color-accent-700);">{{ rr.route }}</span>
+        </div>
+        <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800);">{{ rr.owner }}</span>
+        <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800);">{{ rr.book }}</span>
+        <span style="font-size: var(--t-small); line-height: 1.5; color: var(--color-neutral-800);">{{ rr.viewer }}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: var(--t-mono); line-height: 1.55; color: var(--color-neutral-800); word-break: break-word;">{{ rr.enforce }}</span>
+      </div>
+    </sc-for>
+
+    <div style="display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s3); padding: var(--s3); border: 1px solid var(--color-divider); border-radius: var(--radius-md);">
+      <h4 style="margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 17px;">Open for your decision before contracts are frozen</h4>
+      <sc-for list="{{ openQs }}" as="q" hint-placeholder-count="4">
+        <div style="display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--color-divider);">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-feature-settings: 'tnum'; font-size: var(--t-small); color: var(--color-accent-700);">{{ q.n }}</span>
+          <span style="font-size: var(--t-small); line-height: 1.6; color: var(--color-neutral-800); text-wrap: pretty;">{{ q.text }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1720},&quot;density&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0.85,&quot;max&quot;:1.25,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Spec sheet&quot;},&quot;typeScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0.9,&quot;max&quot;:1.2,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Spec sheet&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#e0a336&quot;,&quot;options&quot;:[&quot;#e0a336&quot;,&quot;#3ecf8e&quot;,&quot;#4a90e2&quot;,&quot;#c084fc&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Product theme&quot;},&quot;lightScreens&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Product theme&quot;},&quot;kpiSet&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Default — 4 cards&quot;,&quot;options&quot;:[&quot;Default — 4 cards&quot;,&quot;Compact — 2 cards&quot;,&quot;With agent health — 5 cards&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Screen scope&quot;},&quot;tableColumns&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Full — 8 columns&quot;,&quot;options&quot;:[&quot;Full — 8 columns&quot;,&quot;Money-first — 6 columns&quot;,&quot;Minimal — 4 columns&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Screen scope&quot;},&quot;traceVerbosity&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;Full — thought · action · observation&quot;,&quot;options&quot;:[&quot;Full — thought · action · observation&quot;,&quot;Actions + observations only&quot;,&quot;Final answer only&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Screen scope&quot;}}">
+const GOLD = '#7d5411', GREY = '#7d7979';
+
+const TOOLS = [
+  ['get_current_context', 0, 'viewer'],
+  ['resolve_entity', 0, 'viewer'],
+  ['query_loans', 0, 'viewer'],
+  ['get_portfolio_summary', 0, 'viewer'],
+  ['calculate_interest', 0, 'viewer'],
+  ['create_loan', 1, 'bookkeeper'],
+  ['update_loan', 1, 'bookkeeper'],
+  ['extend_loan', 1, 'bookkeeper'],
+  ['generate_report', 1, 'bookkeeper']
+];
+
+const TRACE_EVENTS = [
+  { name: 'thought', shape: '{ step: int, text: str }', kind: 'reason' },
+  { name: 'action', shape: '{ step: int, tool: str, args: dict }', kind: 'act' },
+  { name: 'observation', shape: '{ step: int, data: dict, ms: int }', kind: 'act' },
+  { name: 'proposal', shape: '{ batch_id: uuid, count: int, operation: str }', kind: 'final' },
+  { name: 'final', shape: '{ answer: str, metrics: TurnMetrics }', kind: 'final' },
+  { name: 'error', shape: '{ code: str, message: str, recoverable: bool }', kind: 'final' }
+];
+
+const KPI_SETS = {
+  'Default — 4 cards': ['Total outstanding', 'Active loans', 'Overdue', 'Due this quarter'],
+  'Compact — 2 cards': ['Total outstanding', 'Overdue'],
+  'With agent health — 5 cards': ['Total outstanding', 'Active loans', 'Overdue', 'Due this quarter', 'Proposal approval rate']
+};
+
+const COL_SETS = {
+  'Full — 8 columns': 'ref · borrower · group · depositor · amount · giving · due · status',
+  'Money-first — 6 columns': 'ref · borrower · amount · interest · due · status',
+  'Minimal — 4 columns': 'ref · borrower · amount · status'
+};
+
+class Component extends DCLogic {
+  componentDidMount() { this.applyVars(); }
+  componentDidUpdate() { this.applyVars(); }
+
+  applyVars() {
+    const r = document.documentElement.style;
+    r.setProperty('--dens', String(this.props.density ?? 1));
+    r.setProperty('--tsc', String(this.props.typeScale ?? 1));
+    r.setProperty('--pacc', this.props.accent ?? '#e0a336');
+    if (this.props.lightScreens) {
+      r.setProperty('--pbg', '#f7f6f4');
+      r.setProperty('--psurf', '#ffffff');
+      r.setProperty('--pline', '#dcd8d2');
+      r.setProperty('--pink', '#201f1d');
+      r.setProperty('--pmut', '#7d7979');
+    } else {
+      r.setProperty('--pbg', '#0b0e13');
+      r.setProperty('--psurf', '#12171f');
+      r.setProperty('--pline', '#1e2733');
+      r.setProperty('--pink', '#e8eef5');
+      r.setProperty('--pmut', '#6b7a8c');
+    }
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#e0a336';
+    const kpis = KPI_SETS[this.props.kpiSet] ?? KPI_SETS['Default — 4 cards'];
+    const cols = COL_SETS[this.props.tableColumns] ?? COL_SETS['Full — 8 columns'];
+    const verbosity = this.props.traceVerbosity ?? 'Full — thought · action · observation';
+
+    const keep = verbosity.indexOf('Full') === 0
+      ? ['reason', 'act', 'final']
+      : verbosity.indexOf('Actions') === 0
+        ? ['act', 'final']
+        : ['final'];
+    const traceEvents = TRACE_EVENTS.filter(e => keep.indexOf(e.kind) >= 0);
+
+    const B = (pin, el, ep, req, res, model) => ({ pin, el, ep, req, res, model });
+    const bl = (label, span, h, opts) => Object.assign(
+      { label, span, h, pin: '', note: '', stroke: '#2a3644' }, opts || {}
+    );
+
+    const kpiBlocks = kpis.map((k, i) => bl(
+      k, Math.max(2, Math.round(12 / kpis.length)), 52,
+      i === 0 ? { pin: 1, note: 'KpiCard', stroke: accent } : { note: 'KpiCard' }
+    ));
+
+    const screens = [
+      {
+        id: 'login', title: 'Login & session', route: '/login', roles: 'public — resolves to a role',
+        ref: 'ARD §8', rail: false,
+        caption: 'The only screen without the app shell. Role resolution happens here, once, and is cached in the AuthProvider for every later screen.',
+        blocks: [
+          bl('Brand plate + product line', 12, 46),
+          bl('Email / password form', 7, 118, { pin: 1, note: 'AuthForm · idle | submitting | error', stroke: accent }),
+          bl('Org & role bootstrap (post-auth)', 5, 118, { pin: 2, note: 'AuthProvider effect' }),
+          bl('Silent refresh + 401 interceptor', 12, 40, { pin: 3, note: 'no visible UI — behaviour contract' })
+        ],
+        bindings: [
+          B(1, 'Sign in', 'supabase.auth.signInWithPassword', '{ email: str, password: str }', '→ { access_token, refresh_token, expires_at, user }', 'SessionDTO (SDK type, not FastAPI)'),
+          B(2, 'Role + org bootstrap', 'GET /api/me', '{} · Bearer JWT', '→ { user_id, org_id, org_name, role, features[] }', 'MeResponse'),
+          B(3, 'Token refresh', 'supabase.auth.refreshSession', '{ refresh_token: str }', '→ SessionDTO | 401', 'SessionDTO')
+        ]
+      },
+      {
+        id: 'dashboard', title: 'Portfolio overview', route: '/dashboard', roles: 'all roles · approvals panel owner-only',
+        ref: 'ARD §15 · screen built', rail: true,
+        caption: 'Four aggregate reads and one write. The KPI strip reads a dbt mart, not the loans table — so a dashboard number and a report number cannot disagree.',
+        blocks: [
+          ...kpiBlocks,
+          bl('Needs attention — overdue & due-soon rows', 7, 138, { pin: 2, note: 'DataTable · compact · 5 rows' }),
+          bl('Ask FinHive entry + suggestion chips', 5, 62, { pin: 3, note: 'AgentTeaser', stroke: accent }),
+          bl('Pending your approval', 5, 72, { pin: 4, note: 'ProposalFeed · owner only', stroke: accent }),
+          bl('Data health — dbt contracts', 4, 44, { pin: 5, note: 'rail footer' }),
+          bl('New loan', 3, 44, { pin: 6, note: 'primary action' }),
+          bl('Global search', 5, 44, { note: 'header · typeahead' })
+        ],
+        bindings: [
+          B(1, 'KPI strip', 'GET /api/portfolio/summary', '?period=quarter&as_of=<date>', '→ { total_outstanding, active_count, borrower_count, overdue_amount, overdue_count, oldest_overdue_days, due_this_period, maturing_count }', 'PortfolioSummaryResponse\n(reads agg_portfolio_summary)'),
+          B(2, 'Needs attention', 'GET /api/loans', '?status=Overdue,DueSoon&sort=due_date&limit=5', '→ { items: LoanSummary[], total: int, totals: LoanTotals }', 'LoanListResponse · LoanSummary'),
+          B(3, 'Suggestion chips', 'GET /api/agent/suggestions', '?surface=dashboard', '→ { items: [{ id, label, prompt }] }', 'SuggestionsResponse'),
+          B(4, 'Pending approvals', 'GET /api/approvals', '?status=pending&limit=3', '→ { items: ProposalSummary[], total: int }', 'ApprovalListResponse'),
+          B(5, 'Data health', 'GET /api/admin/dbt/status', '{}', '→ { passed: int, total: int, last_run_at: datetime, failing[] }', 'DbtStatusResponse'),
+          B(6, 'New loan', 'POST /api/loans', '{ borrower_name, borrower_group, depositor_name, depositor_group, amount, giving_date, due_period }', '→ 201 { loan: LoanDetail } | 422', 'LoanCreateRequest → LoanResponse')
+        ]
+      },
+      {
+        id: 'loans', title: 'Loans table', route: '/loans', roles: 'all roles · edit hidden for viewer',
+        ref: 'ARD §15 · screen built', rail: true,
+        caption: 'Filter state is the single visible source of truth — MVP1\u2019s most defect-dense area. Applied chips and the restated footer totals mean a wrong filter is obvious rather than silent. Columns: ' + cols + '.',
+        blocks: [
+          bl('Filter chips — applied state, one source of truth', 9, 46, { pin: 2, note: 'FilterChipBar · removable', stroke: accent }),
+          bl('Column picker', 3, 46, { note: 'persisted per user' }),
+          bl('Table header — ' + cols, 12, 34, { note: 'sortable · sticky' }),
+          bl('Rows — virtualised', 12, 92, { pin: 1, note: 'LoanRow · default | editing | saving | error' }),
+          bl('Inline date edit — row 3', 7, 46, { pin: 3, note: 'optimistic patch + rollback', stroke: accent }),
+          bl('Row expand → detail drawer', 5, 46, { pin: 5, note: 'LoanDrawer' }),
+          bl('Footer — filtered totals restated', 8, 40, { pin: 4, note: 'from response.totals' }),
+          bl('Bulk extend selection', 4, 40, { pin: 6, note: 'proposes, never writes', stroke: accent })
+        ],
+        bindings: [
+          B(1, 'Table page', 'GET /api/loans', '?status&borrower_group&due_from&due_to&q&sort&cursor&limit', '→ { items: LoanSummary[], total, totals: LoanTotals, next_cursor }', 'LoanFilterParams → LoanListResponse'),
+          B(2, 'Filter chips', 'GET /api/loans', 'same params — chips are a view of LoanFilterParams', '→ LoanListResponse', 'LoanFilterParams'),
+          B(3, 'Inline date edit', 'PATCH /api/loans/{reference_id}', '{ due_date: date } · If-Match: <version>', '→ 200 { loan: LoanDetail } | 409 stale | 422', 'LoanUpdateRequest → LoanResponse'),
+          B(4, 'Footer totals', '— (same response)', 'no extra call', '→ totals: { count, principal, interest, outstanding }', 'LoanTotals'),
+          B(5, 'Detail drawer', 'GET /api/loans/{reference_id}', '{}', '→ { loan: LoanDetail, history: LoanHistoryEntry[] }', 'LoanDetailResponse'),
+          B(6, 'Bulk extend', 'POST /api/loans/extend', '{ reference_ids: str[], periods: int, reason?: str }', '→ 202 { batch_id, count, status: "pending" }', 'LoanExtendRequest → ProposalBatchResponse')
+        ]
+      },
+      {
+        id: 'chat', title: 'Ask FinHive — ReAct trace', route: '/chat', roles: 'all roles · viewer gets read-only tools',
+        ref: 'ARD §11 · §12 · screen built', rail: true,
+        caption: 'The trace is the product, not a loading state. Step 2 — resolving "sharma group" to sharma_traders before querying — is the whole argument for an agent over a search box.',
+        blocks: [
+          bl('Session list', 3, 150, { pin: 1, note: 'SessionRail' }),
+          bl('Turn thread — user + agent messages', 9, 44, { note: 'MessageList' }),
+          bl('ReAct trace — thought / action / observation', 9, 104, { pin: 3, note: 'TraceStep · ' + verbosity, stroke: accent }),
+          bl('Final answer', 9, 40, { note: 'rehydrated — PII tokens reversed' }),
+          bl('Proposal card — inline diff summary', 9, 52, { pin: 6, note: 'links to /approvals', stroke: accent }),
+          bl('Turn meter — tokens · cost · latency · steps', 6, 40, { pin: 4, note: 'TurnMeter' }),
+          bl('Feedback', 3, 40, { pin: 5, note: 'becomes an eval case' }),
+          bl('Composer', 12, 42, { pin: 2, note: 'idle | streaming | capped', stroke: accent })
+        ],
+        bindings: [
+          B(1, 'Session list', 'GET /api/agent/sessions', '?limit=20', '→ { items: [{ id, title, last_turn_at, turn_count }] }', 'AgentSessionListResponse'),
+          B(2, 'Send message', 'POST /api/agent/stream', '{ session_id: uuid | null, message: str } · SSE response', '→ text/event-stream of ReActEvent (see contract below)', 'AgentTurnRequest → ReActEvent'),
+          B(3, 'Trace steps', '— (from stream)', 'client-side accumulation only', '→ ReActStep { kind, step, tool?, args?, data?, ms? }', 'ReActStep'),
+          B(4, 'Turn meter', '— (final event)', 'no extra call', '→ { prompt_tokens, completion_tokens, cost_usd, latency_ms, steps, model }', 'TurnMetrics'),
+          B(5, 'Feedback', 'POST /api/agent/turns/{turn_id}/feedback', '{ sentiment: "up" | "down", note?: str }', '→ 204', 'FeedbackRequest'),
+          B(6, 'Proposal card', 'GET /api/approvals/{batch_id}', '{}', '→ ProposalDetail (see /approvals)', 'ProposalDetailResponse')
+        ]
+      },
+      {
+        id: 'approvals', title: 'Approval queue — mutation diffs', route: '/approvals', roles: 'all read · approve owner only',
+        ref: 'ARD §12 · screen built', rail: true,
+        caption: 'The diff renders from stored before/after JSONB snapshots — never from the agent\u2019s prose description of what it did. One batch, one Postgres transaction; partial application is impossible.',
+        blocks: [
+          bl('Queue list — pending · approved · rejected', 4, 156, { pin: 1, note: 'ProposalList · tabs' }),
+          bl('Batch header — origin badge AGENT / FORM', 8, 42, { pin: 5, note: 'provenance', stroke: accent }),
+          bl('Field-by-field diff — before → after', 8, 116, { pin: 2, note: 'DiffTable · added | changed | removed', stroke: accent }),
+          bl('Approve batch', 4, 44, { pin: 3, note: 'owner only · hidden otherwise', stroke: accent }),
+          bl('Reject with reason', 4, 44, { pin: 4, note: 'reason required' }),
+          bl('Applied receipt — transaction id + rollback', 8, 42, { pin: 6, note: 'before_state retained' })
+        ],
+        bindings: [
+          B(1, 'Queue list', 'GET /api/approvals', '?status=pending|approved|rejected&cursor', '→ { items: ProposalSummary[], total, next_cursor }', 'ApprovalListResponse · ProposalSummary'),
+          B(2, 'Diff panel', 'GET /api/approvals/{batch_id}', '{}', '→ { batch_id, operation, items: [{ target_ref, before_state, after_state, diff: FieldDiff[] }] }', 'ProposalDetailResponse · FieldDiff'),
+          B(3, 'Approve batch', 'POST /api/approvals/{batch_id}/approve', '{ note?: str }', '→ 200 { applied_ids[], transaction_id, applied_at } | 403 (RLS)', 'ApprovalDecisionRequest → ApprovalResultResponse'),
+          B(4, 'Reject batch', 'POST /api/approvals/{batch_id}/reject', '{ reason: str }', '→ 200 { batch_id, status: "rejected" }', 'ApprovalDecisionRequest'),
+          B(5, 'Origin badge', '— (same response)', 'no extra call', '→ origin: { source: "agent" | "form", turn_id?, actor_id }', 'ProposalOrigin'),
+          B(6, 'Rollback', 'POST /api/approvals/{batch_id}/revert', '{ reason: str }', '→ 200 { transaction_id } — inverts from before_state', 'RevertRequest → ApprovalResultResponse')
+        ]
+      },
+      {
+        id: 'reports', title: 'Reports', route: '/reports', roles: 'generate: owner + bookkeeper · viewer read-only',
+        ref: 'ARD §7 gotcha 1 · §15', rail: true,
+        caption: 'The only screen on the async path. Anything over 100 records writes a job row and returns 202 — the client polls rather than holding a serverless function open.',
+        blocks: [
+          bl('Report list — generated & pending', 4, 148, { pin: 1, note: 'ReportList' }),
+          bl('Generate form — mode · period · rates', 8, 96, { pin: 2, note: 'ReportForm · validates before submit' }),
+          bl('Job progress — 202 → polling', 8, 44, { pin: 3, note: 'JobProgress · queued | running | done | failed', stroke: accent }),
+          bl('Record preview — post-approval state', 8, 96, { pin: 4, note: 'DataTable · read-only' }),
+          bl('Export PDF → Blob signed URL', 6, 42, { pin: 5, note: 'ExportButton' }),
+          bl('Send to approval queue', 6, 42, { pin: 6, note: 'reuses the §12 gate', stroke: accent })
+        ],
+        bindings: [
+          B(1, 'Report list', 'GET /api/reports', '?status&cursor&limit', '→ { items: ReportSummary[], total, next_cursor }', 'ReportListResponse'),
+          B(2, 'Generate', 'POST /api/reports', '{ mode: "interest"|"commission"|"tds"|"chq", period_type: "monthly"|"quarterly"|"yearly", interest_rate: Decimal, commission_rate: Decimal, reference_ids: str[] }', '→ 202 { job_id, poll_after_ms } | 200 { report: ReportDetail } if small', 'ReportGenerateRequest → JobAcceptedResponse'),
+          B(3, 'Job poll', 'GET /api/reports/jobs/{job_id}', '{}', '→ { state, progress: float, report_id?, error? }', 'JobStatusResponse'),
+          B(4, 'Record preview', 'GET /api/reports/{report_id}/records', '?cursor&limit', '→ { items: ReportRecord[], totals: ReportTotals }', 'ReportRecordListResponse'),
+          B(5, 'PDF export', 'POST /api/reports/{report_id}/export', '{ format: "pdf" }', '→ 200 { blob_url, expires_at, bytes }', 'ExportRequest → ExportResponse'),
+          B(6, 'Send for approval', 'POST /api/reports/{report_id}/submit', '{}', '→ 202 { batch_id, count, status: "pending" }', 'ProposalBatchResponse')
+        ]
+      },
+      {
+        id: 'help', title: 'Help & changelog', route: '/help', roles: 'all roles',
+        ref: 'ARD §6 · MDX in git', rail: true,
+        caption: 'No API surface. Content lives in git as MDX, is reviewed in PRs, and is versioned with the code — so the only contract here is a build-time manifest.',
+        blocks: [
+          bl('Doc nav — from build-time manifest', 3, 132, { pin: 1, note: 'DocNav' }),
+          bl('MDX article body — justified measure', 6, 132, { pin: 2, note: 'MDXRenderer' }),
+          bl('On-this-page anchors', 3, 132, { note: 'from MDX headings' }),
+          bl('Changelog feed', 9, 46, { pin: 3, note: 'ChangelogList' }),
+          bl('Version stamp', 3, 46, { note: 'build sha' })
+        ],
+        bindings: [
+          B(1, 'Doc index', 'GET /content/index.json', 'static — built by Vite from content/*.mdx', '→ { sections: [{ slug, title, order, children[] }] }', 'DocIndex (build-time schema, not FastAPI)'),
+          B(2, 'Article body', 'import(`/content/${slug}.mdx`)', 'code-split dynamic import', '→ MDX component + frontmatter { title, updated }', 'DocFrontmatter'),
+          B(3, 'Changelog', 'GET /content/changelog.json', 'static', '→ { entries: [{ version, date, items[] }] }', 'ChangelogFeed')
+        ]
+      }
+    ];
+
+    const trees = [
+      {
+        title: 'Shell & auth', route: 'App',
+        items: [
+          { name: 'AppShell', indent: 0, props: '{ children }', state: 'route from React Router', variants: 'authed / unauthed' },
+          { name: 'AuthProvider', indent: 14, props: '{ children }', state: 'session, me: MeResponse, status', variants: '' },
+          { name: 'RoleGate', indent: 14, props: '{ allow: Role[], fallback?: ReactNode, children }', state: '', variants: 'hide / disable / redirect' },
+          { name: 'NavRail', indent: 14, props: '{ items: NavItem[], approvalCount: number }', state: 'collapsed', variants: 'expanded / collapsed' },
+          { name: 'DataHealthBadge', indent: 28, props: '{ passed: number, total: number, lastRunAt: string }', state: '', variants: 'pass / degraded / stale' },
+          { name: 'AuthForm', indent: 14, props: '{ onSubmit(email, password) }', state: 'submitting, fieldErrors', variants: 'idle / submitting / error' },
+          { name: 'SessionExpiredDialog', indent: 14, props: '{ open, onReauth() }', state: '', variants: 'modal' }
+        ]
+      },
+      {
+        title: 'Dashboard', route: '/dashboard',
+        items: [
+          { name: 'KpiStrip', indent: 0, props: '{ summary: PortfolioSummary, period: Period }', state: '', variants: '2 / 4 / 5 cards' },
+          { name: 'KpiCard', indent: 14, props: '{ label, value, delta?, tone: "neutral"|"warn"|"danger" }', state: '', variants: 'neutral / warn / danger / skeleton' },
+          { name: 'NeedsAttentionPanel', indent: 0, props: '{ rows: LoanSummary[], onOpen(ref) }', state: '', variants: 'filled / empty' },
+          { name: 'AgentTeaser', indent: 0, props: '{ suggestions: PromptSuggestion[], onAsk(prompt) }', state: '', variants: 'default / budget-capped' },
+          { name: 'ProposalFeed', indent: 0, props: '{ items: ProposalSummary[], canApprove: boolean }', state: '', variants: 'owner / non-owner / empty' }
+        ]
+      },
+      {
+        title: 'Loans', route: '/loans',
+        items: [
+          { name: 'LoansPage', indent: 0, props: '{}', state: 'filters: LoanFilterParams (URL-synced)', variants: '' },
+          { name: 'FilterChipBar', indent: 14, props: '{ value: LoanFilterParams, onChange(next), onClearAll() }', state: '', variants: 'empty / applied / overflow' },
+          { name: 'DataTable', indent: 14, props: '{ columns: ColumnDef[], rows, totals, sort, onSort, cursor }', state: 'selection: Set<string>', variants: 'comfortable / compact / skeleton / empty' },
+          { name: 'LoanRow', indent: 28, props: '{ loan: LoanSummary, editable: boolean, onPatch(field, value) }', state: 'editingField, pending', variants: 'default / editing / saving / conflict / error' },
+          { name: 'StatusChip', indent: 28, props: '{ status: LoanStatus }', state: '', variants: 'Active / Overdue / Pending / Paidoff / DueSoon' },
+          { name: 'TotalsFooter', indent: 14, props: '{ totals: LoanTotals, filtered: boolean }', state: '', variants: 'filtered / unfiltered' },
+          { name: 'LoanDrawer', indent: 14, props: '{ referenceId: string | null, onClose() }', state: 'tab', variants: 'detail / history' }
+        ]
+      },
+      {
+        title: 'Ask FinHive', route: '/chat',
+        items: [
+          { name: 'ChatPage', indent: 0, props: '{}', state: 'sessionId, draft (Zustand)', variants: '' },
+          { name: 'useAgentStream', indent: 14, props: 'hook(sessionId) → { steps, status, metrics, send }', state: 'steps: ReActStep[], status', variants: 'idle / thinking / done / capped / error' },
+          { name: 'TraceStep', indent: 14, props: '{ step: ReActStep, verbosity: TraceVerbosity }', state: 'expanded', variants: 'thought / action / observation / retry' },
+          { name: 'RetryNotice', indent: 28, props: '{ attempt: number, validationError: string }', state: '', variants: 'attempt 1 / attempt 2 / degraded' },
+          { name: 'TurnMeter', indent: 14, props: '{ metrics: TurnMetrics }', state: '', variants: 'inline / expanded' },
+          { name: 'FeedbackButtons', indent: 14, props: '{ turnId, value, onVote(sentiment) }', state: '', variants: 'unvoted / up / down' },
+          { name: 'Composer', indent: 14, props: '{ disabled, placeholder, onSend(text) }', state: 'text', variants: 'idle / streaming / capped / read-only' }
+        ]
+      },
+      {
+        title: 'Approvals', route: '/approvals',
+        items: [
+          { name: 'ApprovalsPage', indent: 0, props: '{}', state: 'tab, selectedBatchId', variants: '' },
+          { name: 'ProposalList', indent: 14, props: '{ items: ProposalSummary[], selectedId, onSelect(id) }', state: '', variants: 'pending / approved / rejected / empty' },
+          { name: 'OriginBadge', indent: 28, props: '{ origin: ProposalOrigin }', state: '', variants: 'AGENT / FORM' },
+          { name: 'DiffTable', indent: 14, props: '{ items: ProposalItem[] }', state: 'collapsedRefs', variants: 'changed / added / removed / no-op' },
+          { name: 'DiffRow', indent: 28, props: '{ field: string, before: unknown, after: unknown }', state: '', variants: 'changed / unchanged / type-mismatch' },
+          { name: 'DecisionBar', indent: 14, props: '{ canApprove: boolean, onApprove(note?), onReject(reason) }', state: 'rejectReason', variants: 'owner / read-only / applying / applied' },
+          { name: 'AppliedReceipt', indent: 14, props: '{ transactionId, appliedAt, onRevert() }', state: '', variants: 'applied / reverted' }
+        ]
+      },
+      {
+        title: 'Reports & help', route: '/reports · /help',
+        items: [
+          { name: 'ReportForm', indent: 0, props: '{ onSubmit(req: ReportGenerateRequest) }', state: 'mode, periodType, rates, selection', variants: 'interest / commission / tds / chq' },
+          { name: 'JobProgress', indent: 0, props: '{ jobId: string, onDone(reportId) }', state: 'polling interval (backoff)', variants: 'queued / running / done / failed' },
+          { name: 'ExportButton', indent: 0, props: '{ reportId, format: "pdf" }', state: 'requesting', variants: 'idle / requesting / ready' },
+          { name: 'DocNav', indent: 0, props: '{ index: DocIndex, activeSlug }', state: '', variants: 'default' },
+          { name: 'MDXRenderer', indent: 0, props: '{ slug: string }', state: 'lazy module', variants: 'loading / loaded / not-found' },
+          { name: 'ChangelogList', indent: 0, props: '{ entries: ChangelogEntry[] }', state: '', variants: 'default' }
+        ]
+      }
+    ];
+
+    const statusTokens = [
+      { token: 'status.active', use: 'Loan within term', light: '#025c33', dark: '#0a7d47' },
+      { token: 'status.overdue', use: 'Past due date', light: '#6b0307', dark: '#8f0a10' },
+      { token: 'status.pending', use: 'Awaiting approval', light: '#804001', dark: '#a35502' },
+      { token: 'status.paidoff', use: 'Settled, archived', light: '#022a52', dark: '#03407a' },
+      { token: 'brand.agent', use: 'Agent-originated — provenance, not status', light: accent, dark: accent }
+    ];
+
+    const typeScale = [
+      { token: 'display', spec: '25 / 1.1 / 600', use: 'KPI figures — tabular, tight tracking' },
+      { token: 'heading.page', spec: '17 / 1.3 / 600', use: 'Route title in the header bar' },
+      { token: 'heading.card', spec: '13.5 / 1.3 / 600', use: 'Panel and section titles' },
+      { token: 'body', spec: '13 / 1.55 / 400', use: 'Row labels, prose, agent answers' },
+      { token: 'body.mono', spec: '12 / 1.5 / 400', use: 'Reference IDs, money, dates — tnum' },
+      { token: 'caption', spec: '11.5 / 1.5 / 400', use: 'Secondary row metadata' },
+      { token: 'overline', spec: '10.5 / 1.2 / 500', use: 'Column heads, uppercase, +0.4 tracking' }
+    ];
+
+    const inventory = [
+      { name: 'Button', variants: 'primary · secondary · ghost · icon · destructive × idle / hover / pressed / loading / disabled' },
+      { name: 'StatusChip', variants: 'Active · Overdue · Pending · Paidoff · DueSoon' },
+      { name: 'OriginBadge', variants: 'AGENT (amber) · FORM (blue)' },
+      { name: 'FilterChip', variants: 'applied · removable · overflow "+3 more"' },
+      { name: 'KpiCard', variants: 'neutral · warn · danger · skeleton' },
+      { name: 'DataTable', variants: 'comfortable · compact · skeleton · empty · error' },
+      { name: 'TableRow', variants: 'default · hover · selected · editing · saving · conflict' },
+      { name: 'Input / DateField', variants: 'idle · focus · invalid · disabled · inline-edit' },
+      { name: 'SegmentedControl', variants: '2 · 3 · 4 segments' },
+      { name: 'TraceStep', variants: 'thought · action · observation · retry · degraded' },
+      { name: 'TurnMeter', variants: 'inline · expanded · over-budget' },
+      { name: 'DiffRow', variants: 'changed · added · removed · unchanged · type-mismatch' },
+      { name: 'ProposalCard', variants: 'pending · approved · rejected · applying' },
+      { name: 'Drawer', variants: 'right · full-height · with tabs' },
+      { name: 'Dialog', variants: 'confirm · destructive · session-expired' },
+      { name: 'Toast', variants: 'success · warning · error · undo' },
+      { name: 'Skeleton', variants: 'text · row · card · trace' },
+      { name: 'EmptyState', variants: 'no data · no results · no permission · error' },
+      { name: 'JobProgress', variants: 'queued · running · done · failed' },
+      { name: 'Pagination', variants: 'cursor "load more" · page size' }
+    ];
+
+    const states = [
+      { name: 'Loading / skeleton', screens: '/dashboard /loans /reports', trigger: 'TanStack Query isPending — near-certain on Vercel cold start (3–5s at 3 DAU)', treatment: 'Skeleton in the real row and card geometry, never a centred spinner. Layout must not shift when data lands.', signal: 'no contract change — shape known from the model' },
+      { name: 'SSE streaming mid-trace', screens: '/chat', trigger: 'first event within ~400ms of POST /api/agent/stream', treatment: 'Steps append as they arrive; composer disabled; caret pulse on the open step. First-event-under-1s is a Playwright assertion, not a hope.', signal: 'X-Accel-Buffering: no · Cache-Control: no-transform' },
+      { name: 'Step-cap degraded answer', screens: '/chat', trigger: 'MAX_STEPS = 6 exhausted', treatment: 'Partial answer plus a "narrow your question" affordance with two concrete rewrites. Never a timeout error.', signal: 'final { answer, truncated: true, reason: "step_cap" }' },
+      { name: 'Tool validation retry', screens: '/chat', trigger: 'Pydantic ValidationError on a tool call', treatment: 'Collapsed retry line inside the trace: "corrected due_date — was \u2018next quarter\u2019". Shown, not hidden; two attempts, then degrade.', signal: 'observation { retry: 1, validation_error: str }' },
+      { name: 'Empty result', screens: '/loans /approvals /reports /chat', trigger: 'zero rows for a valid query', treatment: 'Restates the filter that produced nothing and offers to clear it. On /chat, the agent says which filter it applied — a zero-row answer must never read as "none exist".', signal: '200 { items: [], total: 0 }' },
+      { name: '401 / session expired', screens: 'all authed', trigger: 'JWT expired, refresh failed', treatment: 'Modal over the frozen screen; unsaved inline edits held in the buffer and replayed after re-auth. No route change, no data loss.', signal: '401 { code: "token_expired" }' },
+      { name: 'RLS denied', screens: '/approvals', trigger: 'non-owner opens a pending batch', treatment: 'Diff fully visible, DecisionBar replaced by "Only the account owner can approve" plus a request-approval action. The button is absent, not disabled-with-a-tooltip.', signal: '403 { code: "rls_denied", required_role: "owner" }' },
+      { name: 'Cost budget soft block', screens: '/chat /dashboard', trigger: 'per-user daily spend > $0.50', treatment: 'Composer switches to read-only with the remaining budget stated and a form-based path offered for the same task. Owner is notified, not the user blocked silently.', signal: '429 { code: "budget_soft_block", resets_at, spend_usd }' }
+    ];
+
+    const roleRows = [
+      { screen: 'Login & session', route: '/login', owner: 'Full', book: 'Full', viewer: 'Full', enforce: 'role read from JWT claim at /api/me' },
+      { screen: 'Dashboard', route: '/dashboard', owner: 'All KPIs + approval feed', book: 'All KPIs; approval feed read-only, no Approve', viewer: 'KPIs only; approval feed hidden', enforce: 'RLS on reports/proposed_mutations' },
+      { screen: 'Loans table', route: '/loans', owner: 'Read, create, edit, bulk extend', book: 'Read, create, edit, bulk extend', viewer: 'Read only; inline edit and New loan absent', enforce: 'RLS FOR INSERT/UPDATE on loans' },
+      { screen: 'Ask FinHive', route: '/chat', owner: 'All 9 tools', book: 'All 9 tools', viewer: 'Read-only tools only (5 of 9)', enforce: 'required_role on the @tool decorator' },
+      { screen: 'Approvals', route: '/approvals', owner: 'Read, approve, reject, revert', book: 'Read + request approval; no decision bar', viewer: 'Read only', enforce: 'reports_approve_owner_only policy' },
+      { screen: 'Reports', route: '/reports', owner: 'Generate, submit, export', book: 'Generate, submit, export', viewer: 'Read + export only', enforce: 'RLS + route-level role check' },
+      { screen: 'Help & changelog', route: '/help', owner: 'Full', book: 'Full', viewer: 'Full', enforce: 'static content — no authorization' }
+    ];
+
+    const openQs = [
+      { n: '01', text: 'Viewer role and the agent — ARD §24 leaves this open. This spec assumes viewer may invoke the agent with the five read-only tools. If viewers should only see agent output, /chat loses its composer for them and the tool registry needs no viewer tier.' },
+      { n: '02', text: 'Optimistic concurrency on inline edit. Binding T3 assumes an If-Match version header and a 409 on staleness. Last-write-wins is simpler and at 3 DAU may be adequate — but it silently loses a bookkeeper\u2019s edit, which is the failure mode MVP1 existed to remove.' },
+      { n: '03', text: 'Report size threshold for the 202 path. Stated as 100 records, taken from §7. Contracts need one number, and it becomes a Playwright fixture boundary.' },
+      { n: '04', text: 'Revert as a first-class endpoint. §12 says applied batches are reversible because before_state is retained, but names no route. Binding A6 proposes POST /api/approvals/{batch_id}/revert — confirm, or revert becomes a manual DB operation.' },
+      { n: '05', text: 'Cursor vs offset pagination. Every list response here carries next_cursor. Offset is easier to build against a raw-SQL layer; cursor survives a growing dataset. One choice, applied to all six list endpoints.' }
+    ];
+
+    return {
+      screens, trees, statusTokens, typeScale, inventory, states, roleRows, openQs,
+      traceEvents,
+      tools: TOOLS.map(t => ({
+        name: t[0],
+        mut: t[1] ? 'proposes' : 'executes',
+        mutColor: t[1] ? GOLD : GREY,
+        role: t[2]
+      }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -190,6 +190,20 @@ def main() -> int:
     teams = gql(Q_TEAM, {"key": team_key}, key=key)["teams"]["nodes"]
     if not teams:
         print(f"{RED}No team with key '{team_key}'.{RST}", file=sys.stderr)
+        # Listing what does exist turns a dead end into a next step.
+        try:
+            avail = gql("{ teams(first: 50) { nodes { key name issueEstimationType } } }",
+                        key=key)["teams"]["nodes"]
+        except LinearError:
+            avail = []
+        if avail:
+            print("\n  Teams available with this API key:", file=sys.stderr)
+            for t in avail:
+                est = t.get("issueEstimationType") or "notUsed"
+                note = "" if est not in (None, "notUsed") else "  (estimation off)"
+                print(f"    LINEAR_TEAM_KEY={t['key']:<8} {t['name']}{note}", file=sys.stderr)
+            print(f"\n  {DIM}LINEAR_TEAM_KEY is the issue-id PREFIX (e.g. FIN for FIN-1),{RST}", file=sys.stderr)
+            print(f"  {DIM}not the team name. Create a new team in Linear if none of these fit.{RST}", file=sys.stderr)
         return 2
     team = teams[0]
     team_id = team["id"]
@@ -231,8 +245,11 @@ def main() -> int:
     print(f"  labels       : {len(want_labels)} wanted, {len(new_labels)} new")
     print(f"  estimation   : {team.get('issueEstimationType') or 'not set'}")
     if team.get("issueEstimationType") in (None, "notUsed"):
-        print(f"  {YEL}! estimation is off for this team — Estimate values will be ignored.{RST}")
-        print(f"  {DIM}  Enable at Linear → Settings → Team → Estimates (Fibonacci).{RST}")
+        dropped = sum(int(r["Estimate"]) for r in to_create if r["Estimate"].strip().isdigit())
+        print(f"  {YEL}! estimation is OFF for team {team['key']} — all {dropped} points will be silently dropped.{RST}")
+        print(f"  {DIM}  Fix first: Linear → Settings → Teams → {team['key']} → Estimates{RST}")
+        print(f"  {DIM}             set Estimates to Fibonacci (1,2,3,5,8,13), then re-run.{RST}")
+        print(f"  {DIM}  Turning it on afterwards does NOT backfill — you would re-enter 147 estimates by hand.{RST}")
     print()
 
     if not args.apply:
