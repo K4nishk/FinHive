@@ -1,0 +1,65 @@
+name: CI
+
+# Fast gate tier (ARD v2.0.0 §17). Cheapest checks run first, as one sequential job:
+# a failed step stops the job immediately instead of burning time on later ones, so a
+# lint error is blocked in well under the 30s acceptance target instead of waiting on
+# the rest of the tier.
+on:
+  pull_request:
+  push:
+    branches: [development, main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-gates:
+    name: Fast gates
+    runs-on: ubuntu-latest
+    # Hard budget from the issue: the whole tier must finish under two minutes.
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python lint/type-check deps
+        run: pip install -e ".[dev]"
+
+      - name: ruff
+        run: ruff check finhive tests
+
+      - name: mypy --strict (domain, calc)
+        run: mypy --strict finhive/domain finhive/calc
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web lint/format deps
+        working-directory: web
+        # package-lock.json isn't fully in sync with the new eslint/prettier
+        # devDependencies yet (no registry access when they were added) — use
+        # `install` rather than `ci` until a follow-up regenerates the lockfile.
+        run: npm install
+
+      - name: prettier
+        working-directory: web
+        run: npx prettier --check src
+
+      - name: eslint
+        working-directory: web
+        run: npm run lint
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
