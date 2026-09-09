@@ -206,3 +206,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.DS_Store
+output/.DS_Store
+output/Loan Manager/.DS_Store
+output/Loan Manager/run_8/.DS_Store
+.DS_Store
+
+# ops — autonomous build orchestration (local state, never committed)
+ops/.builder.lock/
+ops/.worktree.lock/
+ops/logs/
+ops/.env.local
+ops/queue.tsv
+ops/.completed_issues
+ops/.review_debt.tsv
+ops/.issue_map.tsv
+ops/.agent_contracts.md
