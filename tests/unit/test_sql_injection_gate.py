@@ -36,7 +36,9 @@ def _ruff_check(tmp_path: Path, code: str) -> subprocess.CompletedProcess[str]:
 
 def test_s608_is_selected_and_not_ignored() -> None:
     lint = tomllib.loads(PYPROJECT.read_text())["tool"]["ruff"]["lint"]
-    assert "S" in lint["select"], "flake8-bandit rules (incl. S608) must stay selected"
+    assert "S" in lint["select"], (
+        "flake8-bandit rules (incl. S608) must stay selected"
+    )
     assert "S608" not in lint.get("ignore", []), "S608 must not be silenced"
 
 
