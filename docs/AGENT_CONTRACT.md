@@ -18,14 +18,18 @@ implementing a `KCH-*` Linear issue in this repository.
    tests.
 4. **CodeRabbit CLI gate** — run before pushing: `coderabbit review --committed --base
    <base>`. Blocking findings return to the agent; advisory findings do not block. A
-   blocking finding must be resolved (or escalated, below) before the branch is pushed
-   or a PR is opened — never push a revision the gate hasn't cleared.
+   blocking finding must be resolved before a normal branch push or PR — never push a
+   revision the gate hasn't cleared. The one exception is the escalation draft PR
+   (below), which is allowed to carry a blocking finding precisely because it is not a
+   normal push.
 5. **Push, open a PR** targeting `development` (or the branch it stacked on), once the
    gate has no blocking findings.
 6. **Fix cycles — maximum two.**
    - No blocking findings → ready for human review.
-   - Cycle 1: fix the blocking findings, re-run the test suite, re-run the gate.
-   - Cycle 2: if findings persist, fix again, re-run the test suite, re-run the gate.
+   - Cycle 1: commit the fix, record the commit SHA and the gate output, re-run the
+     test suite, and re-run the gate.
+   - Cycle 2: if findings persist, repeat — a new commit, re-run the test suite,
+     re-run the gate — and retain both cycles' gate results.
    - Still blocking after cycle 2 → **escalate** (below). Do not attempt a third cycle.
    - Only push (or push an update) once a cycle ends with no blocking findings.
 7. **Human merges.** The agent never merges. It opens PRs (and marks one draft on
@@ -36,8 +40,11 @@ implementing a `KCH-*` Linear issue in this repository.
 After two failed cycles the agent stops and files a Linear issue containing:
 
 - The **blocking finding**, verbatim, that persisted through both cycles.
-- **Every fix attempted** — what changed, and specifically why it was rejected or
-  failed (a test failure, a regression, a finding that came back).
+- **Every fix attempted** — the commit SHA, what changed, the gate result it produced,
+  and specifically why it was rejected or failed (a test failure, a regression, a
+  finding that came back). This is why step 6 requires a commit and a retained gate
+  result per cycle — a no-change re-review must not count as a completed cycle, and the
+  evidence must survive to the escalation issue.
 - **Why this needs a human** — the reason no further automated attempt is likely to
   help (usually: the fix requires a decision above the agent's authority, e.g. an
   architecture or security-policy change).
@@ -72,8 +79,11 @@ guard, or (b) denormalize borrower_name onto the summary mart in
 dbt and drop the join entirely. (b) is likely simpler.
 ```
 
-The PR is marked **draft** on escalation — it is not ready for human review, the
-escalation issue is.
+On escalation the agent may push once more and open **one draft PR**, to preserve the
+attempted work and give the escalation issue something concrete to link to — this is
+the sole exception to "never push a revision the gate hasn't cleared" in step 4. The
+draft PR remains blocked: it cannot merge and does not count as a cleared gate. It is
+not ready for human review — the escalation issue is.
 
 ## Why two cycles, not more
 
