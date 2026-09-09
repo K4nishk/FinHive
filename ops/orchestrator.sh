@@ -233,6 +233,10 @@ debt_add() {
   printf '%s\t%s\t%s\n' "$issue" "$reason" "$(date -u +%FT%TZ)" >> "$DEBT"
 }
 debt_clear() {
+  # An unset ledger path made "$DEBT.tmp" expand to a bare ".tmp" in the current
+  # directory — which is the repo root. One of those was swept into a commit by
+  # a `git add -A` elsewhere in the loop. Refuse rather than write to the cwd.
+  [ -n "${DEBT:-}" ] || { fail "debt_clear called with DEBT unset"; return 0; }
   [ -f "$DEBT" ] || return 0
   # `grep -v` exits 1 when it prints NOTHING, so `&& mv` silently skipped the
   # move whenever the row being cleared was the last one — the ledger kept it.
@@ -249,6 +253,10 @@ debt_reason() { awk -F'\t' -v i="$1" '$1 == i { r = $2 } END { print r }' "$DEBT
 
 stuck_count() { awk -F'\t' -v i="$1" '$1 == i { n = $2 } END { print n + 0 }' "$STUCK" 2>/dev/null || echo 0; }
 stuck_clear() {
+  # An unset ledger path made "$STUCK.tmp" expand to a bare ".tmp" in the current
+  # directory — which is the repo root. One of those was swept into a commit by
+  # a `git add -A` elsewhere in the loop. Refuse rather than write to the cwd.
+  [ -n "${STUCK:-}" ] || { fail "stuck_clear called with STUCK unset"; return 0; }
   [ -f "$STUCK" ] || return 0
   grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null || true
   mv "$STUCK.tmp" "$STUCK" 2>/dev/null || true
@@ -633,6 +641,15 @@ End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT
       fail "  push failed for $branch — the fix is committed locally only"; return 1; }
   fi
 
+  # run_gate returns 3 when the platform cut off a fix round. Testing only for 0
+  # collapsed that into "still not clean", so the debt loop read an ordinary
+  # failure and moved to the next issue — where every agent call would fail the
+  # same way and eat the wind-down budget. The header contract already promised
+  # 3 = platform limit.
+  if [ "$gate" -eq 3 ]; then
+    say "  usage limit during the re-gate — debt stays open"
+    return 3
+  fi
   if [ "$gate" -eq 0 ]; then
     say "  $issue is clean now — debt cleared"
     debt_clear "$issue"
@@ -787,6 +804,12 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
   # nothing at all, which meant the next pass treated an issue with an OPEN PR as
   # unbuilt and rebuilt it from scratch over that PR. Bank it as debt instead:
   # the PR exists, so the work left is remediation, not a build.
+  # A platform cut-off is not a review outcome. Banking it as findings debt sent
+  # the next pass to remediate an issue whose gate never ran.
+  if [ "$gate" -eq 3 ]; then
+    fail "$issue — usage limit during the gate; not recording a verdict"
+    return 3
+  fi
   if [ "$gate" -eq 0 ]; then
     echo "$issue" >> "$DONE"
     # The PR opened non-draft because the gate was clean, but nothing had put the

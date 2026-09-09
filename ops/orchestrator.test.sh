@@ -30,7 +30,19 @@ assert_eq() {
 ORCH_SRC="$(cd "$(dirname "$0")" && pwd)/orchestrator.sh"
 [ -f "$ORCH_SRC" ] || { echo "FAIL: cannot find $ORCH_SRC"; exit 1; }
 
-extract_fn() { sed -n "/^$1() {/,/^}/p" "$ORCH_SRC"; }
+# A sed range ending at /^}/ overruns a ONE-LINE function — stuck_count and
+# debt_issues are written `f() { ...; }` — swallowing whatever follows and
+# redefining it. That silently broke stuck_clear here while debt_clear worked.
+extract_fn() {
+  awk -v fn="$1" '
+    !inblk && index($0, fn "() {") == 1 {
+      inblk = 1; print
+      if ($0 ~ /\}[[:space:]]*$/) exit      # one-liner: this line is the whole body
+      next
+    }
+    inblk { print; if ($0 ~ /^\}/) exit }
+  ' "$ORCH_SRC"
+}
 for fn in debt_add debt_clear debt_issues debt_reason stuck_count stuck_clear stuck_bump next_gate_round; do
   src="$(extract_fn "$fn")"
   [ -n "$src" ] || { echo "FAIL: $fn() not found in orchestrator.sh"; exit 1; }
@@ -130,13 +142,11 @@ assert_eq "no owner recorded -> fall back to age" "unknown" "$(lock_state)"
 # ── stuck_clear must clear the last remaining row ───────────────────────────
 # grep -v exits 1 when it prints no lines — if the issue being cleared is the
 # only row, the old `&&`-chained mv never ran and the entry stayed forever.
+# No local redefinition here — this file extracts stuck_clear from
+# orchestrator.sh at the top. A hand-written copy lived at this spot and silently
+# shadowed the real one, so the guard added to the script was never exercised and
+# the stray-file assertion below failed against correct code.
 STUCK="$FIX/.stuck_issues.tsv"
-stuck_clear() {
-  [ -f "$STUCK" ] || return 0
-  grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null || true
-  mv "$STUCK.tmp" "$STUCK" 2>/dev/null || true
-  return 0
-}
 printf 'KCH-78\t3\tts\n' > "$STUCK"
 stuck_clear KCH-78
 rc=$?
@@ -266,7 +276,44 @@ setup_remediate_case findings 0 no
 printf '  major [X]\n\n1 file reviewed:\n' > "$RSTUB/logs/KCH-99_cr_round0.txt"
 ( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$PUSHED $PUBLISHED" ) > "$RSTUB/out"
 assert_eq "the agent path pushes and publishes too" "1 1" "$(cat "$RSTUB/out")"
+# run_gate returns 3 when the platform cuts off a fix round. Collapsing that into
+# "still not clean" made the debt loop treat it as an ordinary failure and move to
+# the next issue, where every agent call fails identically and eats the wind-down
+# budget. The loop breaks on 3 and continues on 1, so the code must be honest.
+setup_remediate_case quota 3 no
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$?" ) > "$RSTUB/out"
+assert_eq "a usage limit in the re-gate propagates as 3, not 1" "3" "$(cat "$RSTUB/out")"
+assert_eq "and the debt entry survives it" "KCH-99" "$(cut -f1 "$RSTUB/debt")"
+
+setup_remediate_case findings 3 no
+printf '  major [X]\n\n1 file reviewed:\n' > "$RSTUB/logs/KCH-99_cr_round0.txt"
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$?" ) > "$RSTUB/out"
+assert_eq "the agent path propagates a usage limit too" "3" "$(cat "$RSTUB/out")"
 unset -f git say fail take_lock drop_lock issue_title open_pr_field run_agent run_gate publish_gate
+
+# ── an unset ledger path must not write into the current directory ──────────
+# "$DEBT.tmp" with DEBT unset expands to a bare ".tmp" in the cwd — the repo
+# root — and one of those was swept into commit 0babe20 by a `git add -A`.
+# Each runs in its own directory so a stray file has nowhere to hide, and
+# without `&&` chaining — an rm that fails would otherwise abort the subshell
+# before the check and report an empty result rather than a real one.
+STRAY="$FIX/stray"; mkdir -p "$STRAY"
+check_no_stray() {   # $1 = function, $2 = variable to unset
+  rm -rf "$STRAY"; mkdir -p "$STRAY"
+  ( cd "$STRAY"; unset "$2"; "$1" KCH-1 >/dev/null 2>&1
+    [ -n "$(ls -A .)" ] && ls -A . || echo clean )
+}
+assert_eq "debt_clear with an unset ledger writes no stray file" "clean" "$(check_no_stray debt_clear DEBT)"
+assert_eq "stuck_clear with an unset ledger writes no stray file" "clean" "$(check_no_stray stuck_clear STUCK)"
+DEBT="$FIX/.review_debt.tsv"; STUCK="$FIX/.stuck_issues.tsv"
+
+# No helper this file extracts may also be redefined in it — a local copy shadows
+# the real one and the suite then tests itself. That happened to stuck_clear.
+shadowed=""
+for fn in debt_add debt_clear debt_issues debt_reason stuck_count stuck_clear stuck_bump next_gate_round; do
+  grep -qE "^${fn}\(\) \{" "$0" && shadowed="$shadowed $fn"
+done
+assert_eq "no extracted helper is shadowed by a local copy" "" "$shadowed"
 
 # run_issue's clean-gate path is the one every NEW PR takes. It recorded the
 # issue done and published nothing, so with the status required no fresh PR

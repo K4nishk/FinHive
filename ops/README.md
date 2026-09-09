@@ -127,8 +127,8 @@ is just a claim — the findings sit in gitignored logs under `ops/logs/`. Run
 blocking findings, the commit that answered each one, and the final round's verdict —
 then set the `coderabbit/cli-gate` commit status. Success only when the final round
 returned zero blocking findings; no logs at all or a final round that errored/hit quota
-both count as failure, not success. No Claude involved — bash, `git`, `gh`, and the logs
-already on disk, so it still runs when spend is capped.
+both count as failure, not success. No Claude involved — bash, `git`, `gh`, `python3`, and
+the logs already on disk, so it still runs when spend is capped.
 
 ### Drafts, re-gating, and clearing the backlog
 

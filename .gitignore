@@ -246,3 +246,7 @@ dbt/logs/
 
 .env
 .env.local
+
+# Stray temp files from "$VAR.tmp" when VAR is unset (see debt_clear).
+.tmp
+*.tmp
