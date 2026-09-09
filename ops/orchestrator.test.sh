@@ -207,10 +207,66 @@ ORCH="$(cd "$(dirname "$0")" && pwd)/orchestrator.sh"
 # Every success path out of remediate_issue must publish. The re-gate-only path
 # — taken by quota-banked debt, the most common reason — cleared its ledger and
 # left the PR drafted with a stale status.
-body="$(sed -n '/^remediate_issue()/,/^}/p' "$ORCH")"
-returns0="$(printf '%s' "$body" | grep -c 'return 0')"
-publishes="$(printf '%s' "$body" | grep -c 'publish_gate')"
-assert_eq "every remediate_issue success path publishes the gate" "$returns0" "$publishes"
+# ── remediate_issue: behaviour, not shape ───────────────────────────────────
+# Three structural greps in a row failed to pin this function down — one counted
+# comments, one passed a mutation it should have caught. So run the real thing
+# against stubs in a scratch repo.
+#
+# The defect: run_gate is NOT read-only. A round with blocking findings calls the
+# agent and commits the fix, so the re-gate-only path — taken by quota-banked
+# debt — can move HEAD. It returned 1 without pushing, stranding those commits on
+# the local checkout: invisible to the PR, and leaving the branch ahead of origin
+# for the next pass to trip over.
+eval "$(sed -n '/^remediate_issue() {/,/^}/p' "$ORCH_SRC")"
+
+RSTUB="$FIX/rem"; mkdir -p "$RSTUB"
+setup_remediate_case() {   # $1 = debt reason, $2 = gate rc, $3 = does run_gate commit?
+  rm -rf "$RSTUB/repo" "$RSTUB/origin"; mkdir -p "$RSTUB/repo"
+  git init -q --bare "$RSTUB/origin"
+  git -C "$RSTUB/repo" init -q
+  git -C "$RSTUB/repo" config user.email t@e.com; git -C "$RSTUB/repo" config user.name T
+  git -C "$RSTUB/repo" remote add origin "$RSTUB/origin"
+  git -C "$RSTUB/repo" commit -q --allow-empty -m base
+  git -C "$RSTUB/repo" branch -M feature/kch-99
+  git -C "$RSTUB/repo" push -q -u origin feature/kch-99
+  PUSHED=0; PUBLISHED=0
+  DEBT="$RSTUB/debt"; printf 'KCH-99\t%s\tts\n' "$1" > "$DEBT"
+  DONE="$RSTUB/done"; : > "$DONE"
+  LOG_DIR="$RSTUB/logs"; mkdir -p "$LOG_DIR"
+  GATE_RC="$2"; GATE_COMMITS="$3"
+  # Config the real script sets at load time; unset here, and `set -u` is on.
+  IMPL_MODEL=stub-model; CR_MAX_ROUNDS=2; BASE_BRANCH=development; AGENT_KIND=ok
+  say() { :; }; fail() { :; }
+  take_lock() { return 0; }; drop_lock() { :; }
+  issue_title() { echo "stub"; }
+  open_pr_field() { [ "$2" = baseRefName ] && echo development || echo 1; }
+  run_agent() { AGENT_KIND=ok; echo x >> "$RSTUB/repo/f.txt"; return 0; }
+  run_gate() { [ "$GATE_COMMITS" = yes ] && { echo g >> "$RSTUB/repo/g.txt"; git add -A; git commit -q -m "fix(KCH-99): address CodeRabbit round 1"; }; return "$GATE_RC"; }
+  publish_gate() { PUBLISHED=1; }
+  git() { case "$*" in "push"*|*"push "*) PUSHED=1; return 0;; esac; command git -C "$RSTUB/repo" "$@"; }
+}
+
+# THE REGRESSION: quota debt, re-gate produces fix commits, gate still fails.
+setup_remediate_case quota 1 yes
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$PUSHED" ) > "$RSTUB/out"
+assert_eq "a failing re-gate that produced commits still pushes them" "1" "$(cat "$RSTUB/out")"
+
+# Clean re-gate: pushes and publishes.
+setup_remediate_case quota 0 yes
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$PUSHED $PUBLISHED" ) > "$RSTUB/out"
+assert_eq "a clean re-gate pushes and publishes" "1 1" "$(cat "$RSTUB/out")"
+
+# Nothing changed: no push at all, rather than a pointless force-push.
+setup_remediate_case quota 0 no
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$PUSHED" ) > "$RSTUB/out"
+assert_eq "an unchanged HEAD is not force-pushed" "0" "$(cat "$RSTUB/out")"
+
+# Findings debt takes the agent path; it must push and publish on a clean gate.
+setup_remediate_case findings 0 no
+printf '  major [X]\n\n1 file reviewed:\n' > "$RSTUB/logs/KCH-99_cr_round0.txt"
+( cd "$RSTUB/repo" && remediate_issue KCH-99 >/dev/null 2>&1; echo "$PUSHED $PUBLISHED" ) > "$RSTUB/out"
+assert_eq "the agent path pushes and publishes too" "1 1" "$(cat "$RSTUB/out")"
+unset -f git say fail take_lock drop_lock issue_title open_pr_field run_agent run_gate publish_gate
 
 # run_issue's clean-gate path is the one every NEW PR takes. It recorded the
 # issue done and published nothing, so with the status required no fresh PR

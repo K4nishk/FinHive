@@ -589,45 +589,49 @@ remediate_issue() {
   # The findings to answer are whatever the LAST round recorded.
   local last; last="$(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -n | tail -1)"
   local lastlog="$LOG_DIR/${issue}_cr_round${last}.txt"
-  # Quota / gate-unavailable debt has no findings to fix. An agent call here
-  # would change nothing and leave the entry open forever — re-gate only.
+
+  # Captured before EITHER path runs. run_gate is not read-only — when a round
+  # reports blocking findings it calls the agent and commits the fix, so the
+  # re-gate-only path can move HEAD just as the agent path does.
+  local before; before="$(git rev-parse HEAD)"
+  local gate
+
   if [ ! -f "$lastlog" ] || [ "$(debt_reason "$issue")" = "quota" ] \
      || [ "$(debt_reason "$issue")" = "gate-unavailable" ]; then
+    # Quota- or error-banked debt has no findings to answer; an agent called with
+    # nothing to fix would change nothing and leave the entry open forever.
     say "  no findings to answer — re-gating only"
     run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
-    if [ $? -eq 0 ]; then
-      say "  $issue is clean now — debt cleared"
-      debt_clear "$issue"
-      grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
-      publish_gate "$issue"
-      return 0
-    fi
-    say "  $issue still not clean — debt stays open"
-    return 1
-  fi
-
-  local before; before="$(git rev-parse HEAD)"
-  run_agent "$issue" "mediate" "$IMPL_MODEL" \
-    "$(printf '%s\n\n%s\n' \
-       "You are fixing an OPEN pull request in the FinHive repository, on branch $branch. Follow CLAUDE.md. Address the CodeRabbit findings below with the smallest correct change, add or update tests, and commit. Do not merge, do not push, do not rebase, and do not create a branch — you are already on the right one. If a finding is wrong, say why instead of changing code.
+    gate=$?
+  else
+    run_agent "$issue" "mediate" "$IMPL_MODEL" \
+      "$(printf '%s\n\n%s\n' \
+         "You are fixing an OPEN pull request in the FinHive repository, on branch $branch. Follow CLAUDE.md. Address the CodeRabbit findings below with the smallest correct change, add or update tests, and commit. Do not merge, do not push, do not rebase, and do not create a branch — you are already on the right one. If a finding is wrong, say why instead of changing code.
 
 End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT=BLOCKED on its own line." \
-       "$(cat "$lastlog" 2>/dev/null | head -400)")"
-  if [ "$AGENT_KIND" = "limit" ]; then say "  usage limit during remediation"; return 3; fi
+         "$(cat "$lastlog" 2>/dev/null | head -400)")"
+    if [ "$AGENT_KIND" = "limit" ]; then say "  usage limit during remediation"; return 3; fi
 
-  git add -A 2>/dev/null || true
-  git commit -q -m "fix($issue): address CodeRabbit round $((last + 1))" >/dev/null 2>&1 || true
-  if [ "$(git rev-parse HEAD)" = "$before" ]; then
-    say "  no changes made — leaving the debt open for a human"
-    return 1
+    git add -A 2>/dev/null || true
+    git commit -q -m "fix($issue): address CodeRabbit round $((last + 1))" >/dev/null 2>&1 || true
+    if [ "$(git rev-parse HEAD)" = "$before" ]; then
+      say "  no changes made — leaving the debt open for a human"
+      return 1
+    fi
+    run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
+    gate=$?
   fi
 
-  run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
-  local gate=$?
-
-  # Push to the SAME branch. The PR updates; the stack does not deepen.
-  git push -q --force-with-lease origin "$branch" 2>/dev/null || {
-    fail "  push failed for $branch — the fix is committed locally only"; return 1; }
+  # ── one push point, one outcome ────────────────────────────────────────────
+  # These were duplicated per path, and the copies drifted twice: the re-gate
+  # path was missing publish_gate, then it was missing the push, so a failed
+  # re-gate left its fix commits on the local checkout only — invisible to the
+  # PR, and leaving the branch ahead of origin for the next pass to trip over.
+  # Deduplicated so a third path cannot go missing a fourth thing.
+  if [ "$(git rev-parse HEAD)" != "$before" ]; then
+    git push -q --force-with-lease origin "$branch" 2>/dev/null || {
+      fail "  push failed for $branch — the fix is committed locally only"; return 1; }
+  fi
 
   if [ "$gate" -eq 0 ]; then
     say "  $issue is clean now — debt cleared"
