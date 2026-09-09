@@ -351,9 +351,18 @@ take_lock() {
     [ "$waited" -ge 300 ] && { fail "worktree lock held >5min — another agent is running"; return 1; }
     sleep 5; waited=$((waited + 5))
   done
+  # Record the owner. An empty lock directory cannot be told apart from an
+  # abandoned one: a SIGTERM does not fire bash's RETURN trap, so a killed run
+  # leaves this behind and every later pass skipped with "an issue is in flight"
+  # forever. With a pid, `kill -0` answers it in one call.
+  printf '%s\n' "$$" > "$WT_LOCK/pid" 2>/dev/null || true
   return 0
 }
 drop_lock() { rm -rf "$WT_LOCK" 2>/dev/null || true; }
+
+# RETURN traps do not run on a signal, so release the lock explicitly. Without
+# this, every Ctrl-C or pkill leaves the worktree lock behind.
+trap 'fail "interrupted — releasing locks"; drop_lock; exit 130' INT TERM
 
 # Fetch the issue body from Linear so the agent implements the spec, not a guess.
 fetch_issue() {

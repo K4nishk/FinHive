@@ -94,9 +94,29 @@ fi
 trap 'rm -rf "$LOCK" 2>/dev/null' EXIT INT TERM
 
 # ── guard 2: never start while an issue is mid-flight ────────────────────────
+# "Held" and "abandoned" look identical from outside, and only guard 1 had a
+# staleness escape. A run killed mid-issue left this lock behind and every later
+# pass skipped forever — 5h of "an issue is in flight" with no owner alive and no
+# hint in the message about how to clear it.
 if [ -d "$WT_LOCK" ]; then
-  say "An issue is in flight (worktree lock held $(lock_age "$WT_LOCK")s). Skipping."
-  exit 0
+  wt_age="$(lock_age "$WT_LOCK")"
+  wt_pid="$(cat "$WT_LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$wt_pid" ] && kill -0 "$wt_pid" 2>/dev/null; then
+    say "An issue is in flight (pid $wt_pid, ${wt_age}s). Skipping."
+    exit 0
+  fi
+  if [ -n "$wt_pid" ]; then
+    say "Worktree lock owner (pid $wt_pid) is gone — reclaiming after ${wt_age}s."
+    rm -rf "$WT_LOCK"
+  elif [ "$wt_age" -gt "$STALE_AFTER" ]; then
+    # Pre-dates the pid file, or the write failed. Age is the only signal left.
+    say "Reclaiming stale worktree lock (${wt_age}s, no owner recorded)."
+    rm -rf "$WT_LOCK"
+  else
+    say "An issue is in flight (worktree lock held ${wt_age}s, no owner recorded). Skipping."
+    say "  If nothing is running, clear it: rm -rf $WT_LOCK"
+    exit 0
+  fi
 fi
 
 # ── guard 3: anything left to build? ─────────────────────────────────────────
