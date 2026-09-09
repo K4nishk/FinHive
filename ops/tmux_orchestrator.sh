@@ -163,7 +163,22 @@ fi
 TM="tmux -f /dev/null"                       # ignore the user's ~/.tmux.conf for layout stability
 SRC="[ -f '$ENV_LOCAL' ] && . '$ENV_LOCAL';" # every pane inherits credentials
 
-$TM new-session  -d -s "$SESSION" -n build -c "$REPO_DIR" -x 250 -y 60
+# Fail loudly if the tmux server is unreachable. Without this the rest of the
+# script runs against a server that does not exist and still prints success —
+# every set-option and send-keys errors to stderr and the ✓ at the end lies.
+if ! $TM new-session -d -s "$SESSION" -n build -c "$REPO_DIR" -x 250 -y 60 2>"$LOG_DIR/.tmux.err"; then
+  bad "Could not start the tmux server."
+  sed 's/^/    /' "$LOG_DIR/.tmux.err" >&2
+  echo
+  dim "Common causes:"
+  dim "  · running inside a sandbox that cannot reach /tmp/tmux-\$UID"
+  dim "  · a stale server socket — try: tmux kill-server"
+  dim "Run this from your own terminal, not from an automated session."
+  rm -f "$LOG_DIR/.tmux.err"
+  exit 1
+fi
+rm -f "$LOG_DIR/.tmux.err"
+
 $TM set-option   -t "$SESSION" -g mouse on
 $TM set-option   -t "$SESSION" -g history-limit 50000
 $TM set-option   -t "$SESSION" -g status-interval 5
