@@ -116,9 +116,16 @@ query($teamId: String!) {
 }
 """
 
+# first:250 trips Linear's query-complexity ceiling (max 10000) on a team with many
+# labels, so page at 100 and follow the cursor.
 Q_LABELS = """
-query($teamId: String!) {
-  team(id: $teamId) { labels(first: 250) { nodes { id name } } }
+query($teamId: String!, $after: String) {
+  team(id: $teamId) {
+    labels(first: 100, after: $after) {
+      nodes { id name }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
 }
 """
 
@@ -155,6 +162,18 @@ mutation($input: IssueCreateInput!) {
   issueCreate(input: $input) { success issue { id identifier title url } }
 }
 """
+
+
+def fetch_labels(key: str, team_id: str) -> dict[str, str]:
+    """name -> id for every label the team can use, following the cursor."""
+    out: dict[str, str] = {}
+    after = None
+    while True:
+        node = gql(Q_LABELS, {"teamId": team_id, "after": after}, key=key)["team"]["labels"]
+        out.update({l["name"]: l["id"] for l in node["nodes"]})
+        if not node["pageInfo"]["hasNextPage"]:
+            return out
+        after = node["pageInfo"]["endCursor"]
 
 
 def fetch_existing_titles(key: str, team_id: str, page: int = 50) -> set[str]:
@@ -239,7 +258,7 @@ def main() -> int:
     team_id = team["id"]
 
     projects = {p["name"]: p["id"] for p in gql(Q_PROJECTS, {"teamId": team_id}, key=key)["team"]["projects"]["nodes"]}
-    labels = {l["name"]: l["id"] for l in gql(Q_LABELS, {"teamId": team_id}, key=key)["team"]["labels"]["nodes"]}
+    labels = fetch_labels(key, team_id)
     existing = fetch_existing_titles(key, team_id)
 
     # Milestones become Linear projects, in first-appearance (build) order.
@@ -302,13 +321,27 @@ def main() -> int:
         projects[name] = res["project"]["id"]
         print(f"  {GRN}+{RST} project  {name}")
 
+    # Label creation can collide with a name the team query did not return — Linear also
+    # has workspace-scoped labels, and names are matched case-insensitively. A collision
+    # must never abort a 147-issue import, so re-read and carry on.
     for name in new_labels:
-        res = gql(M_LABEL, {"name": name, "teamId": team_id}, key=key)["issueLabelCreate"]
-        if not res["success"]:
-            print(f"  {YEL}!{RST} label    {name} — not created, continuing without it")
-            continue
-        labels[name] = res["issueLabel"]["id"]
-        print(f"  {GRN}+{RST} label    {name}")
+        try:
+            res = gql(M_LABEL, {"name": name, "teamId": team_id}, key=key)["issueLabelCreate"]
+            if res["success"]:
+                labels[name] = res["issueLabel"]["id"]
+                print(f"  {GRN}+{RST} label    {name}")
+                continue
+            raise LinearError("issueLabelCreate returned success=false")
+        except LinearError as exc:
+            labels = fetch_labels(key, team_id)                      # something else owns it
+            hit = labels.get(name) or next(
+                (v for k, v in labels.items() if k.lower() == name.lower()), None)
+            if hit:
+                labels[name] = hit
+                print(f"  {DIM}={RST} label    {name} {DIM}(already existed){RST}")
+            else:
+                print(f"  {YEL}!{RST} label    {name} — {exc}; continuing without it",
+                      file=sys.stderr)
 
     created, failed = 0, 0
     for row in to_create:
