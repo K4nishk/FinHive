@@ -687,15 +687,9 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
 # plus `while read` works on every bash and keeps the loop in the parent shell so
 # the counter survives (a pipeline would put it in a subshell).
 QUEUE_RUN="$LOG_DIR/.pending.$$"
-next_issues > "$QUEUE_RUN"
-trap 'rm -f "$QUEUE_RUN"' EXIT
+DEBT_RUN="$LOG_DIR/.debt.$$"
+trap 'rm -f "$QUEUE_RUN" "$DEBT_RUN"' EXIT
 
-TOTAL="$(grep -c . "$QUEUE_RUN" 2>/dev/null || echo 0)"
-if [ "${TOTAL:-0}" -eq 0 ]; then
-  say "Queue exhausted — nothing to build."; exit 0
-fi
-
-say "Queue: $TOTAL issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$CR_MAX_ROUNDS"
 say "Budget: \$$SESSION_BUDGET_USD, wind down at ${BUDGET_THRESHOLD_PCT}%  (session $FH_SESSION_ID)"
 built=0
 SESSION_BUILT=""
@@ -708,9 +702,12 @@ ENDED=""
 # an unclean PR near the bottom stops everything above it from landing however
 # many features get built on top. Clearing debt before starting anything new is
 # what keeps the stack shallow enough to actually merge.
-DEBT_RUN="$LOG_DIR/.debt.$$"
-debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
-trap 'rm -f "$QUEUE_RUN" "$DEBT_RUN"' EXIT
+#
+# This runs BEFORE the queue is snapshotted, on purpose. An issue can be both in
+# debt and pending — KCH-84 was, with an open PR and no completion record — and a
+# queue read first would still list it after remediation cleared it, so the pass
+# would try to BUILD an issue it had just fixed. run_issue's open-PR guard would
+# refuse, but only after logging a failure and counting a strike toward parking.
 DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
 if [ "${DEBT_N:-0}" -gt 0 ]; then
   say ""
@@ -727,6 +724,15 @@ if [ "${DEBT_N:-0}" -gt 0 ]; then
   done < "$DEBT_RUN"
   say ""
 fi
+
+# Snapshot the queue only now, so anything remediation just completed is gone.
+next_issues > "$QUEUE_RUN"
+TOTAL="$(grep -c . "$QUEUE_RUN" 2>/dev/null || echo 0)"
+if [ "${TOTAL:-0}" -eq 0 ]; then
+  say "Queue exhausted — nothing left to build."
+  wind_down "${ENDED:-queue drained}"; exit 0
+fi
+say "Queue: $TOTAL issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$CR_MAX_ROUNDS"
 
 [ -n "$ENDED" ] && { say "Pass ended before the queue — $ENDED"; wind_down "$ENDED"; exit 0; }
 
