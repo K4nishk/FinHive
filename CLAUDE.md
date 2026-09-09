@@ -115,6 +115,17 @@ These override any conflicting implementation. If code disagrees with these, the
 
 ---
 
+## Linear
+
+Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
+`~/.claude/CLAUDE.md` for the full convention. FinHive specifics:
+
+- **Product label**: `product:finhive` on every issue, always first
+- **Projects**: `FinHive <milestone> · <name>` — e.g. `FinHive M1a · Local Setup, Login & Encryption`
+- **Workstream label**: `ops`, `ci-cd`, `data`, `security`, `backend`, `business-logic`, `frontend`, `agent`, `auth`, `testing`, `observability`, `docs`
+- **Source of truth**: `output/Loan Manager/mvp2/linear_import.csv` — row order is build order, never re-sort it
+- **Import**: `python3 ops/seed_linear.py` (dry run) → `--apply`. Idempotent by title.
+
 ## Explicit Prohibitions
 
 - **Do not** hardcode API keys or secrets. Use `.env` files.
