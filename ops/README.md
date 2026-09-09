@@ -107,8 +107,9 @@ Other knobs: `CR_MAX_ROUNDS` (2) · `MAX_TURNS` · `LOCAL_CHECKS` · `SKIP_KILL_
 Passing one does not answer the others.
 
 1. **CLI gate** (pre-push, inside `orchestrator.sh`) — blocking findings return to the
-   agent up to `CR_MAX_ROUNDS`, then a mediator fixes, dismisses with rationale, or
-   escalates to a new Linear issue carrying every attempted fix and why it failed.
+   agent up to `CR_MAX_ROUNDS`, then immediately escalate to a new Linear issue carrying
+   every attempted fix and why it failed. No third remediation cycle, mediator fix, or
+   dismissal — see `docs/AGENT_CONTRACT.md`.
 2. **SaaS PR review** (`remediate_prs.sh`) — triggered automatically when a PR opens
    (`reviews.auto_review.enabled` in `.coderabbit.yaml`); answers comments posted after.
    Pushes to the **same branch**, so the stack never deepens.

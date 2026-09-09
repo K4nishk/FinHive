@@ -1,9 +1,9 @@
-"""CodeRabbit repo config (KCH-83) — acceptance is that .coderabbit.yaml exists,
-declares path filters, restates CLAUDE.md conventions via path_instructions,
-and enables request_changes_workflow so opening a PR both triggers a review
-and blocks merge on any actionable finding. Not a full schema check against
-CodeRabbit's JSON schema (unreachable without network) -- see
-`coderabbit config validate`.
+"""CodeRabbit repo config (KCH-83) — acceptance is that .coderabbit.yaml
+exists, declares path filters, restates CLAUDE.md conventions via
+path_instructions, and enables request_changes_workflow so opening a PR
+both triggers a review and blocks merge on any actionable finding. Not a
+full schema check against CodeRabbit's JSON schema (unreachable without
+network) -- see `coderabbit config validate`.
 """
 
 from __future__ import annotations
@@ -67,3 +67,12 @@ def test_path_instructions_restate_key_business_rules() -> None:
     )
     for term in ("giving_date", "Decimal", "QTableWidget", "raw SQL"):
         assert term in combined, f"path_instructions missing coverage of: {term}"
+
+
+def test_ruff_tool_is_enabled_under_reviews() -> None:
+    """CodeRabbit reads Ruff settings from reviews.tools.ruff.enabled --
+    a root-level `tools` mapping is not read for reviews at all.
+    """
+    data = _load()
+    assert "tools" not in data, "tools must live under reviews, not at root"
+    assert data["reviews"]["tools"]["ruff"]["enabled"] is True
