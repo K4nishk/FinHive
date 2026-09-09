@@ -32,9 +32,11 @@ class GetAllLoans:
             loans = uow.loans.get_all_active(db_filters)
 
         # Apply by_months filter in Python
-        # by_months filter: excludes loans with no due_date; shows loans where
-        # due_date.month is a member of the selected set AND due_date.year == current_year.
-        # An empty/None selection means no filter (select-none == no-filter, not select-all).
+        # by_months filter: excludes loans with no due_date; shows loans
+        # where due_date.month is a member of the selected set AND
+        # due_date.year == current_year.
+        # An empty/None selection means no filter (select-none ==
+        # no-filter, not select-all).
         if by_months:
             selected_months = set(by_months)
             current_year = date.today().year

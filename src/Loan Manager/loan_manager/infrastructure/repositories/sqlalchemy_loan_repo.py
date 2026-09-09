@@ -89,7 +89,8 @@ class SqlAlchemyLoanRepository(ILoanRepository):
                 query = query.filter(
                     LoanModel.depositor_group.ilike(f"%{filters['depositor_group']}%")
                 )
-            # by_months is NOT applied at DB level — it's an application-layer filter
+            # by_months is NOT applied at DB level — it's an
+            # application-layer filter
 
         models = query.all()
         return [loan_model_to_entity(m) for m in models]

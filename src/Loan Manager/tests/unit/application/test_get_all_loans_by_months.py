@@ -71,7 +71,9 @@ def sample_loans() -> list[Loan]:
         _make_loan("march_due", date(CURRENT_YEAR, 3, 10)),
         _make_loan("july_due", date(CURRENT_YEAR, 7, 20)),
         _make_loan("june_due", date(CURRENT_YEAR, 6, 5)),
-        _make_loan("overdue_march", date(CURRENT_YEAR, 3, 1), status=LoanStatus.OVERDUE),
+        _make_loan(
+            "overdue_march", date(CURRENT_YEAR, 3, 1), status=LoanStatus.OVERDUE
+        ),
         _make_loan("no_due_date", None),
         _make_loan("prior_year_march", date(CURRENT_YEAR - 1, 3, 10)),
     ]

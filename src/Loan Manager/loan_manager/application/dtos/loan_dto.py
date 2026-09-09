@@ -90,7 +90,8 @@ class LoanFilterDTO(BaseModel):
             return v
         for month in v:
             if not (1 <= month <= 12):
-                raise ValueError(f"by_months entries must be in 1..12, got {month}")
+                msg = f"by_months entries must be in 1..12, got {month}"
+                raise ValueError(msg)
         return v
 
 

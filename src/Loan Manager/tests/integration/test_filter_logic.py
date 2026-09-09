@@ -103,7 +103,8 @@ class TestByMonthFilter:
         uc = _get_all_loans_uc(db_session)
         result = uc.execute(LoanFilterDTO(by_months=[3, 7]))
 
-        # No sample loan is due in March; July is due for b6, b7, b12, b13, b14, b15.
+        # No sample loan is due in March; July is due for b6, b7, b12,
+        # b13, b14, b15.
         names = {loan.borrower_name for loan in result}
         assert names == {"b6", "b7", "b12", "b13", "b14", "b15"}
 
