@@ -38,6 +38,9 @@ jobs:
       - name: mypy --strict (domain, calc)
         run: mypy --strict finhive/domain finhive/calc
 
+      - name: import-linter (architecture boundaries)
+        run: lint-imports
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

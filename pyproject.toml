@@ -75,3 +75,28 @@ module = ["finhive.domain.*", "finhive.calc.*"]
 disallow_untyped_defs = true
 disallow_any_generics = true
 strict_equality = true
+
+# ── architecture boundaries ─────────────────────────────────────────────────
+# ARD v2.0.0 §5 "How the boundary is *enforced* (not just documented)": these
+# contracts are the enforcement, not the diagram. `lint-imports` runs in CI
+# (see .github/workflows/ci.yml) and fails the build on a violating import.
+[tool.importlinter]
+root_package = "finhive"
+
+[[tool.importlinter.contracts]]
+name = "calc-service is pure"
+type = "forbidden"
+source_modules = ["finhive.calc"]
+forbidden_modules = ["finhive.db", "finhive.agent", "httpx", "asyncpg"]
+
+[[tool.importlinter.contracts]]
+name = "agent never touches SQL directly"
+type = "forbidden"
+source_modules = ["finhive.agent"]
+forbidden_modules = ["asyncpg", "finhive.db.raw"]
+
+[[tool.importlinter.contracts]]
+name = "domain does not depend on infrastructure or presentation"
+type = "forbidden"
+source_modules = ["finhive.domain"]
+forbidden_modules = ["finhive.db", "api"]
