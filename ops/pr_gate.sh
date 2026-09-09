@@ -399,10 +399,16 @@ regate() {
     esac
     return 1
   fi
-  if [ "$rc" -ne 0 ]; then
-    fail "coderabbit review exited $rc — the round is not a review, see $out"
-    return 1
-  fi
+  # rc is NOT the review outcome. `coderabbit review` publishes no reliable
+  # finding-dependent exit-code contract — its own docs point integrations at the
+  # completion event — so a review that finished and reported findings can still
+  # exit non-zero, and rejecting on rc discards it before it is ever published.
+  #
+  # This check was added deliberately, when round_unavailable was a blocklist of
+  # failure strings and rc was a real second net against modes nobody had a
+  # pattern for. round_unavailable is now `! round_completed`, which catches every
+  # non-completion by construction, so rc has no safety left to add — only the
+  # ability to reject a completed review. It stays in the log line as a diagnostic.
   say "  round complete (rc=$rc): $(round_blocking_count "$out") blocking finding(s) → $out"
   return 0
 }

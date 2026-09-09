@@ -207,6 +207,28 @@ assert_contains "clean report calls out the passing verdict" "$report_clean" "�
 report_none="$(build_report KCH-777 "$LOGS" "$FIX_REPO")"
 assert_contains "no-run report says unreviewed" "$report_none" "Unreviewed — cannot merge"
 
+# ── a completed review is a review, whatever the CLI exits with ─────────────
+# regate rejected any non-zero rc as "not a review". `coderabbit review` has no
+# documented finding-dependent exit code, so a run that finished and reported
+# findings could exit non-zero and be discarded before publishing — which is
+# what happened to round 8. Completion is the authority; rc is a diagnostic.
+cat > "$LOGS/done_with_findings.txt" <<'EOF'
+  major [Data Integrity & Integration]
+  Do not use rc as the review outcome.
+
+Major    1
+
+8 files reviewed:
+EOF
+if round_unavailable "$LOGS/done_with_findings.txt"; then
+  fail=$((fail+1)); echo "FAIL: a completed review with findings must not read as unavailable"
+else pass=$((pass+1)); fi
+assert_eq "and it is not classified as a failure" "" "$(round_failure_kind "$LOGS/done_with_findings.txt")"
+assert_eq "its findings are counted" "1" "$(round_blocking_count "$LOGS/done_with_findings.txt")"
+# regate must not carry an rc gate that can veto a completed review.
+assert_eq "regate does not reject on the CLI exit code" "0" \
+  "$(sed -n '/^regate() {/,/^}/p' "$OPS_DIR/pr_gate.sh" | grep -vE '^[[:space:]]*#' | grep -c '"\$rc" -ne 0')"
+
 # ── issue_branch ─────────────────────────────────────────────────────────
 assert_eq "issue_branch matches the orchestrator's naming" "feature/kch-78" "$(issue_branch KCH-78)"
 
