@@ -71,7 +71,7 @@ rm -rf "$LOGS"; mkdir -p "$LOGS"
 
 # ── round_unavailable ─────────────────────────────────────────────────────
 echo "Error: rate limit exceeded, try again later" > "$LOGS/quota.txt"
-echo "1 issue found: Major - missing null check" > "$LOGS/findings.txt"
+printf '  major [Functional Correctness]\n  missing null check\n\nMajor    1\n' > "$LOGS/findings.txt"
 if round_unavailable "$LOGS/quota.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag quota text"; fi
 if round_unavailable "$LOGS/findings.txt"; then fail=$((fail+1)); echo "FAIL: round_unavailable should not flag ordinary findings"; else pass=$((pass+1)); fi
 
@@ -111,13 +111,28 @@ assert_eq "a CLI usage error is never the clean final verdict" "failure" "$VERDI
 rm -f "$LOGS/KCH-98_cr_round0.txt"
 
 # ── round_blocking_count / round_blocking_lines ──────────────────────────
+# Shaped like real CodeRabbit output: indented "severity [Category]" headers,
+# then a tally block. A bare keyword grep counted the tally lines too.
 cat > "$LOGS/mixed.txt" <<'EOF'
-1. Nit: rename variable for clarity
-2. Major: SQL built via string concatenation
-3. Blocker: money computed with float, not Decimal
-4. Minor: docstring formatting
+  nit [Style]
+  Rename variable for clarity
+  major [Security & Privacy]
+  SQL built via string concatenation
+  blocker [Functional Correctness]
+  money computed with float, not Decimal
+
+Major    1
+Blocker  1
 EOF
-assert_eq "round_blocking_count counts only blocking severities" "2" "$(round_blocking_count "$LOGS/mixed.txt")"
+assert_eq "counts findings, not the tally lines that repeat them" "2" "$(round_blocking_count "$LOGS/mixed.txt")"
+# The count must fail SAFE. If CodeRabbit changes its layout, over-reporting costs
+# a look; under-reporting merges unreviewed code.
+printf '  major [X]\n' > "$LOGS/hdr_only.txt"
+assert_eq "headers with no tally still count" "1" "$(round_blocking_count "$LOGS/hdr_only.txt")"
+printf 'Major:  something bad\n' > "$LOGS/legacy.txt"
+assert_eq "an unfamiliar layout still counts rather than reading clean" "1" "$(round_blocking_count "$LOGS/legacy.txt")"
+printf 'CodeRabbit Review\n0 issues found. A high-quality diff.\n' > "$LOGS/prose.txt"
+assert_eq "prose mentioning a severity word is not a finding" "0" "$(round_blocking_count "$LOGS/prose.txt")"
 assert_contains "round_blocking_lines surfaces the Major line" "$(round_blocking_lines "$LOGS/mixed.txt")" "SQL built via string concatenation"
 assert_contains "round_blocking_lines surfaces the Blocker line" "$(round_blocking_lines "$LOGS/mixed.txt")" "float, not Decimal"
 
@@ -138,8 +153,8 @@ echo "0 issues found" > "$LOGS/KCH-2_cr_round0.txt"
 gate_verdict KCH-2 "$LOGS"
 assert_eq "clean final round -> success" "success" "$VERDICT_STATE"
 
-echo "1 issue found: Critical - hardcoded secret" > "$LOGS/KCH-3_cr_round0.txt"
-echo "1 issue found: Critical - hardcoded secret" > "$LOGS/KCH-3_cr_round1.txt"
+printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n' > "$LOGS/KCH-3_cr_round0.txt"
+printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n' > "$LOGS/KCH-3_cr_round1.txt"
 gate_verdict KCH-3 "$LOGS"
 assert_eq "blocking findings survive to the final round -> failure" "failure" "$VERDICT_STATE"
 
@@ -149,7 +164,7 @@ gate_verdict KCH-4 "$LOGS"
 assert_eq "final round unavailable overrides an earlier clean round -> failure" "failure" "$VERDICT_STATE"
 
 # A clean round that is NOT the final one must not short-circuit the verdict.
-echo "1 issue found: Blocker - x" > "$LOGS/KCH-5_cr_round0.txt"
+printf '  blocker [Functional Correctness]\n  x\n\nBlocker  1\n' > "$LOGS/KCH-5_cr_round0.txt"
 echo "0 issues found" > "$LOGS/KCH-5_cr_round1.txt"
 gate_verdict KCH-5 "$LOGS"
 assert_eq "verdict reads the LAST round, not the first" "success" "$VERDICT_STATE"

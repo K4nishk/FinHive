@@ -112,8 +112,27 @@ pr_base_for_branch() {
 # against yet) — absence means "cannot verify", never "verified".
 round_sha() { [ -f "${1%.txt}.sha" ] && cat "${1%.txt}.sha" 2>/dev/null || true; }
 
-round_blocking_count() { grep -icE "$CR_BLOCKING" "$1" 2>/dev/null || true; }
-round_blocking_lines() { grep -iE "$CR_BLOCKING" "$1" 2>/dev/null || true; }
+# Blocking findings in a round log, most authoritative source first.
+#
+# CodeRabbit prints each finding as "  major [Category]" and then a tally block
+# repeating "Major    1". A bare keyword grep counted both, so KCH-84's round 2
+# read as 2 blocking findings when it had 1.
+#
+# The order matters more than the patterns. Anchoring only to the header form
+# would fail toward ZERO the day CodeRabbit changes its layout — silently calling
+# an unreviewed diff clean, the exact failure this file exists to prevent. So:
+# CodeRabbit's own tally if it printed one, else the finding headers, else a
+# loose keyword count. Each fallback can over-report, never under-report.
+round_blocking_count() {
+  local tally hdr
+  tally="$(grep -iE "^[[:space:]]*($CR_BLOCKING)[[:space:]]+[0-9]+[[:space:]]*$" "$1" 2>/dev/null \
+           | awk '{ s += $2 } END { print s + 0 }')"
+  if [ "${tally:-0}" -gt 0 ]; then printf '%s' "$tally"; return; fi
+  hdr="$(grep -icE "^[[:space:]]*($CR_BLOCKING)[[:space:]]*\\[" "$1" 2>/dev/null || true)"
+  if [ "${hdr:-0}" -gt 0 ]; then printf '%s' "$hdr"; return; fi
+  grep -icE "^[[:space:]]*($CR_BLOCKING)[[:space:]]*[:\\[]" "$1" 2>/dev/null || true
+}
+round_blocking_lines() { grep -iE -A4 "^[[:space:]]*($CR_BLOCKING)[[:space:]]*[:\\[]" "$1" 2>/dev/null || true; }
 
 # The branch ops/orchestrator.sh names for an issue: feature/<issue lowercased>.
 issue_branch() { printf 'feature/%s' "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"; }

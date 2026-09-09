@@ -118,6 +118,59 @@ printf 'KCH-78\t3\tts\nKCH-84\t1\tts\n' > "$STUCK"
 stuck_clear KCH-78
 assert_eq "clearing one of several rows keeps the rest" "KCH-84	1	ts" "$(cat "$STUCK")"
 
+# ── gate rounds must be monotonic across passes ─────────────────────────────
+# run_gate restarted at 0 every pass while --regate appends, and pr_gate.sh picks
+# the last round by NUMBER. A KCH-78 remediation went clean at round 1 while a
+# stale round 2 from an earlier regate survived, so the publisher would have
+# failed a PR from a log three commits out of date.
+GLOG="$FIX/gl"; mkdir -p "$GLOG"
+next_gate_round() {
+  local issue="$1" f n max=-1
+  for f in "$GLOG/${issue}_cr_round"*.txt; do
+    [ -e "$f" ] || continue
+    n="$(basename "$f" | sed 's/.*_cr_round//;s/\.txt$//')"
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ "$n" -gt "$max" ] && max="$n"
+  done
+  echo "$((max + 1))"
+}
+assert_eq "first gate starts at round 0" "0" "$(next_gate_round KCH-78)"
+: > "$GLOG/KCH-78_cr_round0.txt"; : > "$GLOG/KCH-78_cr_round1.txt"
+assert_eq "a second pass continues, never restarts at 0" "2" "$(next_gate_round KCH-78)"
+: > "$GLOG/KCH-78_cr_round2.txt"
+assert_eq "a regate round is counted too" "3" "$(next_gate_round KCH-78)"
+: > "$GLOG/KCH-78_cr_round10.txt"
+assert_eq "numeric max, not lexical" "11" "$(next_gate_round KCH-78)"
+: > "$GLOG/KCH-78_cr_roundXX.txt"
+assert_eq "a non-numeric round name is ignored" "11" "$(next_gate_round KCH-78)"
+assert_eq "another issue is unaffected" "0" "$(next_gate_round KCH-84)"
+
+# ── blocking count must not include CodeRabbit's tally line ─────────────────
+CR_BLOCKING="critical|major|blocker|high"
+blocking_count() { grep -icE "^[[:space:]]*($CR_BLOCKING)[[:space:]]*\[" "$1" 2>/dev/null || true; }
+cat > "$FIX/one.txt" <<'EOF'
+  major [Security & Privacy]
+
+  Validate the job and command failure paths.
+
+Major    1
+
+1 file reviewed:
+EOF
+assert_eq "one finding plus its tally counts as one" "1" "$(blocking_count "$FIX/one.txt")"
+cat > "$FIX/clean.txt" <<'EOF'
+CodeRabbit Review
+0 issues found. A high-quality diff.
+EOF
+assert_eq "prose mentioning 'high' is not a finding" "0" "$(blocking_count "$FIX/clean.txt")"
+cat > "$FIX/two.txt" <<'EOF'
+  major [Functional Correctness]
+  critical [Security & Privacy]
+Major    1
+Critical 1
+EOF
+assert_eq "two findings plus two tally lines counts as two" "2" "$(blocking_count "$FIX/two.txt")"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

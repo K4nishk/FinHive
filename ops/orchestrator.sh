@@ -191,6 +191,36 @@ except Exception: pass" "$jf" >> "$LOG_DIR/${issue}_agent.log" 2>/dev/null
 # Consecutive no-commit failures per issue. An issue the agent cannot move is a
 # human's problem; without this it is re-attempted on every pass at full token
 # cost and blocks nothing but the budget.
+# Highest gate round already recorded for an issue, plus one.
+next_gate_round() {
+  local issue="$1" f n max=-1
+  for f in "$LOG_DIR/${issue}_cr_round"*.txt; do
+    [ -e "$f" ] || continue
+    n="$(basename "$f" | sed 's/.*_cr_round//;s/\.txt$//')"
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ "$n" -gt "$max" ] && max="$n"
+  done
+  echo "$((max + 1))"
+}
+
+# Blocking findings in a round log.
+#
+# CodeRabbit prints each finding as "  major [Category]" and then a tally block
+# that repeats "Major    1". A bare keyword grep counts both, so every round read
+# one finding higher than it was. Anchor to the finding header form.
+# Same three-tier rule as pr_gate.sh's round_blocking_count — see the reasoning
+# there. Each fallback can over-report, never under-report: a miscount that hides
+# a finding merges unreviewed code, a miscount that invents one costs a look.
+blocking_count() {
+  local tally hdr
+  tally="$(grep -iE "^[[:space:]]*($CR_BLOCKING)[[:space:]]+[0-9]+[[:space:]]*$" "$1" 2>/dev/null \
+           | awk '{ s += $2 } END { print s + 0 }')"
+  if [ "${tally:-0}" -gt 0 ]; then printf '%s' "$tally"; return; fi
+  hdr="$(grep -icE "^[[:space:]]*($CR_BLOCKING)[[:space:]]*\\[" "$1" 2>/dev/null || true)"
+  if [ "${hdr:-0}" -gt 0 ]; then printf '%s' "$hdr"; return; fi
+  grep -icE "^[[:space:]]*($CR_BLOCKING)[[:space:]]*[:\\[]" "$1" 2>/dev/null || true
+}
+
 # ── review debt ──────────────────────────────────────────────────────────────
 # Issues whose PR is open but whose gate is not clean: quota, a dropped review,
 # or blocking findings that survived. They are NOT queue work — rebuilding one
@@ -421,7 +451,17 @@ PY
 # Runs pre-push so fix commits land in the PR's first commit set. Returns 0 when the
 # final round is clean, 1 when blocking findings survive.
 run_gate() {
-  local issue="$1" prompt_file="$2" gate_base="${3:-$BASE_BRANCH}" round=0 out
+  local issue="$1" prompt_file="$2" gate_base="${3:-$BASE_BRANCH}" out
+  # Start after the highest round already on disk, never at 0.
+  #
+  # Restarting at 0 overwrote earlier rounds AND left any higher-numbered one
+  # behind, and pr_gate.sh picks the last round by NUMBER. On 2026-09-09 a
+  # remediation of KCH-78 went clean at round 1 (15:36) while a stale round 2
+  # from an earlier --regate (10:29) survived — so the loop cleared the debt
+  # correctly and the publisher would still have failed the PR from a log three
+  # commits out of date. Monotonic numbering makes "last" mean "latest".
+  local round; round="$(next_gate_round "$issue")"
+  local first_round="$round"
   if [ "${SKIP_GATE:-0}" = "1" ]; then
     say "  SKIP_GATE=1 — gate not run"; return 2
   fi
@@ -451,17 +491,17 @@ run_gate() {
       return 2
     fi
     local blocking
-    blocking="$(grep -icE "$CR_BLOCKING" "$out" || true)"
+    blocking="$(blocking_count "$out")"
     if [ "${blocking:-0}" -eq 0 ]; then
       say "  gate clean at round $round"
       return 0
     fi
     say "  $blocking blocking finding(s) at round $round"
-    if [ "$round" -ge "$CR_MAX_ROUNDS" ]; then
+    if [ "$((round - first_round))" -ge "$CR_MAX_ROUNDS" ]; then
       return 1
     fi
     round=$((round + 1))
-    say "  returning findings to the agent (cycle $round of $CR_MAX_ROUNDS)"
+    say "  returning findings to the agent (cycle $((round - first_round)) of $CR_MAX_ROUNDS)"
     {
       echo "The CodeRabbit CLI gate returned blocking findings on your change."
       echo "Fix them. Do not disable the check, weaken an assertion, or delete a test."
