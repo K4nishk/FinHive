@@ -14,15 +14,21 @@ implementing a `KCH-*` Linear issue in this repository.
    tip of `development` (or from the current stack tip — see Stacked PRs below).
 2. **Implement** — the smallest correct change for the issue, with tests. No unrelated
    refactors, no scope creep.
-3. **Push, open a PR** targeting `development` (or the branch it stacked on).
-4. **CodeRabbit CLI gate** — run pre-push: `coderabbit review --committed --base <base>`.
-   Blocking findings return to the agent; advisory findings do not block.
-5. **Fix cycles — maximum two.**
+3. **Test** — run the full test suite before every commit. Do not commit with failing
+   tests.
+4. **CodeRabbit CLI gate** — run before pushing: `coderabbit review --committed --base
+   <base>`. Blocking findings return to the agent; advisory findings do not block. A
+   blocking finding must be resolved (or escalated, below) before the branch is pushed
+   or a PR is opened — never push a revision the gate hasn't cleared.
+5. **Push, open a PR** targeting `development` (or the branch it stacked on), once the
+   gate has no blocking findings.
+6. **Fix cycles — maximum two.**
    - No blocking findings → ready for human review.
-   - Cycle 1: fix the blocking findings, push, re-review.
-   - Cycle 2: if findings persist, fix again, push, re-review.
+   - Cycle 1: fix the blocking findings, re-run the test suite, re-run the gate.
+   - Cycle 2: if findings persist, fix again, re-run the test suite, re-run the gate.
    - Still blocking after cycle 2 → **escalate** (below). Do not attempt a third cycle.
-6. **Human merges.** The agent never merges. It opens PRs (and marks one draft on
+   - Only push (or push an update) once a cycle ends with no blocking findings.
+7. **Human merges.** The agent never merges. It opens PRs (and marks one draft on
    escalation); a human approves and merges to `development`.
 
 ## Escalation payload
