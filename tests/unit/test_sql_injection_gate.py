@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 import tomllib
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
@@ -51,12 +52,15 @@ def test_s608_is_not_suppressed_for_the_finhive_ci_target() -> None:
     S608 for the package ruff actually lints without changing that table.
     """
     fixture = ROOT / "finhive" / "_kch84_sql_injection_gate_probe.py"
-    assert not fixture.exists(), f"refusing to overwrite unexpected file: {fixture}"
+    assert not fixture.exists(), (
+        f"refusing to overwrite unexpected file: {fixture}"
+    )
     try:
         result = _ruff_check(
             fixture.parent,
             'from __future__ import annotations\n\n\n'
-            'def q(uid):\n    return f"SELECT * FROM users WHERE id = {uid}"\n',
+            'def q(uid):\n'
+            '    return f"SELECT * FROM users WHERE id = {uid}"\n',
             filename=fixture.name,
         )
     finally:
@@ -66,8 +70,27 @@ def test_s608_is_not_suppressed_for_the_finhive_ci_target() -> None:
 
 
 def test_ci_runs_the_rule_set_against_finhive() -> None:
-    text = WORKFLOW.read_text()
-    assert "ruff check finhive tests" in text
+    """The gate is only real if an active step on pull_request actually runs
+    it -- a matching string could just as easily sit in a comment, a step
+    gated behind ``if: false``, or one marked ``continue-on-error: true``,
+    all of which would let SQL string construction slip past this test.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    assert "pull_request" in workflow[True], (
+        "workflow must trigger on pull_request for the gate to run pre-merge"
+    )
+
+    ruff_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if "ruff check finhive tests" in step.get("run", "")
+    ]
+    assert ruff_steps, "no step runs 'ruff check finhive tests'"
+    assert any(
+        not step.get("continue-on-error", False) and "if" not in step
+        for step in ruff_steps
+    ), "the ruff step must run unconditionally and not tolerate failure"
 
 
 def test_fstring_sql_constant_is_blocked(tmp_path: Path) -> None:
@@ -84,7 +107,8 @@ def test_percent_formatted_sql_constant_is_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
         'from __future__ import annotations\n\n\n'
-        'def q(uid):\n    return "SELECT * FROM users WHERE id = %s" % (uid,)\n',
+        'def q(uid):\n'
+        '    return "SELECT * FROM users WHERE id = %s" % (uid,)\n',
     )
     assert result.returncode != 0
     assert "S608" in result.stdout
@@ -94,7 +118,8 @@ def test_dot_format_sql_constant_is_blocked(tmp_path: Path) -> None:
     result = _ruff_check(
         tmp_path,
         'from __future__ import annotations\n\n\n'
-        'def q(uid):\n    return "SELECT * FROM users WHERE id = {}".format(uid)\n',
+        'def q(uid):\n'
+        '    return "SELECT * FROM users WHERE id = {}".format(uid)\n',
     )
     assert result.returncode != 0
     assert "S608" in result.stdout
