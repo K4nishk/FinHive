@@ -133,6 +133,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     rows = _rows(session_id())
     if any(r.get("error") == "limit" for r in rows):
         print(f"{RED}HARD STOP{RST} — the platform reported a usage limit this session")
+        print("VERDICT=HARDSTOP")
         return 2
     t = totals(rows)
     pct = (t["cost_usd"] / args.budget_usd * 100) if args.budget_usd > 0 else 0.0
@@ -141,6 +142,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     colour = GRN if pct < 75 else (YEL if pct < args.threshold else RED)
     print(f"  {colour}{bar}{RST} {pct:5.1f}%  ${t['cost_usd']:.4f} / ${args.budget_usd:.2f}"
           f"  {DIM}({t['calls']} calls, {t['input'] + t['output']:,} tok){RST}")
+    # A sentinel the caller can require. Exit codes alone are ambiguous: python
+    # exits 2 on argparse errors and on a missing file, which is indistinguishable
+    # from a deliberate "hard stop" code. A crashed meter must never read as a
+    # platform limit — that produced a false wind-down on 2026-09-08.
+    print("VERDICT=THRESHOLD" if pct >= args.threshold else "VERDICT=OK")
     return 1 if pct >= args.threshold else 0
 
 

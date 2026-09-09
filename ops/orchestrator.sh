@@ -32,10 +32,18 @@ set -uo pipefail
 # ── relocate (rule 1) ────────────────────────────────────────────────────────
 if [ "${FH_RELOCATED:-}" != "1" ]; then
   _src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  _copy="${TMPDIR:-/tmp}/finhive-orchestrator.$$.sh"
-  cp "$_src/orchestrator.sh" "$_copy" || exit 1
-  chmod +x "$_copy"
-  FH_RELOCATED=1 FH_REAL_OPS="$_src" exec "$_copy" "$@"
+  _dir="${TMPDIR:-/tmp}/finhive-ops.$$"
+  mkdir -p "$_dir" || exit 1
+  # Relocate the HELPERS too, not just this script. run_issue resets the worktree,
+  # which can delete a helper that only exists in an unpushed commit — the loop then
+  # calls a script that is no longer there and misreads the failure. Relocating
+  # orchestrator.sh alone left usage.py exposed to exactly that.
+  cp "$_src/orchestrator.sh" "$_dir/" || exit 1
+  for _h in usage.py pr_gate.sh; do
+    [ -f "$_src/$_h" ] && cp "$_src/$_h" "$_dir/"
+  done
+  chmod +x "$_dir"/*.sh "$_dir"/*.py 2>/dev/null
+  FH_RELOCATED=1 FH_REAL_OPS="$_src" FH_TMP_OPS="$_dir" exec "$_dir/orchestrator.sh" "$@"
 fi
 
 OPS_DIR="${FH_REAL_OPS:?FH_REAL_OPS unset — relocation failed}"
@@ -75,7 +83,9 @@ export SESSION_BUDGET_USD BUDGET_THRESHOLD_PCT
 FH_SESSION_ID="${FH_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 export FH_SESSION_ID
 SESSION_START="$(date +%s)"
-USAGE="$OPS_DIR/usage.py"
+# Run the relocated copy — the in-repo one can vanish when the worktree resets.
+USAGE="${FH_TMP_OPS:-$OPS_DIR}/usage.py"
+[ -f "$USAGE" ] || USAGE="$OPS_DIR/usage.py"
 
 say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
@@ -123,15 +133,22 @@ next_issues() {
     | grep -Fx -f <(printf '%s\n' "$pend")
 }
 
-issue_title() { grep -P "^\d+\t$1\t" "$QUEUE" 2>/dev/null | cut -f5 | head -1; }
+# BSD grep (macOS) has no -P, so the original PCRE pattern matched nothing and every
+# issue logged as "untitled". awk is portable and reads the field directly.
+issue_title() { awk -F'\t' -v i="$1" '$2 == i { print $5; exit }' "$QUEUE" 2>/dev/null; }
 
 # Rule 3: deepest unmerged feature branch, measured in commits ahead of the base.
+# $1 = the branch being built, excluded so an issue never stacks on itself.
+# Rebuilding KCH-78 picked feature/kch-78 as its own base, which reset the branch
+# onto its own tip — the agent then saw the work already done and made no commits.
 stack_tip() {
-  local best="" bestn=0 n
+  local skip="${1:-}" best="" bestn=0 n short
   for b in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/feature/ 2>/dev/null); do
+    short="${b#origin/}"
+    [ -n "$skip" ] && [ "$short" = "$skip" ] && continue
     git merge-base --is-ancestor "$b" "origin/$BASE_BRANCH" 2>/dev/null && continue
     n="$(git rev-list --count "origin/$BASE_BRANCH..$b" 2>/dev/null || echo 0)"
-    if [ "$n" -gt "$bestn" ]; then bestn="$n"; best="${b#origin/}"; fi
+    if [ "$n" -gt "$bestn" ]; then bestn="$n"; best="$short"; fi
   done
   printf '%s' "$best"
 }
@@ -162,9 +179,24 @@ except Exception: pass" "$jf" >> "$LOG_DIR/${issue}_agent.log" 2>/dev/null
 }
 
 # 0 = room left · 1 = at/over threshold · 2 = platform said stop
+#
+# Trusts the VERDICT sentinel, not the exit code. python exits 2 on an argparse
+# error and on a missing file, which previously read as "platform hard stop" and
+# wound the loop down for no reason. A broken meter is a warning, not a stop.
 budget_state() {
-  python3 "$USAGE" check --budget-usd "$SESSION_BUDGET_USD" --threshold "$BUDGET_THRESHOLD_PCT" 2>/dev/null
-  return $?
+  local out verdict
+  out="$(python3 "$USAGE" check --budget-usd "$SESSION_BUDGET_USD" \
+         --threshold "$BUDGET_THRESHOLD_PCT" 2>&1)"
+  verdict="$(printf '%s\n' "$out" | sed -n 's/^VERDICT=\(.*\)$/\1/p' | tail -1)"
+  printf '%s\n' "$out" | grep -v '^VERDICT=' || true
+  case "$verdict" in
+    OK)        return 0 ;;
+    THRESHOLD) return 1 ;;
+    HARDSTOP)  return 2 ;;
+    *)
+      say "  WARNING: usage meter did not report (is ops/usage.py present?) — continuing unmetered"
+      return 0 ;;
+  esac
 }
 
 # ── wind-down ────────────────────────────────────────────────────────────────
@@ -358,11 +390,28 @@ run_issue() {
   git reset --hard --quiet HEAD 2>/dev/null || true
   git clean -fdq 2>/dev/null || true      # locks are gitignored (rule 2); this is safe
 
-  local base; base="$(stack_tip)"
+  local base; base="$(stack_tip "$branch")"
   if [ -n "$base" ] && git rev-parse --verify --quiet "origin/$base" >/dev/null; then
     say "  stacking on $base ($(git rev-list --count "origin/$BASE_BRANCH..origin/$base") ahead)"
   else
     base="$BASE_BRANCH"; say "  branching from $BASE_BRANCH"
+  fi
+
+  # `checkout -B` RESETS an existing local branch to the start point, which silently
+  # discards commits that were never pushed. That destroyed a commit on 2026-09-08,
+  # including the helper the loop itself depends on. Refuse instead.
+  if git rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+    local unpushed
+    if git rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
+      unpushed="$(git rev-list --count "origin/$branch..$branch" 2>/dev/null || echo 0)"
+    else
+      unpushed="$(git rev-list --count "origin/$BASE_BRANCH..$branch" 2>/dev/null || echo 0)"
+    fi
+    if [ "${unpushed:-0}" -gt 0 ]; then
+      fail "$branch has $unpushed unpushed commit(s) — refusing to reset and lose them"
+      fail "  push them (git push -u origin $branch) or delete the branch, then re-run"
+      return 1
+    fi
   fi
 
   git checkout -q -B "$branch" "origin/$base" 2>/dev/null || {
@@ -383,7 +432,7 @@ run_issue() {
   fi
 
   git add -A 2>/dev/null || true
-  git commit -q -m "$issue: ${title:-implement}" 2>/dev/null || true
+  git commit -q -m "$issue: ${title:-implement}" >/dev/null 2>&1 || true
 
   if [ "$(git rev-parse HEAD)" = "$before" ]; then
     fail "$issue produced no commits (agent rc=$rc) — see $LOG_DIR/${issue}_agent.log"
