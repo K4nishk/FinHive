@@ -12,7 +12,7 @@ class GetAllLoans:
 
     def execute(self, filters: Optional[LoanFilterDTO] = None) -> list[LoanDTO]:
         db_filters = None
-        by_month = None
+        by_months = None
 
         if filters:
             db_filters = {}
@@ -24,22 +24,24 @@ class GetAllLoans:
                 db_filters["depositor_name"] = filters.depositor_name
             if filters.depositor_group:
                 db_filters["depositor_group"] = filters.depositor_group
-            by_month = filters.by_month
+            by_months = filters.by_months
             if not db_filters:
                 db_filters = None
 
         with self._uow_factory() as uow:
             loans = uow.loans.get_all_active(db_filters)
 
-        # Apply by_month filter in Python
-        # by_month filter: excludes loans with no due_date; shows loans where
-        # due_date.month == selected_month AND due_date.year == current_year
-        if by_month is not None:
+        # Apply by_months filter in Python
+        # by_months filter: excludes loans with no due_date; shows loans where
+        # due_date.month is a member of the selected set AND due_date.year == current_year.
+        # An empty/None selection means no filter (select-none == no-filter, not select-all).
+        if by_months:
+            selected_months = set(by_months)
             current_year = date.today().year
             loans = [
                 loan for loan in loans
                 if loan.due_date is not None
-                and loan.due_date.month == by_month
+                and loan.due_date.month in selected_months
                 and loan.due_date.year == current_year
             ]
 

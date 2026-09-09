@@ -81,7 +81,17 @@ class LoanFilterDTO(BaseModel):
     borrower_name: Optional[str] = None
     depositor_name: Optional[str] = None
     depositor_group: Optional[str] = None
-    by_month: Optional[int] = Field(default=None, ge=1, le=12)
+    by_months: Optional[list[int]] = None
+
+    @field_validator("by_months")
+    @classmethod
+    def validate_by_months(cls, v: Optional[list[int]]) -> Optional[list[int]]:
+        if v is None:
+            return v
+        for month in v:
+            if not (1 <= month <= 12):
+                raise ValueError(f"by_months entries must be in 1..12, got {month}")
+        return v
 
 
 class ExtendLoanDTO(BaseModel):

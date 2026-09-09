@@ -127,7 +127,7 @@ class TestSqlAlchemyLoanRepository:
         assert len(results) == 2
 
     def test_no_due_date_included_in_name_filters(self, db_session):
-        """Loans with no due_date are included when filtering by name/group (not by_month)."""
+        """Loans with no due_date are included when filtering by name/group (not by_months)."""
         repo = SqlAlchemyLoanRepository(db_session)
         repo.save(_make_loan("2026_03_001", borrower_group="bg1", due_date=None))
         repo.save(_make_loan("2026_03_002", borrower_group="bg1", due_date=date(2026, 5, 1)))

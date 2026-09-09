@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QGroupBox,
     QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox, QPushButton,
     QLabel, QMessageBox,
 )
@@ -61,15 +61,19 @@ class CalculatorTab(QWidget):
         self._depositor_group_filter.setEditable(True)
         filter_layout.addRow("Depositor Group:", self._depositor_group_filter)
 
-        self._by_month_filter = QComboBox()
-        self._by_month_filter.addItem("")
         months = [
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ]
-        for i, m in enumerate(months, 1):
-            self._by_month_filter.addItem(m, i)
-        filter_layout.addRow("By Month:", self._by_month_filter)
+        by_month_widget = QWidget()
+        by_month_grid = QGridLayout(by_month_widget)
+        by_month_grid.setContentsMargins(0, 0, 0, 0)
+        self._by_month_checkboxes: list[QCheckBox] = []
+        for i, m in enumerate(months):
+            checkbox = QCheckBox(m)
+            self._by_month_checkboxes.append(checkbox)
+            by_month_grid.addWidget(checkbox, i // 4, i % 4)
+        filter_layout.addRow("By Month:", by_month_widget)
 
         filter_group.setLayout(filter_layout)
         layout.addWidget(filter_group)
@@ -137,14 +141,17 @@ class CalculatorTab(QWidget):
         b_name = self._borrower_name_filter.currentText().strip() or None
         d_name = self._depositor_name_filter.currentText().strip() or None
         d_group = self._depositor_group_filter.currentText().strip() or None
-        by_month = self._by_month_filter.currentData()
+        by_months = [
+            i for i, cb in enumerate(self._by_month_checkboxes, start=1)
+            if cb.isChecked()
+        ] or None
 
         filters = LoanFilterDTO(
             borrower_group=b_group,
             borrower_name=b_name,
             depositor_name=d_name,
             depositor_group=d_group,
-            by_month=by_month,
+            by_months=by_months,
         )
 
         unit = ExtensionPeriodUnit(self._unit_combo.currentText())
