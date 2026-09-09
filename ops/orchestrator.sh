@@ -444,7 +444,7 @@ run_gate() {
       fi
       if grep -qiE 'rate.?limit|quota|too many requests' "$out"; then
         say "  gate unavailable (quota) — banking as review debt, not treating as clean"
-        printf '%s\t%s\tquota\n' "$issue" "$(date -u +%FT%TZ)" >> "$OPS_DIR/.review_debt.tsv"
+        debt_add "$issue" "quota"
         return 2
       fi
       say "  gate errored — see $out"
@@ -510,8 +510,20 @@ remediate_issue() {
   # The findings to answer are whatever the LAST round recorded.
   local last; last="$(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -n | tail -1)"
   local lastlog="$LOG_DIR/${issue}_cr_round${last}.txt"
-  if [ ! -f "$lastlog" ]; then
-    say "  no gate log to answer — re-gating from scratch"
+  # Quota / gate-unavailable debt has no findings to fix. An agent call here
+  # would change nothing and leave the entry open forever — re-gate only.
+  if [ ! -f "$lastlog" ] || [ "$(debt_reason "$issue")" = "quota" ] \
+     || [ "$(debt_reason "$issue")" = "gate-unavailable" ]; then
+    say "  no findings to answer — re-gating only"
+    run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
+    if [ $? -eq 0 ]; then
+      say "  $issue is clean now — debt cleared"
+      debt_clear "$issue"
+      grep -qx "$issue" "$DONE" 2>/dev/null || echo "$issue" >> "$DONE"
+      return 0
+    fi
+    say "  $issue still not clean — debt stays open"
+    return 1
   fi
 
   local before; before="$(git rev-parse HEAD)"

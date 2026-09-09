@@ -470,6 +470,10 @@ publish_stack() {
   say "Stack (bottom-up): $(printf '%s' "$order" | tr '\n' ' ')"
   for n in $order; do
     head="$(printf '%s\n' "$rows" | awk -F'\t' -v n="$n" '$1 == n { print $3; exit }')"
+    case "$head" in
+      feature/*) ;;
+      *) say "── PR #$n · $head — not a builder branch, skipping"; continue ;;
+    esac
     issue="$(printf '%s' "${head#feature/}" | tr '[:lower:]' '[:upper:]')"
     say "── PR #$n · $issue"
     if ! publish_for_issue "$issue"; then
