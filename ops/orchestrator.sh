@@ -58,7 +58,24 @@ MAX_TURNS="${MAX_TURNS:-60}"
 CR_MAX_ROUNDS="${CR_MAX_ROUNDS:-2}"
 CR_BLOCKING="${CR_BLOCKING:-critical|major|blocker|high}"
 PERM_MODE="${PERM_MODE:-acceptEdits}"
-MAX_ISSUES="${MAX_ISSUES:-0}"          # 0 = drain the queue
+MAX_ISSUES="${MAX_ISSUES:-0}"          # 0 = drain the queue (or until the budget)
+
+# Budget. There is no API for the remaining balance of a 5-hour window, so this
+# meters what THIS LOOP spends, not the window itself — anything you spend in an
+# interactive session counts against the same window and is invisible here. The
+# reliable signal is a usage-limit response from the CLI, which is a hard stop
+# regardless of this number.
+SESSION_BUDGET_USD="${SESSION_BUDGET_USD:-20}"
+BUDGET_THRESHOLD_PCT="${BUDGET_THRESHOLD_PCT:-95}"
+KILL_TMUX_ON_WINDDOWN="${KILL_TMUX_ON_WINDDOWN:-1}"
+TMUX_SESSION="${FINHIVE_TMUX_SESSION:-finhive}"
+export SESSION_BUDGET_USD BUDGET_THRESHOLD_PCT
+
+# One id per pass, so the ledger and the summary group correctly.
+FH_SESSION_ID="${FH_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+export FH_SESSION_ID
+SESSION_START="$(date +%s)"
+USAGE="$OPS_DIR/usage.py"
 
 say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
@@ -78,6 +95,16 @@ done
 [ -f "$QUEUE" ] || { fail "no queue at $QUEUE — run: python3 ops/seed_linear.py --write-queue"; exit 1; }
 [ -n "${LINEAR_API_KEY:-}" ] || { fail "LINEAR_API_KEY unset (ops/.env.local)"; exit 1; }
 gh auth status >/dev/null 2>&1 || { fail "gh not authenticated — run: gh auth login"; exit 1; }
+
+# Check the review gate BEFORE building anything. An unauthenticated CodeRabbit
+# fails once per issue, mid-run, after the agent has already spent its tokens —
+# and every PR opens as an unreviewed draft. Fail here instead.
+if ! coderabbit usage >/dev/null 2>&1; then
+  fail "CodeRabbit not authenticated — run: coderabbit auth login"
+  fail "The review gate is the point of this loop; refusing to build without it."
+  fail "Set SKIP_GATE=1 to build anyway (every PR opens as an unreviewed draft)."
+  [ "${SKIP_GATE:-0}" = "1" ] || exit 1
+fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,6 +134,96 @@ stack_tip() {
     if [ "$n" -gt "$bestn" ]; then bestn="$n"; best="${b#origin/}"; fi
   done
   printf '%s' "$best"
+}
+
+# ── metered agent invocation ─────────────────────────────────────────────────
+# Every claude call goes through here so nothing spends untracked. Writes the
+# JSON result, records it, and echoes the classification so callers can branch.
+# Sets AGENT_KIND to ok|limit|auth|error.
+run_agent() {
+  local issue="$1" phase="$2" model="$3" prompt="$4"
+  local jf="$LOG_DIR/${issue}_${phase}_$(date +%s).json"
+
+  claude -p --output-format json --model "$model" --max-turns "$MAX_TURNS" \
+         --permission-mode "$PERM_MODE" "$prompt" > "$jf" 2>>"$LOG_DIR/${issue}_agent.log"
+
+  local line; line="$(python3 "$USAGE" record "$jf" --issue "$issue" --phase "$phase" --model "$model" 2>/dev/null)"
+  AGENT_KIND="$(printf '%s' "$line" | sed -n 's/.*kind=\([a-z]*\).*/\1/p')"
+  [ -n "$AGENT_KIND" ] || AGENT_KIND="ok"
+
+  # Keep the human-readable answer next to the JSON; the log is what a person reads.
+  python3 -c "
+import json,sys
+try: print(json.load(open(sys.argv[1])).get('result',''))
+except Exception: pass" "$jf" >> "$LOG_DIR/${issue}_agent.log" 2>/dev/null
+
+  say "    agent[$phase] $line"
+  [ "$AGENT_KIND" = "ok" ]
+}
+
+# 0 = room left · 1 = at/over threshold · 2 = platform said stop
+budget_state() {
+  python3 "$USAGE" check --budget-usd "$SESSION_BUDGET_USD" --threshold "$BUDGET_THRESHOLD_PCT" 2>/dev/null
+  return $?
+}
+
+# ── wind-down ────────────────────────────────────────────────────────────────
+# Called when the budget threshold is reached or the platform hard-stops us.
+# The remaining tokens are NOT spent on more building — they go to making the
+# in-flight work recoverable, because a half-finished branch that was never
+# pushed is the one thing this loop can actually lose.
+wind_down() {
+  local reason="$1"
+  say ""
+  say "══ WIND-DOWN · $reason"
+
+  # 1. Back up in-flight work. Commit whatever is uncommitted and push the
+  #    branch so nothing lives only on this machine.
+  local br; br="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    say "  uncommitted work on $br — committing as WIP"
+    git add -A 2>/dev/null || true
+    git commit -q -m "WIP: wind-down backup ($reason)" 2>/dev/null || true
+  fi
+  case "$br" in
+    feature/*)
+      if git push -q --force-with-lease -u origin "$br" 2>/dev/null; then
+        say "  pushed $br"
+      else
+        say "  WARNING: could not push $br — the work is committed locally only"
+      fi ;;
+    *) say "  on $br — nothing to push" ;;
+  esac
+
+  # 2. Session summary, to stdout and to a file the tmux pane leaves behind.
+  local summary="$LOG_DIR/SESSION_${FH_SESSION_ID}.md"
+  {
+    echo "# Build session $FH_SESSION_ID"
+    echo
+    echo "- ended: $reason"
+    echo "- duration: $(( ($(date +%s) - SESSION_START) / 60 )) min"
+    echo "- issues completed: $(comm -12 <(sort "$DONE" 2>/dev/null) <(printf '%s\n' "$SESSION_BUILT" | tr ' ' '\n' | sort) 2>/dev/null | grep -c . || echo 0)"
+    echo "- built this session: ${SESSION_BUILT:-none}"
+    echo "- still pending: $(pending_issues | grep -c . || echo 0)"
+    [ -s "$ESCALATIONS" ] && { echo "- escalations:"; sed 's/^/  - /' "$ESCALATIONS"; }
+    echo
+    echo '```'
+    python3 "$USAGE" report 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'
+    echo '```'
+  } > "$summary"
+
+  say ""
+  python3 "$USAGE" report 2>/dev/null | while IFS= read -r l; do say "$l"; done
+  say "  summary written to $summary"
+
+  # 3. Kill the tmux session last — after the summary exists on disk, so
+  #    killing the pane cannot destroy the only copy of it.
+  if [ "$KILL_TMUX_ON_WINDDOWN" = "1" ] && command -v tmux >/dev/null 2>&1; then
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      say "  killing tmux session '$TMUX_SESSION'"
+      tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+    fi
+  fi
 }
 
 take_lock() {
@@ -171,12 +288,27 @@ PY
 # Runs pre-push so fix commits land in the PR's first commit set. Returns 0 when the
 # final round is clean, 1 when blocking findings survive.
 run_gate() {
-  local issue="$1" prompt_file="$2" round=0 out
+  local issue="$1" prompt_file="$2" gate_base="${3:-$BASE_BRANCH}" round=0 out
+  if [ "${SKIP_GATE:-0}" = "1" ]; then
+    say "  SKIP_GATE=1 — gate not run"; return 2
+  fi
   while :; do
     out="$LOG_DIR/${issue}_cr_round${round}.txt"
     say "  CodeRabbit gate, round $round"
-    if ! coderabbit review --plain > "$out" 2>&1; then
+    # Plain text IS the default mode in coderabbit 0.7.5 — there is no --plain
+    # flag, and passing one makes the CLI print usage and exit non-zero, which
+    # looks exactly like a clean review to a naive check. --committed scopes the
+    # review to what this branch actually added over its base.
+    if ! coderabbit review --committed --base "$gate_base" > "$out" 2>&1; then
       # A gate that cannot run is not a pass. Say so and let the human look.
+      if grep -qiE 'not logged in|auth login|unauthor' "$out"; then
+        say "  gate unavailable (not authenticated) — run: coderabbit auth login"
+        return 2
+      fi
+      if grep -qiE 'unknown option|unknown command|Usage: coderabbit' "$out"; then
+        say "  gate INVOCATION is wrong — the CLI rejected the command, see $out"
+        return 2
+      fi
       if grep -qiE 'rate.?limit|quota|too many requests' "$out"; then
         say "  gate unavailable (quota) — banking as review debt, not treating as clean"
         printf '%s\t%s\tquota\n' "$issue" "$(date -u +%FT%TZ)" >> "$OPS_DIR/.review_debt.tsv"
@@ -203,9 +335,9 @@ run_gate() {
       echo
       cat "$out"
     } > "$prompt_file"
-    claude -p --model "$IMPL_MODEL" --max-turns "$MAX_TURNS" \
-           --permission-mode "$PERM_MODE" "$(cat "$prompt_file")" \
-           >> "$LOG_DIR/${issue}_agent.log" 2>&1
+    if ! run_agent "$issue" "gate" "$IMPL_MODEL" "$(cat "$prompt_file")"; then
+      [ "$AGENT_KIND" = "limit" ] && { say "  usage limit during fix round"; return 3; }
+    fi
     git add -A && git commit -q -m "fix($issue): address CodeRabbit round $round" 2>/dev/null || true
   done
 }
@@ -240,12 +372,15 @@ run_issue() {
   local before; before="$(git rev-parse HEAD)"
 
   say "  implementing with $IMPL_MODEL"
-  claude -p --model "$IMPL_MODEL" --max-turns "$MAX_TURNS" --permission-mode "$PERM_MODE" \
+  run_agent "$issue" "impl" "$IMPL_MODEL" \
     "$(printf '%s\n\n%s\n' \
        "Implement this Linear issue in the FinHive repository. Follow CLAUDE.md. Make the smallest correct change, add tests, and commit. Do not merge anything, do not push, and do not modify files under ops/ unless the issue says to." \
-       "$spec")" \
-    > "$LOG_DIR/${issue}_agent.log" 2>&1
+       "$spec")"
   local rc=$?
+  if [ "$AGENT_KIND" = "limit" ]; then
+    say "  usage limit reached during implementation"
+    return 3
+  fi
 
   git add -A 2>/dev/null || true
   git commit -q -m "$issue: ${title:-implement}" 2>/dev/null || true
@@ -255,7 +390,7 @@ run_issue() {
     return 1
   fi
 
-  run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt"
+  run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$base"
   local gate=$?
   if [ "$gate" -eq 1 ]; then
     say "  findings survived $CR_MAX_ROUNDS cycles — mediating with $MEDIATOR_MODEL"
@@ -312,16 +447,40 @@ if [ "${TOTAL:-0}" -eq 0 ]; then
 fi
 
 say "Queue: $TOTAL issue(s) pending. Base=$BASE_BRANCH impl=$IMPL_MODEL rounds=$CR_MAX_ROUNDS"
+say "Budget: \$$SESSION_BUDGET_USD, wind down at ${BUDGET_THRESHOLD_PCT}%  (session $FH_SESSION_ID)"
 built=0
+SESSION_BUILT=""
+ENDED=""
+
 while IFS= read -r issue; do
   [ -n "$issue" ] || continue
-  if run_issue "$issue"; then
+
+  # Check BEFORE starting an issue, never mid-issue: stopping between issues
+  # leaves a clean tree, stopping inside one leaves a half-built branch.
+  budget_state; bstate=$?
+  if [ "$bstate" -eq 2 ]; then ENDED="platform usage limit"; break; fi
+  if [ "$bstate" -eq 1 ]; then ENDED="reached ${BUDGET_THRESHOLD_PCT}% of \$$SESSION_BUDGET_USD budget"; break; fi
+
+  run_issue "$issue"; irc=$?
+  if [ "$irc" -eq 0 ]; then
     built=$((built + 1))
+    SESSION_BUILT="$SESSION_BUILT $issue"
+  elif [ "$irc" -eq 3 ]; then
+    # The agent itself was cut off by the platform. Stop now — every further
+    # call would fail the same way and burn the wind-down budget.
+    SESSION_BUILT="$SESSION_BUILT $issue(partial)"
+    ENDED="platform usage limit mid-issue"
+    break
   else
     say "  $issue did not complete — will retry next pass"
   fi
+
   if [ "$MAX_ISSUES" -gt 0 ] && [ "$built" -ge "$MAX_ISSUES" ]; then
-    say "MAX_ISSUES=$MAX_ISSUES reached."; break
+    ENDED="MAX_ISSUES=$MAX_ISSUES reached"; break
   fi
 done < "$QUEUE_RUN"
+
+[ -n "$ENDED" ] || ENDED="queue drained"
+say ""
 say "Pass complete — $built issue(s) built, $(pending_issues | grep -c . || echo 0) still pending."
+wind_down "$ENDED"
