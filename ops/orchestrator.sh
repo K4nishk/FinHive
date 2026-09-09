@@ -209,7 +209,12 @@ debt_issues() { [ -f "$DEBT" ] && cut -f1 "$DEBT" 2>/dev/null | grep -v '^$' || 
 debt_reason() { awk -F'\t' -v i="$1" '$1 == i { r = $2 } END { print r }' "$DEBT" 2>/dev/null; }
 
 stuck_count() { awk -F'\t' -v i="$1" '$1 == i { n = $2 } END { print n + 0 }' "$STUCK" 2>/dev/null || echo 0; }
-stuck_clear() { [ -f "$STUCK" ] && grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null && mv "$STUCK.tmp" "$STUCK"; return 0; }
+stuck_clear() {
+  [ -f "$STUCK" ] || return 0
+  grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null || true
+  mv "$STUCK.tmp" "$STUCK" 2>/dev/null || true
+  return 0
+}
 stuck_bump() {
   local n; n="$(stuck_count "$1")"
   stuck_clear "$1"

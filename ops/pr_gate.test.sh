@@ -220,6 +220,40 @@ assert_eq "a cycle with distinct numbers terminates" "2
 5" "$(pr_stack_order development "$(printf '%s\n' \
   "2	development	feature/a" "4	feature/a	feature/b" "5	feature/b	feature/a")")"
 
+# ── publish_for_issue: a failed status POST must not read as success ───────
+# The status POST's exit code used to be ignored — a gh/network error left the
+# PR with no coderabbit/cli-gate status while the script still exited 0 on a
+# clean verdict. See the header's "gh/network error exits 1" contract.
+PFI_LOGS="$FIX_DIR/pfi_logs"; mkdir -p "$PFI_LOGS"
+echo "0 issues found" > "$PFI_LOGS/KCH-50_cr_round0.txt"
+PFI_REPO="$FIX_DIR/pfi_repo"; mkdir -p "$PFI_REPO"
+git -C "$PFI_REPO" init -q
+git -C "$PFI_REPO" config user.email test@example.com
+git -C "$PFI_REPO" config user.name "Test"
+git -C "$PFI_REPO" commit -q --allow-empty -m "KCH-50: seed"
+
+gh() {
+  case "$1" in
+    pr)   [ "$2" = "view" ] && echo '{"number":50,"headRefOid":"deadbeef","url":"https://example/pr/50","isDraft":false}' ;;
+    repo) [ "$2" = "view" ] && echo "acme/finhive" ;;
+    api)
+      case "$*" in
+        *"/statuses/"*) return 1 ;;
+        *) echo "https://example/comment/1" ;;
+      esac ;;
+  esac
+}
+
+_saved_log_dir="$LOG_DIR" _saved_repo_dir="$REPO_DIR"
+LOG_DIR="$PFI_LOGS" REPO_DIR="$PFI_REPO"
+pfi_err="$(publish_for_issue KCH-50 2>&1 >/dev/null)"
+pfi_rc=$?
+LOG_DIR="$_saved_log_dir" REPO_DIR="$_saved_repo_dir"
+unset -f gh
+
+assert_eq "a failed status POST makes publish_for_issue fail, not succeed" "1" "$pfi_rc"
+assert_contains "the failure names the missing gate status" "$pfi_err" "no gate status"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

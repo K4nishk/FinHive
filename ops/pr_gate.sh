@@ -383,7 +383,8 @@ require_check() {
 usage() {
   cat >&2 <<'EOF'
 usage: pr_gate.sh ISSUE            publish the findings trail + status for ISSUE's PR
-       pr_gate.sh --regate ISSUE   re-review the whole branch vs development, then publish
+       pr_gate.sh --regate ISSUE   re-review the branch against its own PR base, then publish
+                                   (set GATE_REVIEW_BASE=development for a whole-stack review)
        pr_gate.sh --stack          publish every open stacked PR, bottom-up
        pr_gate.sh --require-check  make coderabbit/cli-gate required on development
 
@@ -436,12 +437,15 @@ for k, v in (("pr_number", d["number"]), ("pr_sha", d["headRefOid"]),
   publish_comment "$repo_slug" "$pr_number" "$issue" "$report"
 
   local gh_state; gh_state="failure"; [ "$VERDICT_STATE" = "success" ] && gh_state="success"
-  gh api "repos/$repo_slug/statuses/$pr_sha" \
-    -f state="$gh_state" \
-    -f context="$GATE_CONTEXT" \
-    -f description="$(printf '%s' "$VERDICT_DESC" | cut -c1-140)" \
-    -f target_url="${LAST_COMMENT_URL:-$pr_url}" \
-    >/dev/null
+  if ! gh api "repos/$repo_slug/statuses/$pr_sha" \
+       -f state="$gh_state" \
+       -f context="$GATE_CONTEXT" \
+       -f description="$(printf '%s' "$VERDICT_DESC" | cut -c1-140)" \
+       -f target_url="${LAST_COMMENT_URL:-$pr_url}" \
+       >/dev/null 2>&1; then
+    fail "could not set $GATE_CONTEXT on $pr_sha — the PR has no gate status"
+    return 1
+  fi
 
   say "PR #$pr_number ($issue): $GATE_CONTEXT = $gh_state — $VERDICT_DESC"
   if [ "$VERDICT_STATE" = "success" ] && [ "$PROMOTE" = "1" ]; then

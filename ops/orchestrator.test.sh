@@ -99,6 +99,25 @@ assert_eq "dead owner -> reclaim" "reclaim" "$(lock_state)"
 rm -f "$WT/pid"
 assert_eq "no owner recorded -> fall back to age" "unknown" "$(lock_state)"
 
+# ── stuck_clear must clear the last remaining row ───────────────────────────
+# grep -v exits 1 when it prints no lines — if the issue being cleared is the
+# only row, the old `&&`-chained mv never ran and the entry stayed forever.
+STUCK="$FIX/.stuck_issues.tsv"
+stuck_clear() {
+  [ -f "$STUCK" ] || return 0
+  grep -v "^$1	" "$STUCK" > "$STUCK.tmp" 2>/dev/null || true
+  mv "$STUCK.tmp" "$STUCK" 2>/dev/null || true
+  return 0
+}
+printf 'KCH-78\t3\tts\n' > "$STUCK"
+stuck_clear KCH-78
+rc=$?
+assert_eq "clearing the only row empties the file" "" "$(cat "$STUCK" 2>/dev/null)"
+assert_eq "clearing the only row returns 0" "0" "$rc"
+printf 'KCH-78\t3\tts\nKCH-84\t1\tts\n' > "$STUCK"
+stuck_clear KCH-78
+assert_eq "clearing one of several rows keeps the rest" "KCH-84	1	ts" "$(cat "$STUCK")"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -139,14 +139,15 @@ draft is a statement about the gate, never a stale flag.
 
 ```bash
 ops/pr_gate.sh KCH-78              # publish the trail, set the status, clear the draft if clean
-ops/pr_gate.sh --regate KCH-78     # re-review the WHOLE branch vs development first
+ops/pr_gate.sh --regate KCH-78     # re-review the branch against its own PR base first
 ops/pr_gate.sh --stack             # walk every open PR bottom-up, stopping at the first blocked one
 ```
 
 `--regate` exists because the builder reviews each branch against the branch *below* it
 — the right diff while stacking, but it means the bottom PR's full contents are never
-reviewed as one unit. It reviews `feature/<issue>` against `development` and **appends**
-a round rather than overwriting one, so the fix history survives. It runs in a
+reviewed as one unit. It reviews `feature/<issue>` against its own PR base and **appends**
+a round rather than overwriting one, so the fix history survives; set
+`GATE_REVIEW_BASE=development` for a whole-stack review. It runs in a
 throwaway **detached** worktree, so it is safe while a build is in flight: the shared
 checkout is untouched, and leaving the branch unclaimed keeps the builder's own
 `git checkout` of it from failing with "already used by worktree".
