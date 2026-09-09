@@ -70,6 +70,10 @@ CR_BLOCKING="${CR_BLOCKING:-critical|major|blocker|high}"
 PERM_MODE="${PERM_MODE:-acceptEdits}"
 MAX_ISSUES="${MAX_ISSUES:-0}"          # 0 = drain the queue (or until the budget)
 STUCK_MAX="${STUCK_MAX:-2}"            # consecutive no-commit failures before an issue is parked
+# DEBT_ONLY=1 stops after the review-debt drain, before any new feature. The point
+# of clearing debt is to make a tall stack mergeable; carrying straight on into the
+# queue would add ~14 more PRs on top of it at the default budget and undo that.
+DEBT_ONLY="${DEBT_ONLY:-0}"
 
 # Budget. There is no API for the remaining balance of a 5-hour window, so this
 # meters what THIS LOOP spends, not the window itself — anything you spend in an
@@ -723,6 +727,17 @@ if [ "${DEBT_N:-0}" -gt 0 ]; then
     esac
   done < "$DEBT_RUN"
   say ""
+fi
+
+if [ "$DEBT_ONLY" = "1" ]; then
+  if [ -s "$DEBT" ]; then
+    say "DEBT_ONLY=1 — stopping. Debt still open:"
+    sed 's/^/  - /' "$DEBT"
+  else
+    say "DEBT_ONLY=1 — debt cleared, stopping before the queue. Merge the stack bottom-up."
+  fi
+  wind_down "${ENDED:-debt-only pass}"
+  exit 0
 fi
 
 # Snapshot the queue only now, so anything remediation just completed is gone.

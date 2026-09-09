@@ -187,9 +187,15 @@ Two guards keep an open PR from being overwritten:
   exactly that.
 
 ```bash
-cat ops/.review_debt.tsv            # what is queued
-ops/pr_gate.sh --regate KCH-84      # re-review one PR by hand
+cat ops/.review_debt.tsv                        # what is queued
+DEBT_ONLY=1 ./ops/run_builder.sh                # clear debt, then STOP before the queue
+ops/pr_gate.sh --regate KCH-84                  # re-review one PR by hand
 ```
+
+`DEBT_ONLY=1` matters more than it looks. Without it a pass drains the debt and
+carries straight on into the queue until 95% of the budget — roughly fourteen more
+issues at the default — stacking new PRs on top of the stack you just made mergeable.
+Use it whenever the intent is "unblock the stack, then merge".
 
 ---
 
