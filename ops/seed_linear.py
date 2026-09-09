@@ -163,6 +163,56 @@ mutation($input: IssueCreateInput!) {
 }
 """
 
+Q_QUEUE = """
+query($teamId: ID!, $after: String, $first: Int!) {
+  issues(filter: { team: { id: { eq: $teamId } },
+                   project: { name: { startsWith: "FinHive" } },
+                   state: { type: { nin: ["completed", "canceled"] } } },
+         first: $first, after: $after, orderBy: createdAt) {
+    nodes { identifier title estimate project { name } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+
+
+def write_queue(key: str, team_id: str, path: Path) -> int:
+    """Write ops/queue.tsv in build order.
+
+    Creation order IS build order — issues were seeded top-to-bottom from a CSV that
+    was already sorted by milestone and dependency, so Linear's own ordering is the
+    queue. Column 2 is the identifier; run_builder.sh and orchestrator.sh both cut -f2.
+    """
+    # These nodes carry title and project, so the body is much larger per row than the
+    # id+title pager — it truncates well below first:50. Halve on failure, same as
+    # fetch_existing_titles.
+    rows, after, page = [], None, 25
+    while True:
+        try:
+            node = gql(Q_QUEUE, {"teamId": team_id, "after": after, "first": page},
+                       key=key, retries=2)["issues"]
+        except LinearError:
+            if page <= 5:
+                raise
+            page = max(5, page // 2)
+            print(f"{YEL}  large page truncated — retrying at first:{page}{RST}", file=sys.stderr)
+            continue
+        rows.extend(node["nodes"])
+        if not node["pageInfo"]["hasNextPage"]:
+            break
+        after = node["pageInfo"]["endCursor"]
+    rows.sort(key=lambda r: int(r["identifier"].rsplit("-", 1)[1]))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write("# order\tissue\testimate\tproject\ttitle\n")
+        fh.write("# regenerate: python3 ops/seed_linear.py --write-queue\n")
+        for i, r in enumerate(rows, 1):
+            proj = (r["project"] or {}).get("name", "-").replace("\t", " ")
+            title = r["title"].replace("\t", " ")
+            fh.write(f"{i}\t{r['identifier']}\t{r['estimate'] or 0}\t{proj}\t{title}\n")
+    return len(rows)
+
 
 def fetch_labels(key: str, team_id: str) -> dict[str, str]:
     """name -> id for every label the team can use, following the cursor."""
@@ -210,6 +260,8 @@ def main() -> int:
     ap.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     ap.add_argument("--milestone", help="only import rows in this Milestone (substring match, e.g. M1)")
     ap.add_argument("--limit", type=int, help="cap the number of issues (useful for a first smoke import)")
+    ap.add_argument("--write-queue", action="store_true",
+                    help="write ops/queue.tsv from Linear (build order) and exit")
     args = ap.parse_args()
 
     key = os.environ.get("LINEAR_API_KEY", "").strip()
@@ -222,9 +274,19 @@ def main() -> int:
         print(f"{RED}LINEAR_TEAM_KEY is not set.{RST}", file=sys.stderr)
         print("  This is the issue-id PREFIX (e.g. FIN for FIN-1), not the team name.", file=sys.stderr)
         return 2
-    if not args.csv.exists():
+    if not args.write_queue and not args.csv.exists():
         print(f"{RED}CSV not found: {args.csv}{RST}", file=sys.stderr)
         return 2
+
+    if args.write_queue:
+        teams = gql(Q_TEAM, {"key": team_key}, key=key)["teams"]["nodes"]
+        if not teams:
+            print(f"{RED}No team with key '{team_key}'.{RST}", file=sys.stderr)
+            return 2
+        out = REPO / "ops" / "queue.tsv"
+        n = write_queue(key, teams[0]["id"], out)
+        print(f"  {GRN}wrote{RST} {out.relative_to(REPO)} — {n} open issue(s) in build order")
+        return 0
 
     with args.csv.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
