@@ -71,7 +71,7 @@ rm -rf "$LOGS"; mkdir -p "$LOGS"
 
 # ── round_unavailable ─────────────────────────────────────────────────────
 echo "Error: rate limit exceeded, try again later" > "$LOGS/quota.txt"
-printf '  major [Functional Correctness]\n  missing null check\n\nMajor    1\n' > "$LOGS/findings.txt"
+printf '  major [Functional Correctness]\n  missing null check\n\nMajor    1\n\n1 file reviewed:\n' > "$LOGS/findings.txt"
 if round_unavailable "$LOGS/quota.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag quota text"; fi
 if round_unavailable "$LOGS/findings.txt"; then fail=$((fail+1)); echo "FAIL: round_unavailable should not flag ordinary findings"; else pass=$((pass+1)); fi
 
@@ -97,10 +97,35 @@ Writing review comments... 5m 14s elapsed - still working
 Error: WebSocket closed
 EOF
 if round_unavailable "$LOGS/wsdrop.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a dropped connection"; fi
+assert_eq "a dropped connection is classified transport" "transport" "$(round_failure_kind "$LOGS/wsdrop.txt")"
+
+# The false positive that motivated the rewrite: CodeRabbit reviewing the
+# quota-handling code produced findings full of the word "quota", and a
+# blocklist read that completed review as a quota FAILURE.
+cat > "$LOGS/about_quota.txt" <<'EOF'
+  major [Functional Correctness]
+  Write the quota debt row through debt_add.
+  This append writes issue, timestamp, quota — but debt_add expects a reason,
+  so repeated quota rounds add duplicate rows and rate limit handling drifts.
+
+Major    1
+
+8 files reviewed:
+EOF
+if round_unavailable "$LOGS/about_quota.txt"; then fail=$((fail+1)); echo "FAIL: findings ABOUT quotas are not a quota failure"; else pass=$((pass+1)); fi
+assert_eq "a completed review has no failure kind" "" "$(round_failure_kind "$LOGS/about_quota.txt")"
+
+# A failure mode nobody has written a pattern for must still fail CLOSED.
+printf 'Connecting to CodeRabbit... 0s elapsed\nPreparing review... 1s elapsed\n' > "$LOGS/novel.txt"
+if round_unavailable "$LOGS/novel.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: an unrecognised incomplete run must read as unavailable"; fi
+assert_eq "an unrecognised failure is named, not silently passed" "incomplete" "$(round_failure_kind "$LOGS/novel.txt")"
 # ...but a finding that merely mentions an error must still count as a review.
 cat > "$LOGS/mentions_error.txt" <<'EOF'
 CodeRabbit Review
-1. Major: swallowed error in the retry path — log it before returning
+  major [Functional Correctness]
+  swallowed error in the retry path — log it before returning
+
+1 file reviewed:
 EOF
 if round_unavailable "$LOGS/mentions_error.txt"; then fail=$((fail+1)); echo "FAIL: a finding mentioning 'error' is not an unavailable round"; else pass=$((pass+1)); fi
 if round_unavailable "$LOGS/badflag.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: round_unavailable should flag a CLI usage error"; fi
@@ -149,23 +174,23 @@ rm -rf "$LOGS"; mkdir -p "$LOGS"
 
 assert_eq "no logs at all -> failure (unreviewed)" "failure" "$(gate_verdict KCH-1 "$LOGS"; echo "$VERDICT_STATE")"
 
-echo "0 issues found" > "$LOGS/KCH-2_cr_round0.txt"
+printf '0 issues found\n\n3 files reviewed:\n' > "$LOGS/KCH-2_cr_round0.txt"
 gate_verdict KCH-2 "$LOGS"
 assert_eq "clean final round -> success" "success" "$VERDICT_STATE"
 
-printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n' > "$LOGS/KCH-3_cr_round0.txt"
-printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n' > "$LOGS/KCH-3_cr_round1.txt"
+printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n\n1 file reviewed:\n' > "$LOGS/KCH-3_cr_round0.txt"
+printf '  critical [Security & Privacy]\n  hardcoded secret\n\nCritical 1\n\n1 file reviewed:\n' > "$LOGS/KCH-3_cr_round1.txt"
 gate_verdict KCH-3 "$LOGS"
 assert_eq "blocking findings survive to the final round -> failure" "failure" "$VERDICT_STATE"
 
-echo "0 issues found" > "$LOGS/KCH-4_cr_round0.txt"
+printf '0 issues found\n\n1 file reviewed:\n' > "$LOGS/KCH-4_cr_round0.txt"
 echo "Error: quota exceeded" > "$LOGS/KCH-4_cr_round1.txt"
 gate_verdict KCH-4 "$LOGS"
 assert_eq "final round unavailable overrides an earlier clean round -> failure" "failure" "$VERDICT_STATE"
 
 # A clean round that is NOT the final one must not short-circuit the verdict.
-printf '  blocker [Functional Correctness]\n  x\n\nBlocker  1\n' > "$LOGS/KCH-5_cr_round0.txt"
-echo "0 issues found" > "$LOGS/KCH-5_cr_round1.txt"
+printf '  blocker [Functional Correctness]\n  x\n\nBlocker  1\n\n1 file reviewed:\n' > "$LOGS/KCH-5_cr_round0.txt"
+printf '0 issues found\n\n1 file reviewed:\n' > "$LOGS/KCH-5_cr_round1.txt"
 gate_verdict KCH-5 "$LOGS"
 assert_eq "verdict reads the LAST round, not the first" "success" "$VERDICT_STATE"
 

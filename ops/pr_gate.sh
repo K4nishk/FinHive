@@ -46,6 +46,8 @@ MARKER_PREFIX="<!-- coderabbit-cli-gate:"
 # Clearing the draft on a clean gate is the default; --no-promote opts out.
 # Defaulted here, not in main(), so sourcing this file for tests is safe under -u.
 PROMOTE="${PROMOTE:-1}"
+REGATE_RETRIES="${REGATE_RETRIES:-3}"      # attempts when the review's socket drops
+REGATE_RETRY_WAIT="${REGATE_RETRY_WAIT:-30}"
 
 say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
@@ -73,24 +75,37 @@ round_files() {
   done | sort -n -k1,1 | cut -f2
 }
 
-# A round that errored or hit CodeRabbit's quota never actually reviewed the
-# diff — it must not be read as clean just because it has no blocking lines.
+# Did this round actually review the diff?
 #
-# Quota is not the only way a round can fail to happen. A CLI usage error
-# ("unknown option '--plain'"), a signed-out session, or a dropped connection
-# prints a help screen or a one-line hint and exits — text containing no severity
-# keyword at all, which scored as "0 blocking findings" and published a green
-# gate for a branch CodeRabbit never looked at. Treat every not-a-review outcome
-# the same.
+# CodeRabbit ends every completed review — clean or not — with "N files
+# reviewed". A run that died never prints it. That one positive signal decides
+# it, and it is right on all 25 round logs in this repo.
 #
-# The transport cases are not hypothetical: KCH-85 round 1 died on "Connection
-# failed: WebSocket closed" after 5m14s and would have published a clean gate on
-# a PR whose review never finished. `^Error:` is the generic backstop — the CLI
-# ends a failed run with it, and anchoring to the line start keeps a finding that
-# merely mentions an error from tripping it. Validated against all 17 gate logs
-# on disk: flags exactly the three unreviewed rounds, no false positives.
-round_unavailable() {
-  grep -qiE '^[[:space:]]*Error:|rate.?limit|quota|too many requests|unknown option|unknown command|Usage: coderabbit|not logged in|unauthorized|authentication failed|connection error|connection failed|websocket closed' "$1" 2>/dev/null
+# The earlier version pattern-matched failure strings anywhere in the log, which
+# is wrong in both directions. It read a completed review of the quota-handling
+# code as a quota FAILURE, because CodeRabbit's findings discussed quotas — and
+# it would silently pass any failure mode nobody had added a pattern for. Asking
+# "did it finish?" fails closed on modes we have never seen.
+# The commit a round reviewed, recorded beside its log by regate(). Empty for
+# rounds the builder wrote (it gates pre-push, so there is no PR head to compare
+# against yet) — absence means "cannot verify", never "verified".
+round_sha() { [ -f "${1%.txt}.sha" ] && cat "${1%.txt}.sha" 2>/dev/null || true; }
+
+round_completed() { grep -qiE '^[0-9]+ files? reviewed' "$1" 2>/dev/null; }
+
+round_unavailable() { ! round_completed "$1"; }
+
+# Why a round failed, for the operator: 'transport' | 'quota' | 'auth' | 'usage'.
+# Only consulted when the review did NOT complete, so there is no findings prose
+# left to confuse these patterns.
+round_failure_kind() {
+  local f="$1"
+  round_completed "$f" && { echo ""; return; }
+  grep -qiE 'connection error|connection failed|websocket closed|econnreset|socket hang up' "$f" 2>/dev/null && { echo transport; return; }
+  grep -qiE 'rate.?limit|quota|too many requests' "$f" 2>/dev/null && { echo quota; return; }
+  grep -qiE 'not logged in|unauthorized|authentication failed' "$f" 2>/dev/null && { echo auth; return; }
+  grep -qiE 'unknown option|unknown command|Usage: coderabbit' "$f" 2>/dev/null && { echo usage; return; }
+  echo "incomplete"
 }
 
 # The base a re-gate should diff against: the PR's OWN base, not BASE_BRANCH.
@@ -110,11 +125,6 @@ pr_base_for_branch() {
   base="$(gh pr view "$branch" --json baseRefName -q .baseRefName 2>/dev/null)"
   printf '%s' "${base:-$BASE_BRANCH}"
 }
-
-# The commit a round reviewed, recorded beside its log by regate(). Empty for
-# rounds the builder wrote (it gates pre-push, so there is no PR head to compare
-# against yet) — absence means "cannot verify", never "verified".
-round_sha() { [ -f "${1%.txt}.sha" ] && cat "${1%.txt}.sha" 2>/dev/null || true; }
 
 # Blocking findings in a round log, most authoritative source first.
 #
@@ -357,14 +367,36 @@ regate() {
   local rbase; rbase="$(pr_base_for_branch "$branch")"
   say "Reviewing $ref @ $(printf '%s' "$sha" | cut -c1-7) against $rbase — round $(round_number "$out")"
   say "  (the PR's own diff; set GATE_REVIEW_BASE=development to review the whole stack)"
-  ( cd "$wt" && coderabbit review --committed --base "$rbase" ) > "$out" 2>&1
-  local rc=$?
+  # 2 of 24 rounds on this repo have died mid-review on a dropped WebSocket,
+  # uncorrelated with diff size or duration — one completed at 5m25s, another
+  # dropped at 2m00s. Retry the transport failures; leave the rest alone.
+  local attempt=1 rc=0 kind
+  while :; do
+    ( cd "$wt" && coderabbit review --committed --base "$rbase" ) > "$out" 2>&1
+    rc=$?
+    kind="$(round_failure_kind "$out")"
+    [ "$kind" != "transport" ] && break
+    if [ "$attempt" -ge "$REGATE_RETRIES" ]; then
+      fail "  connection dropped $attempt time(s) — giving up"
+      break
+    fi
+    say "  connection dropped (attempt $attempt) — retrying in ${REGATE_RETRY_WAIT}s"
+    sleep "$REGATE_RETRY_WAIT"
+    attempt=$((attempt + 1))
+  done
   # Record WHAT was reviewed next to the log, so publishing can prove the verdict
   # belongs to the commit the PR is actually at.
   printf '%s\n' "$sha" > "${out%.txt}.sha"
 
   if round_unavailable "$out"; then
-    fail "CodeRabbit did not review the branch — see $out"
+    kind="$(round_failure_kind "$out")"
+    fail "CodeRabbit did not review the branch (${kind:-unknown}) — see $out"
+    case "$kind" in
+      transport) fail "  a dropped connection is CodeRabbit-side and transient; just run this again" ;;
+      quota)     fail "  quota — the log names the reset window; retry after it" ;;
+      auth)      fail "  run: coderabbit auth login" ;;
+      usage)     fail "  the CLI rejected the command — this is a bug in pr_gate.sh, not your branch" ;;
+    esac
     return 1
   fi
   if [ "$rc" -ne 0 ]; then
