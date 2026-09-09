@@ -8,6 +8,7 @@ suite's reach -- these tests pin the paper trail, not live GitHub state.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -21,6 +22,16 @@ PR_GATE = ROOT / "ops" / "pr_gate.sh"
 
 def _contract_text() -> str:
     return CONTRACT.read_text()
+
+
+def _protection_contexts() -> list[str]:
+    """Parse the required_status_checks.contexts list out of the documented
+    `gh api .../protection` JSON block, rather than substring-matching the
+    surrounding prose (which happens to repeat both status-check names)."""
+    match = re.search(r"<<'JSON'\n(.*?)\nJSON\n", _contract_text(), re.DOTALL)
+    assert match, "could not find the required_status_checks JSON block in docs/AGENT_CONTRACT.md"
+    ruleset = json.loads(match.group(1))
+    return ruleset["required_status_checks"]["contexts"]
 
 
 def test_branch_protection_section_exists() -> None:
@@ -46,9 +57,9 @@ def test_documented_ruleset_blocks_direct_pushes() -> None:
 
 def test_documented_status_check_matches_ci_job_name() -> None:
     job_name = yaml.safe_load(WORKFLOW.read_text())["jobs"]["fast-gates"]["name"]
-    assert f'"{job_name}"' in _contract_text(), (
-        f"docs/AGENT_CONTRACT.md's required_status_checks must name the fast-gates "
-        f"job as it actually reports: {job_name!r}"
+    assert job_name in _protection_contexts(), (
+        f"docs/AGENT_CONTRACT.md's required_status_checks.contexts must name the "
+        f"fast-gates job as it actually reports: {job_name!r}"
     )
 
 
@@ -56,7 +67,7 @@ def test_documented_status_check_matches_gate_context() -> None:
     match = re.search(r'GATE_CONTEXT="\$\{GATE_CONTEXT:-([^}]+)\}"', PR_GATE.read_text())
     assert match, "could not find GATE_CONTEXT default in ops/pr_gate.sh"
     gate_context = match.group(1)
-    assert f'"{gate_context}"' in _contract_text(), (
-        f"docs/AGENT_CONTRACT.md's required_status_checks must name the CLI gate "
-        f"context as ops/pr_gate.sh actually publishes it: {gate_context!r}"
+    assert gate_context in _protection_contexts(), (
+        f"docs/AGENT_CONTRACT.md's required_status_checks.contexts must name the CLI "
+        f"gate context as ops/pr_gate.sh actually publishes it: {gate_context!r}"
     )
