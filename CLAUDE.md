@@ -13,6 +13,21 @@
 
 ---
 
+## Model Tiers (cost-optimised)
+
+Use the right model for the task. Overkill burns budget; under-spec burns quality.
+
+| Tier | Model | Use when |
+|---|---|---|
+| **Reasoning** | `claude-opus-4-6` | Architecture decisions, root-cause analysis, code review adjudication, complex debugging, mediation |
+| **Implementation** | `claude-sonnet-4-6` | Writing code, fixing bugs, implementing features, test authoring, refactoring |
+| **Generation** | `claude-haiku-4-5-20251001` | Output formatting, simple text generation, commit message drafting, doc summaries |
+
+When configuring `ops/` scripts: `IMPL_MODEL` → Sonnet, `MEDIATOR_MODEL` → Opus.
+Interactive sessions default to Opus for reasoning-heavy work and Sonnet for code changes.
+
+---
+
 ## Language & Framework Constraints
 
 - Python >= 3.10. Target compatibility: 3.10–3.13.
