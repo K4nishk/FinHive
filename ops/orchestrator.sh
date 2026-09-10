@@ -594,9 +594,24 @@ remediate_issue() {
     fail "  $branch has uncommitted changes — refusing to remediate over them"; return 1
   fi
 
-  # The findings to answer are whatever the LAST round recorded.
-  local last; last="$(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -n | tail -1)"
-  local lastlog="$LOG_DIR/${issue}_cr_round${last}.txt"
+  # The highest round number on disk — used only to number the next fix commit.
+  local highest_round; highest_round="$(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -n | tail -1)"
+
+  # The findings to answer: the most recent round that actually recorded a
+  # blocking finding — not necessarily the literal last file on disk. A later
+  # round can be a bare quota/auth/CLI error with zero parsed findings; reading
+  # only the last file erased the evidence that an earlier round found real
+  # blocking issues, and a fresh re-review can then come back clean for reasons
+  # that have nothing to do with a fix (a moved base, CodeRabbit non-determinism),
+  # clearing the debt without a commit ever having answered the finding.
+  local lastlog="" round
+  for round in $(ls -1 "$LOG_DIR/${issue}"_cr_round*.txt 2>/dev/null | sed 's/.*_cr_round//;s/\.txt//' | sort -rn); do
+    local candidate="$LOG_DIR/${issue}_cr_round${round}.txt"
+    if [ "$(blocking_count "$candidate")" -gt 0 ]; then
+      lastlog="$candidate"
+      break
+    fi
+  done
 
   # Captured before EITHER path runs. run_gate is not read-only — when a round
   # reports blocking findings it calls the agent and commits the fix, so the
@@ -605,16 +620,13 @@ remediate_issue() {
   local gate
 
   local has_findings=0
-  if [ -f "$lastlog" ] && [ "$(blocking_count "$lastlog")" -gt 0 ]; then
-    has_findings=1
-  fi
+  [ -n "$lastlog" ] && has_findings=1
 
-  if [ "$has_findings" -eq 0 ] || [ "$(debt_reason "$issue")" = "quota" ] \
-     || [ "$(debt_reason "$issue")" = "gate-unavailable" ]; then
-    # No actionable findings on disk — either the log is missing, contains a
-    # CLI error instead of a real review, or the debt was banked for a
-    # non-findings reason. An agent called with nothing to fix would change
-    # nothing and leave the entry open forever. Re-gate from scratch.
+  if [ "$has_findings" -eq 0 ]; then
+    # No round ever recorded a blocking finding — the debt was banked for a
+    # non-findings reason (quota, an unauthenticated CLI, a bad invocation).
+    # An agent called with nothing to fix would change nothing and leave the
+    # entry open forever. Re-gate from scratch.
     say "  no actionable findings on disk — re-gating only"
     run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
     gate=$?
@@ -628,7 +640,7 @@ End your final message with VERDICT=IMPLEMENTED, VERDICT=ALREADY_DONE or VERDICT
     if [ "$AGENT_KIND" = "limit" ]; then say "  usage limit during remediation"; return 3; fi
 
     git add -A 2>/dev/null || true
-    git commit -q -m "fix($issue): address CodeRabbit round $((last + 1))" >/dev/null 2>&1 || true
+    git commit -q -m "fix($issue): address CodeRabbit round $((highest_round + 1))" >/dev/null 2>&1 || true
     if [ "$(git rev-parse HEAD)" = "$before" ]; then
       say "  no changes made — leaving the debt open for a human"
       return 1
