@@ -13,8 +13,10 @@ without a test noticing.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import tomllib
 import yaml
@@ -22,6 +24,37 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+# Matches a shell construct that swallows the ruff command's own exit status,
+# e.g. ``ruff check finhive tests || true`` / ``|| exit 0`` / ``|| :``.
+_MASKS_EXIT_STATUS = re.compile(
+    r"ruff check finhive tests\s*\|\|\s*(true|exit\s+0|:)\b"
+)
+
+
+def _blocking_ruff_steps(
+    workflow: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Return (job_id, job, step) triples where the ruff step is actually
+    capable of blocking a PR: the parent job has no ``if``/``continue-on-error``
+    that could skip or tolerate it, the step itself has no ``if``/
+    ``continue-on-error`` either, and the shell command isn't suffixed with a
+    construct (e.g. ``|| true``) that would mask a non-zero exit status.
+    """
+    hits: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for job_id, job in workflow.get("jobs", {}).items():
+        if job.get("if") is not None or job.get("continue-on-error", False):
+            continue
+        for step in job.get("steps", []):
+            run = step.get("run", "")
+            if "ruff check finhive tests" not in run:
+                continue
+            if step.get("if") is not None or step.get("continue-on-error", False):
+                continue
+            if _MASKS_EXIT_STATUS.search(run):
+                continue
+            hits.append((job_id, job, step))
+    return hits
 
 
 def _ruff_check(
@@ -71,26 +104,70 @@ def test_s608_is_not_suppressed_for_the_finhive_ci_target() -> None:
 
 def test_ci_runs_the_rule_set_against_finhive() -> None:
     """The gate is only real if an active step on pull_request actually runs
-    it -- a matching string could just as easily sit in a comment, a step
-    gated behind ``if: false``, or one marked ``continue-on-error: true``,
-    all of which would let SQL string construction slip past this test.
+    it -- a matching string could just as easily sit in a comment, a step (or
+    its parent job) gated behind ``if: false``, a step (or its parent job)
+    marked ``continue-on-error: true``, or a shell command that swallows
+    ruff's exit status (e.g. ``|| true``), any of which would let SQL string
+    construction slip past this test.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text())
     assert "pull_request" in workflow[True], (
         "workflow must trigger on pull_request for the gate to run pre-merge"
     )
 
-    ruff_steps = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if "ruff check finhive tests" in step.get("run", "")
-    ]
-    assert ruff_steps, "no step runs 'ruff check finhive tests'"
-    assert any(
-        not step.get("continue-on-error", False) and "if" not in step
-        for step in ruff_steps
-    ), "the ruff step must run unconditionally and not tolerate failure"
+    assert _blocking_ruff_steps(workflow), (
+        "no job runs 'ruff check finhive tests' unconditionally, bound to a "
+        "job that also runs unconditionally, without tolerating or masking "
+        "failure"
+    )
+
+
+def test_blocking_ruff_steps_rejects_job_level_if() -> None:
+    workflow: dict[str, Any] = {
+        "jobs": {
+            "fast-gates": {
+                "if": "false",
+                "steps": [{"run": "ruff check finhive tests"}],
+            }
+        }
+    }
+    assert _blocking_ruff_steps(workflow) == []
+
+
+def test_blocking_ruff_steps_rejects_job_level_continue_on_error() -> None:
+    workflow: dict[str, Any] = {
+        "jobs": {
+            "fast-gates": {
+                "continue-on-error": True,
+                "steps": [{"run": "ruff check finhive tests"}],
+            }
+        }
+    }
+    assert _blocking_ruff_steps(workflow) == []
+
+
+def test_blocking_ruff_steps_rejects_masked_exit_status() -> None:
+    workflow: dict[str, Any] = {
+        "jobs": {
+            "fast-gates": {
+                "steps": [{"run": "ruff check finhive tests || true"}],
+            }
+        }
+    }
+    assert _blocking_ruff_steps(workflow) == []
+
+
+def test_blocking_ruff_steps_accepts_unconditional_fatal_step() -> None:
+    workflow: dict[str, Any] = {
+        "jobs": {
+            "fast-gates": {
+                "steps": [{"run": "ruff check finhive tests"}],
+            }
+        }
+    }
+    hits = _blocking_ruff_steps(workflow)
+    assert len(hits) == 1
+    assert hits[0][0] == "fast-gates"
 
 
 def test_fstring_sql_constant_is_blocked(tmp_path: Path) -> None:
