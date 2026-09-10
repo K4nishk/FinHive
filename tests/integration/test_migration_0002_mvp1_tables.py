@@ -2,10 +2,14 @@
 reference_id uniqueness guarantee is scoped to an org rather than global
 (KCH-93 acceptance).
 
-Requires a real Postgres reachable via TEST_DATABASE_URL or DATABASE_URL --
+Requires a real, disposable Postgres reachable via TEST_DATABASE_URL --
 skipped otherwise, per the `integration` marker's contract in pyproject.toml.
 Unlike 0001's test, this one doesn't need the `auth` schema, so a bare
 Postgres container works, not just a Supabase instance.
+
+TEST_DATABASE_URL only, never DATABASE_URL: `_reset` drops users, orgs, and
+all business tables, so pointing this at an application database would be
+destructive.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from finhive.db.migrations import apply_pending  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 _MVP1_TABLES = [
@@ -41,7 +45,7 @@ async def _reset(conn: asyncpg.Connection) -> None:
         await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
 
-@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL or DATABASE_URL")
+@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL")
 def test_two_orgs_can_independently_reuse_the_same_reference_id() -> None:
     import asyncio
 
@@ -89,7 +93,7 @@ def test_two_orgs_can_independently_reuse_the_same_reference_id() -> None:
     assert count == expected
 
 
-@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL or DATABASE_URL")
+@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL")
 def test_reference_id_must_stay_unique_within_the_same_org() -> None:
     import asyncio
 
@@ -144,7 +148,7 @@ def test_reference_id_must_stay_unique_within_the_same_org() -> None:
     assert raised
 
 
-@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL or DATABASE_URL")
+@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL")
 def test_report_record_cannot_attach_to_another_orgs_report() -> None:
     """The FK on report_records is composite on (org_id, report_id); a report
     row belonging to org A must not accept a report_record claiming org B,
