@@ -63,3 +63,30 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  mvp1-regression:
+    name: MVP1 regression
+    runs-on: ubuntu-latest
+    # Business-continuity gate (KCH-88): the MVP1 desktop app under active real-world
+    # use must never regress while MVP2 is built alongside it, so this job runs the
+    # full MVP1 suite against src/Loan Manager on every PR -- regardless of which
+    # paths changed -- and is a required check, so a break here blocks merge even for
+    # an otherwise-unrelated MVP2 PR.
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: src/Loan Manager
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/Loan Manager/requirements.txt
+
+      - name: Install MVP1 dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run MVP1 unit, integration and smoke tests
+        run: python -m pytest tests/ -v --cov=loan_manager
