@@ -122,6 +122,7 @@ gh api "repos/$OWNER/$REPO/branches/main/protection" -X PUT --input - <<JSON
     "strict": true,
     "checks": [
       { "context": "Fast gates", "app_id": $GH_ACTIONS_APP_ID },
+      { "context": "MVP1 regression", "app_id": $GH_ACTIONS_APP_ID },
       { "context": "coderabbit/cli-gate", "app_id": null }
     ]
   },
@@ -134,19 +135,23 @@ gh api "repos/$OWNER/$REPO/branches/main/protection" -X PUT --input - <<JSON
 JSON
 ```
 
-The two contexts must match what CI actually publishes: `"Fast gates"` is the
-`fast-gates` job's display name in `.github/workflows/ci.yml`, and
-`"coderabbit/cli-gate"` is `GATE_CONTEXT` in `ops/pr_gate.sh` — the status the CLI gate
-publishes per PR (see `ops/pr_gate.sh --require-check`, which appends that context to
-an existing protection rule rather than creating one). If either name changes, this
-block must change with it; `tests/unit/test_branch_protection.py` pins both names so a
-rename doesn't silently desync the documented command from what CI/the gate actually
-report.
+The three contexts must match what CI actually publishes: `"Fast gates"` is the
+`fast-gates` job's display name in `.github/workflows/ci.yml`, `"MVP1 regression"` is
+the `mvp1-regression` job's display name in the same file — it runs the full MVP1
+suite (150 unit/integration tests plus 22 smoke tests) against `src/Loan Manager` on
+every PR regardless of changed paths, so a deliberate break in MVP1 domain code blocks
+an unrelated MVP2 PR (KCH-88) — and `"coderabbit/cli-gate"` is `GATE_CONTEXT` in
+`ops/pr_gate.sh` — the status the CLI gate publishes per PR (see `ops/pr_gate.sh
+--require-check`, which appends that context to an existing protection rule rather
+than creating one). If any name changes, this block must change with it;
+`tests/unit/test_branch_protection.py` pins all three names so a rename doesn't
+silently desync the documented command from what CI/the gate actually report.
 
 `checks[].app_id` (not the legacy `contexts` list) is what actually binds a required
 context to its publisher, so an unrelated app can't satisfy the same context name.
-`"Fast gates"` runs as a GitHub Actions job, so it's bound to the GitHub Actions app's
-id, resolved at apply time rather than hardcoded. `"coderabbit/cli-gate"` is
+`"Fast gates"` and `"MVP1 regression"` both run as GitHub Actions jobs, so both are
+bound to the GitHub Actions app's id, resolved at apply time rather than hardcoded.
+`"coderabbit/cli-gate"` is
 deliberately left unbound (`app_id: null`, meaning "any app") because `ops/pr_gate.sh`
 currently publishes it via a human- or agent-authenticated `gh auth login` session
 (`ops/orchestrator.sh` checks `gh auth status`), not a distinct GitHub App — a PAT-created

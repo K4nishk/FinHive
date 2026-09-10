@@ -73,6 +73,37 @@ def test_documented_status_check_matches_ci_job_name() -> None:
     )
 
 
+def test_documented_status_check_matches_mvp1_regression_job_name() -> None:
+    """KCH-88: the MVP1 regression gate must be one of the documented required
+    checks, and its documented name must match the job's actual CI display name."""
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    job_name = workflow["jobs"]["mvp1-regression"]["name"]
+    assert job_name in _protection_contexts(), (
+        "docs/AGENT_CONTRACT.md's required_status_checks.checks must "
+        f"name the mvp1-regression job as it actually reports: {job_name!r}"
+    )
+
+
+def test_mvp1_regression_job_runs_on_every_pr_path() -> None:
+    """KCH-88 acceptance: a deliberate break in MVP1 domain code must block an
+    unrelated MVP2 PR, so neither the workflow trigger nor the job itself may be
+    gated behind a paths filter."""
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    # PyYAML parses the unquoted `on:` key as the boolean True (YAML 1.1), not
+    # the string "on" -- look it up accordingly rather than via workflow["on"].
+    triggers = workflow[True]
+    pull_request_trigger = triggers["pull_request"]
+    assert not pull_request_trigger or "paths" not in pull_request_trigger, (
+        "the pull_request trigger must not filter by paths -- mvp1-regression has "
+        "to run on every PR regardless of which files changed"
+    )
+    job = workflow["jobs"]["mvp1-regression"]
+    assert "if" not in job, (
+        "mvp1-regression must not be conditioned on changed paths -- it has to "
+        "run on every PR regardless of which files changed"
+    )
+
+
 def test_documented_status_check_matches_gate_context() -> None:
     match = re.search(
         r'GATE_CONTEXT="\$\{GATE_CONTEXT:-([^}]+)\}"', PR_GATE.read_text()
@@ -93,3 +124,13 @@ def test_documented_ruleset_binds_fast_gates_to_actions_app() -> None:
     text = _contract_text()
     assert 'GH_ACTIONS_APP_ID="$(gh api apps/github-actions' in text
     assert '"context": "Fast gates", "app_id": $GH_ACTIONS_APP_ID' in text
+
+
+def test_documented_ruleset_binds_mvp1_regression_to_actions_app() -> None:
+    """Same binding requirement as Fast gates (KCH-88): MVP1 regression also
+    runs as a GitHub Actions job, so it must be bound to the Actions app's id
+    rather than left open to any app with a same-named status."""
+    assert (
+        '"context": "MVP1 regression", "app_id": $GH_ACTIONS_APP_ID'
+        in _contract_text()
+    )
