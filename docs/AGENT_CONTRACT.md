@@ -103,6 +103,63 @@ sibling branch that hasn't merged yet. A release PR promotes `development` → `
 Review and merge a stack **bottom-up**; merging out of order leaves a child PR's base
 retargeted mid-review.
 
+## Branch protection
+
+`main` must stay always-deployable, so nothing lands on it except a release PR that
+has cleared every gate and one human approval — no direct pushes, no admin bypass.
+This is a one-time repo-admin action (same category as `gh auth login` in
+`ops/README.md`), applied once via `gh api` and not re-run per PR:
+
+```bash
+# Resolve the GitHub Actions app's id instead of hardcoding it -- pinning a
+# guessed constant into this doc would be worse than not binding at all if it's
+# ever wrong. Look it up at apply time:
+GH_ACTIONS_APP_ID="$(gh api apps/github-actions --jq '.id')"
+
+gh api "repos/$OWNER/$REPO/branches/main/protection" -X PUT --input - <<JSON
+{
+  "required_status_checks": {
+    "strict": true,
+    "checks": [
+      { "context": "Fast gates", "app_id": $GH_ACTIONS_APP_ID },
+      { "context": "coderabbit/cli-gate", "app_id": null }
+    ]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 1 },
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
+The two contexts must match what CI actually publishes: `"Fast gates"` is the
+`fast-gates` job's display name in `.github/workflows/ci.yml`, and
+`"coderabbit/cli-gate"` is `GATE_CONTEXT` in `ops/pr_gate.sh` — the status the CLI gate
+publishes per PR (see `ops/pr_gate.sh --require-check`, which appends that context to
+an existing protection rule rather than creating one). If either name changes, this
+block must change with it; `tests/unit/test_branch_protection.py` pins both names so a
+rename doesn't silently desync the documented command from what CI/the gate actually
+report.
+
+`checks[].app_id` (not the legacy `contexts` list) is what actually binds a required
+context to its publisher, so an unrelated app can't satisfy the same context name.
+`"Fast gates"` runs as a GitHub Actions job, so it's bound to the GitHub Actions app's
+id, resolved at apply time rather than hardcoded. `"coderabbit/cli-gate"` is
+deliberately left unbound (`app_id: null`, meaning "any app") because `ops/pr_gate.sh`
+currently publishes it via a human- or agent-authenticated `gh auth login` session
+(`ops/orchestrator.sh` checks `gh auth status`), not a distinct GitHub App — a PAT-created
+status has no app identity to bind to. The residual mitigation is that creating a commit
+status already requires push/write access to the repo, so this isn't open to arbitrary
+third parties, but the gap stays open until `pr_gate.sh`'s status-setting step runs under
+a machine identity (e.g. a GitHub Actions job authenticated with `GITHUB_TOKEN`) that has
+its own app id to bind to.
+
+`development` gets the lighter-weight `--require-check` treatment (§ "Where this is
+enforced" below) rather than this full ruleset, since it is the integration branch
+agents push feature branches into directly, not the always-deployable one.
+
 ## Where this is enforced
 
 - `ops/orchestrator.sh` — the build loop: branch → implement → CLI gate → fix cycles
