@@ -603,9 +603,10 @@ remediate_issue() {
   # re-gate-only path can move HEAD just as the agent path does.
   local before; before="$(git rev-parse HEAD)"
   local gate
-
+  
   if [ ! -f "$lastlog" ] || [ "$(debt_reason "$issue")" = "quota" ] \
-     || [ "$(debt_reason "$issue")" = "gate-unavailable" ]; then
+    || [ "$(debt_reason "$issue")" = "gate-unavailable" ] \
+    || [ "$(debt_reason "$issue")" = "pr-open" ]; then
     # Quota- or error-banked debt has no findings to answer; an agent called with
     # nothing to fix would change nothing and leave the entry open forever.
     say "  no findings to answer — re-gating only"
