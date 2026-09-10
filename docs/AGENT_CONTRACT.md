@@ -31,7 +31,9 @@ implementing a `KCH-*` Linear issue in this repository.
    - Cycle 2: if findings persist, repeat — a new commit, re-run the test suite,
      re-run the gate — and retain both cycles' gate results.
    - Still blocking after cycle 2 → **escalate** (below). Do not attempt a third cycle.
-   - Only push (or push an update) once a cycle ends with no blocking findings.
+   - Only push (or push an update) once a cycle ends with no blocking findings — except
+     the single escalation draft PR (below), which is explicitly allowed to carry a
+     blocking finding.
 7. **Human merges.** The agent never merges. It opens PRs (and marks one draft on
    escalation); a human approves and merges to `development`.
 
