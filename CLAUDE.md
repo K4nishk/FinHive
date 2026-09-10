@@ -10,6 +10,7 @@
 - **Source**: `/src/Loan Manager/loan_manager/` (Python package)
 - **WIKI**: `/output/Loan Manager/run_8/WIKI.md` — full repository knowledge base with file index, data flows, and business rules. Read it before making architectural decisions.
 - **ARD**: `/output/Loan Manager/run_8/ARD.md` — architecture reference for onboarding context.
+- **Agent contract**: `/docs/AGENT_CONTRACT.md` — the rules any agent (orchestrator-driven or interactive) follows when implementing a `KCH-*` issue: branch, implement, CodeRabbit gate, bounded fix cycles, escalation.
 
 ---
 
@@ -218,6 +219,15 @@ See `.claude/skills/*/SKILL.md` for full list. Key categories:
 - `/skill-create` — Generate skills from git history
 
 ---
+
+## Agentic Development Loop
+
+When work is implemented by an agent against a `KCH-*` Linear issue, follow
+`/docs/AGENT_CONTRACT.md`: branch from `development` as `feature/kch-N`, implement with
+tests, run the CodeRabbit CLI gate, fix blocking findings for at most two cycles, then
+escalate to a new Linear issue carrying the finding, each attempted fix, why it failed,
+and a suggested direction. An agent never merges — it opens a PR (or, on escalation,
+a draft PR) for a human to review.
 
 ## Development Workflow
 
