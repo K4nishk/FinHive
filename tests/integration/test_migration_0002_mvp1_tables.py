@@ -15,6 +15,7 @@ destructive.
 from __future__ import annotations
 
 import os
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -196,8 +197,8 @@ def test_report_record_cannot_attach_to_another_orgs_report() -> None:
                     "2026-01-01",
                     30,
                     "days",
-                    2.5,
-                    1.0,
+                    Decimal("2.5").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                    Decimal("1.0").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                 )
             except asyncpg.ForeignKeyViolationError:
                 return True
