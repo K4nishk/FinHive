@@ -41,6 +41,8 @@ The script:
    clean-machine run without them is not a working local app. Pass
    `--allow-partial` (or set `ALLOW_PARTIAL_SETUP=1`) to opt into an
    SPA-only run anyway, e.g. for frontend-only work.
+   Seeding (KCH-94) needs the service-account credentials described below,
+   in addition to `DATABASE_URL`.
 6. Starts the API on `http://localhost:8000` and the SPA on
    `http://localhost:5173` together. The SPA dev server proxies `/api`
    requests to the API port (see `web/vite.config.ts`).
@@ -59,15 +61,35 @@ export DATABASE_URL="postgresql://...supabase-branch-connection-string..."
 When `DATABASE_URL` is set, the script skips `supabase start` and uses that
 connection directly.
 
+## Service account credentials (KCH-94)
+
+Milestone one skips public signup: a single service account is seeded for
+the existing MVP1 user, with `role=owner` and a real `org_id`, authenticating
+against Supabase Auth. Add its credentials to `ops/.env.local` alongside
+`DATABASE_URL`:
+
+```bash
+export SUPABASE_URL="http://127.0.0.1:54321"          # supabase start's default; omit to use it
+export SUPABASE_SERVICE_ROLE_KEY="..."                 # printed by `supabase start`, or from a hosted project's API settings
+export MVP1_OWNER_EMAIL="owner@example.com"
+export MVP1_OWNER_PASSWORD="..."
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` bypasses Row Level Security and is used in
+exactly one place, `finhive/db/admin.py`, to provision the Supabase Auth user
+this seed needs. Re-running `python -m finhive.db.seed_service_account` (or
+`./run_local_mac.sh`) is idempotent: it looks the org and auth user up by
+name/email before creating either.
+
 ## Current milestone state
 
-M1a is being built incrementally. The script's migration, seed, and API
-steps depend on infrastructure that hasn't landed yet:
+M1a is being built incrementally. The script's migration and API steps
+depend on infrastructure that hasn't landed yet:
 
 | Step | Lands in |
 |---|---|
 | Migration runner | KCH-91 |
-| Service account seed | KCH-94 |
+| Service account seed | KCH-94 — done |
 | FastAPI app (`finhive.dev_server:app`) | KCH-102 |
 
 Until all three exist, `./run_local_mac.sh` fails with a list of what's
@@ -76,8 +98,8 @@ KCH-90's "working local app" acceptance criterion. Pass `--allow-partial`
 (or set `ALLOW_PARTIAL_SETUP=1`) if you specifically want the SPA-only
 subset anyway, e.g. for frontend-only work; the script prints a `PARTIAL
 SETUP` warning naming what's missing rather than presenting it as success.
-Once those three land, re-running `./run_local_mac.sh` (no flag needed)
-picks them up automatically.
+Once those land, re-running `./run_local_mac.sh` (no flag needed) picks them
+up automatically.
 
 ## Troubleshooting
 
