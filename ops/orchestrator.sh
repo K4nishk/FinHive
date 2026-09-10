@@ -603,13 +603,19 @@ remediate_issue() {
   # re-gate-only path can move HEAD just as the agent path does.
   local before; before="$(git rev-parse HEAD)"
   local gate
-  
-  if [ ! -f "$lastlog" ] || [ "$(debt_reason "$issue")" = "quota" ] \
-    || [ "$(debt_reason "$issue")" = "gate-unavailable" ] \
-    || [ "$(debt_reason "$issue")" = "pr-open" ]; then
-    # Quota- or error-banked debt has no findings to answer; an agent called with
-    # nothing to fix would change nothing and leave the entry open forever.
-    say "  no findings to answer — re-gating only"
+
+  local has_findings=0
+  if [ -f "$lastlog" ] && [ "$(blocking_count "$lastlog")" -gt 0 ]; then
+    has_findings=1
+  fi
+
+  if [ "$has_findings" -eq 0 ] || [ "$(debt_reason "$issue")" = "quota" ] \
+     || [ "$(debt_reason "$issue")" = "gate-unavailable" ]; then
+    # No actionable findings on disk — either the log is missing, contains a
+    # CLI error instead of a real review, or the debt was banked for a
+    # non-findings reason. An agent called with nothing to fix would change
+    # nothing and leave the entry open forever. Re-gate from scratch.
+    say "  no actionable findings on disk — re-gating only"
     run_gate "$issue" "$LOG_DIR/${issue}_gate_prompt.txt" "$prbase"
     gate=$?
   else
@@ -692,8 +698,19 @@ run_issue() {
   # from being overwritten. Send them to the debt ledger instead.
   if [ -n "$(open_pr_field "$branch" number)" ]; then
     fail "$issue already has an open PR — refusing to rebuild over it"
-    fail "  banked as review debt; the next pass will remediate it in place"
-    debt_add "$issue" "pr-open"
+    # Preserve the existing debt reason when re-banking. An issue that exhausted
+    # its fix rounds with real "findings" and was then hit by the queue walker
+    # must stay "findings" so the next remediation pass runs the mediation agent
+    # instead of a bare re-gate. Overwriting to "pr-open" made KCH-90 loop:
+    # re-gate found the same findings, never called the agent, debt stayed open.
+    local existing_reason; existing_reason="$(debt_reason "$issue")"
+    if [ -n "$existing_reason" ]; then
+      fail "  re-banking with existing reason ($existing_reason)"
+      debt_add "$issue" "$existing_reason"
+    else
+      fail "  banked as review debt; the next pass will remediate it in place"
+      debt_add "$issue" "pr-open"
+    fi
     return 1
   fi
 
