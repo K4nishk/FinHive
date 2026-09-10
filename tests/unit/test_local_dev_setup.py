@@ -1,19 +1,28 @@
 """The M1a local launcher contract (KCH-90).
 
 Acceptance is "a clean machine reaches a working local app from a single
-command on both operating systems" — not something a unit test can drive
-directly (it needs a real Python/Node/Postgres environment). What's checked
-here instead: the two launchers and their setup guides exist, the shell
-script is syntactically valid and executable, both scripts mirror the MVP1
-version-check convention (readable failure message, 3.10 floor), and both
-cover every step the issue lists. That's the contract a reviewer or a later
-ticket can hold the scripts to without running a full environment bring-up.
+command on both operating systems" — not something most of these tests can
+drive directly (it needs a real Python/Node/Postgres environment). Most of
+what's checked here is structural: the two launchers and their setup guides
+exist, the shell script is syntactically valid and executable, both scripts
+mirror the MVP1 version-check convention (readable failure message, 3.10
+floor), and both at least mention every step the issue lists. That
+substring check is a floor, not KCH-90 acceptance evidence — it would pass
+just as happily if a step appeared only in a comment or a skip notice.
+The one test that actually exercises the launcher end-to-end,
+``test_mac_launcher_brings_up_a_reachable_spa``, is opt-in (see
+FINHIVE_LOCAL_SETUP_INTEGRATION below) because it needs Node, and either a
+reachable database or a container runtime, to actually run the app.
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import socket
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -24,9 +33,12 @@ WINDOWS_SCRIPT = ROOT / "run_local_windows.bat"
 MAC_GUIDE = ROOT / "docs" / "LOCAL_SETUP_MACOS.md"
 WINDOWS_GUIDE = ROOT / "docs" / "LOCAL_SETUP_WINDOWS.md"
 
+RUN_INTEGRATION = os.environ.get("FINHIVE_LOCAL_SETUP_INTEGRATION") == "1"
+
 # Every step the issue's acceptance criteria name, checked as a substring
 # present in each script (case-insensitive markers for the concept, not
-# literal commands, since mac/bat spell them differently).
+# literal commands, since mac/bat spell them differently). This only proves
+# the step is mentioned somewhere — see the module docstring.
 REQUIRED_STEPS = [
     "python",
     "venv",
@@ -80,7 +92,10 @@ def test_scripts_mirror_mvp1_version_check_convention(script: Path) -> None:
 
 @pytest.mark.parametrize(
     "guide,script_name",
-    [(MAC_GUIDE, "run_local_mac.sh"), (WINDOWS_GUIDE, "run_local_windows.bat")],
+    [
+        (MAC_GUIDE, "run_local_mac.sh"),
+        (WINDOWS_GUIDE, "run_local_windows.bat"),
+    ],
 )
 def test_setup_guide_references_its_script(guide: Path, script_name: str) -> None:
     assert script_name in guide.read_text()
@@ -89,3 +104,46 @@ def test_setup_guide_references_its_script(guide: Path, script_name: str) -> Non
 def test_windows_script_is_a_batch_file_not_powershell() -> None:
     text = WINDOWS_SCRIPT.read_text()
     assert text.startswith("@echo off")
+
+
+def _port_is_open(host: str, port: int) -> bool:
+    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.settimeout(1)
+        return sock.connect_ex((host, port)) == 0
+
+
+@pytest.mark.skipif(
+    not RUN_INTEGRATION,
+    reason=(
+        "opt-in: set FINHIVE_LOCAL_SETUP_INTEGRATION=1 to actually launch "
+        "run_local_mac.sh and verify the SPA serves real traffic. Requires "
+        "Python 3.10+, Node 20+, and either DATABASE_URL or a running "
+        "Supabase CLI plus a container runtime."
+    ),
+)
+def test_mac_launcher_brings_up_a_reachable_spa() -> None:
+    proc = subprocess.Popen(
+        ["bash", str(MAC_SCRIPT), "--allow-partial"],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 300
+        spa_up = False
+        while time.monotonic() < deadline:
+            if _port_is_open("127.0.0.1", 5173):
+                spa_up = True
+                break
+            if proc.poll() is not None:
+                pytest.fail(
+                    "launcher exited before the SPA came up:\n"
+                    f"{proc.stdout.read()}"
+                )
+            time.sleep(1)
+        assert spa_up, "SPA did not become reachable on :5173 within 300s"
+    finally:
+        proc.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=10)

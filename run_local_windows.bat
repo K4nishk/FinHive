@@ -4,9 +4,20 @@ setlocal enabledelayedexpansion
 ::
 :: Mirrors the MVP1 launcher conventions (src\Loan Manager\run_windows.bat): a
 :: readable version-check failure, a project-local .venv, quiet installs.
-:: Steps whose infrastructure hasn't landed yet (migration runner: KCH-91,
-:: service-account seed: KCH-92, FastAPI app: KCH-93) print a notice and skip
-:: rather than failing the whole run -- see docs\LOCAL_SETUP_WINDOWS.md.
+::
+:: KCH-90's acceptance criteria is "a clean machine reaches a working local
+:: app from a single command" -- migrations, the service-account seed, and
+:: the API all have to actually run for that to be true. Their
+:: infrastructure lands in separate tickets (migration runner: KCH-91,
+:: service-account seed: KCH-94, FastAPI app: KCH-102). Until all three
+:: exist, this script FAILS rather than silently launching an SPA-only app
+:: and calling it done. Pass --allow-partial (or set ALLOW_PARTIAL_SETUP=1)
+:: to opt into that partial run anyway for frontend-only work -- see
+:: docs\LOCAL_SETUP_WINDOWS.md.
+
+set ALLOW_PARTIAL=%ALLOW_PARTIAL_SETUP%
+if "%ALLOW_PARTIAL%"=="" set ALLOW_PARTIAL=0
+if "%~1"=="--allow-partial" set ALLOW_PARTIAL=1
 
 echo === FinHive -- Windows Local Setup ===
 
@@ -66,16 +77,37 @@ set VENV_DIR=%ROOT_DIR%.venv
 if not exist "!VENV_DIR!" (
     echo Creating virtual environment...
     !PYTHON_CMD! -m venv "!VENV_DIR!"
+    if not !errorlevel! == 0 (
+        echo ERROR: failed to create the virtual environment at !VENV_DIR!.
+        pause
+        exit /b 1
+    )
 )
 call "!VENV_DIR!\Scripts\activate.bat"
 
 echo Installing backend dependencies...
 python -m pip install --quiet --upgrade pip
+if not !errorlevel! == 0 (
+    echo ERROR: "pip install --upgrade pip" failed.
+    pause
+    exit /b 1
+)
 python -m pip install --quiet -e ".[dev]"
+if not !errorlevel! == 0 (
+    echo ERROR: "pip install -e .[dev]" failed.
+    pause
+    exit /b 1
+)
 
 echo Installing frontend dependencies...
 pushd "%ROOT_DIR%web"
 call npm install --silent
+if not !errorlevel! == 0 (
+    echo ERROR: "npm install" failed in web\.
+    popd
+    pause
+    exit /b 1
+)
 popd
 
 :: --- Database: local Supabase (Postgres + Auth), or a configured Supabase branch ---
@@ -93,8 +125,21 @@ if defined DATABASE_URL (
 ) else (
     where supabase >nul 2>&1
     if !errorlevel! == 0 (
+        docker info >nul 2>&1
+        if not !errorlevel! == 0 (
+            echo ERROR: the Supabase CLI needs a running Docker-compatible container runtime.
+            echo Start Docker Desktop ^(or another Docker API-compatible runtime^) and retry,
+            echo or set DATABASE_URL in ops\.env.local to point at a Supabase branch instead.
+            pause
+            exit /b 1
+        )
         echo Starting local Supabase ^(Postgres + Auth^)...
         call supabase start
+        if not !errorlevel! == 0 (
+            echo ERROR: "supabase start" failed.
+            pause
+            exit /b 1
+        )
         set DATABASE_URL=postgresql://postgres:postgres@localhost:54322/postgres
     ) else (
         echo ERROR: no DATABASE_URL is set and the Supabase CLI was not found.
@@ -105,22 +150,45 @@ if defined DATABASE_URL (
     )
 )
 
+:: --- Track mandatory KCH-90 stages so a missing one blocks by default ---
+set MISSING_STAGES=
+
 :: --- Migrations (finhive\db\migrate.py, added by KCH-91) ---
 !PYTHON_CMD! -c "import finhive.db.migrate" >nul 2>&1
 if !errorlevel! == 0 (
     echo Applying migrations...
     python -m finhive.db.migrate
 ) else (
-    echo NOTE: migration runner not yet available ^(KCH-91^) -- skipping.
+    set "MISSING_STAGES=!MISSING_STAGES! - migration runner (KCH-91)"
 )
 
-:: --- Seed service account (finhive\db\seed_service_account.py, added by KCH-92) ---
+:: --- Seed service account (finhive\db\seed_service_account.py, added by KCH-94) ---
 !PYTHON_CMD! -c "import finhive.db.seed_service_account" >nul 2>&1
 if !errorlevel! == 0 (
     echo Seeding service account...
     python -m finhive.db.seed_service_account
 ) else (
-    echo NOTE: service account seed not yet available ^(KCH-92^) -- skipping.
+    set "MISSING_STAGES=!MISSING_STAGES! - service account seed (KCH-94)"
+)
+
+:: --- API (finhive\dev_server.py, added by KCH-102) ---
+!PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
+if not !errorlevel! == 0 (
+    set "MISSING_STAGES=!MISSING_STAGES! - backend API (KCH-102)"
+)
+
+if not "!MISSING_STAGES!"=="" (
+    if not "!ALLOW_PARTIAL!"=="1" (
+        echo ERROR: KCH-90 is not fully satisfiable yet -- missing:
+        echo !MISSING_STAGES!
+        echo This is a partial environment, not a working local app. Re-run once
+        echo those land, or pass --allow-partial ^(or set ALLOW_PARTIAL_SETUP=1^) to
+        echo launch the SPA-only subset anyway for frontend-only work.
+        pause
+        exit /b 1
+    )
+    echo WARNING: PARTIAL SETUP -- proceeding without:
+    echo !MISSING_STAGES!
 )
 
 :: --- Launch API and SPA together ---
@@ -129,7 +197,7 @@ if !errorlevel! == 0 (
     echo Starting API on http://localhost:8000 ...
     start "FinHive API" cmd /c "uvicorn finhive.dev_server:app --reload --port 8000"
 ) else (
-    echo NOTE: backend API is not yet scaffolded ^(KCH-93^) -- starting the SPA only.
+    echo Starting the SPA only -- the backend API is not part of this run.
 )
 
 echo Starting SPA on http://localhost:5173 ...

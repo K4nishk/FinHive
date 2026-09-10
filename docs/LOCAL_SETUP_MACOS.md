@@ -11,6 +11,12 @@ local database.
   Provides local Postgres + Auth via `supabase start`. If you'd rather point at a
   hosted Supabase branch instead of running Postgres locally, skip this and set
   `DATABASE_URL` as described below.
+- **A Docker API-compatible container runtime** (e.g. Docker Desktop, OrbStack,
+  Colima) — required if you use the Supabase CLI path above; `supabase start`
+  runs Postgres and Auth as containers and fails without a running runtime. The
+  script checks `docker info` before calling `supabase start` and fails with a
+  readable error if no runtime is running. Not needed if you set `DATABASE_URL`
+  to point at a hosted Supabase branch instead.
 
 ## Run it
 
@@ -26,15 +32,18 @@ The script:
    dependencies with `pip install -e ".[dev]"`.
 3. Installs frontend dependencies with `npm install` in `web/`.
 4. Starts a local database: if `DATABASE_URL` is set (see below), it connects
-   to that Supabase branch instead; otherwise it runs `supabase start` to spin
-   up local Postgres + Auth.
-5. Applies migrations and seeds the service account, once those exist
-   (KCH-91, KCH-92) — before they land, the script prints a notice and skips
-   these steps rather than failing.
+   to that Supabase branch instead; otherwise it checks that a container
+   runtime is running and then runs `supabase start` to spin up local
+   Postgres + Auth.
+5. Applies migrations, seeds the service account, and starts the API — once
+   those exist (KCH-91, KCH-94, KCH-102 respectively). **Until all three
+   exist, the script fails instead of launching a partial app**, since a
+   clean-machine run without them is not a working local app. Pass
+   `--allow-partial` (or set `ALLOW_PARTIAL_SETUP=1`) to opt into an
+   SPA-only run anyway, e.g. for frontend-only work.
 6. Starts the API on `http://localhost:8000` and the SPA on
    `http://localhost:5173` together. The SPA dev server proxies `/api`
-   requests to the API port (see `web/vite.config.ts`). The API step is
-   skipped with a notice until the FastAPI app is scaffolded (KCH-93).
+   requests to the API port (see `web/vite.config.ts`).
 
 Stop everything with `Ctrl-C`; the script tears down the API process it
 started.
@@ -52,17 +61,23 @@ connection directly.
 
 ## Current milestone state
 
-M1a is being built incrementally. Until the corresponding issues land, the
-script's migration, seed, and API steps are no-ops with a printed notice:
+M1a is being built incrementally. The script's migration, seed, and API
+steps depend on infrastructure that hasn't landed yet:
 
 | Step | Lands in |
 |---|---|
 | Migration runner | KCH-91 |
-| Service account seed | KCH-92 |
-| FastAPI app (`finhive.dev_server:app`) | KCH-93 |
+| Service account seed | KCH-94 |
+| FastAPI app (`finhive.dev_server:app`) | KCH-102 |
 
-Once those merge, re-running `./run_local_mac.sh` picks them up automatically
-— no changes to this script or guide are needed.
+Until all three exist, `./run_local_mac.sh` fails with a list of what's
+missing rather than launching an incomplete app — that partial state isn't
+KCH-90's "working local app" acceptance criterion. Pass `--allow-partial`
+(or set `ALLOW_PARTIAL_SETUP=1`) if you specifically want the SPA-only
+subset anyway, e.g. for frontend-only work; the script prints a `PARTIAL
+SETUP` warning naming what's missing rather than presenting it as success.
+Once those three land, re-running `./run_local_mac.sh` (no flag needed)
+picks them up automatically.
 
 ## Troubleshooting
 
@@ -72,5 +87,11 @@ Once those merge, re-running `./run_local_mac.sh` picks them up automatically
   (`node --version` to check).
 - **`no DATABASE_URL is set and the Supabase CLI was not found`** — install
   the Supabase CLI, or set `DATABASE_URL` in `ops/.env.local`.
+- **`the Supabase CLI needs a running Docker-compatible container runtime`**
+  — start Docker Desktop (or another Docker API-compatible runtime) and
+  retry, or set `DATABASE_URL` in `ops/.env.local` instead.
+- **`KCH-90 is not fully satisfiable yet`** — the migration runner,
+  service-account seed, or API haven't landed. Pass `--allow-partial` for an
+  SPA-only run, or wait for KCH-91/KCH-94/KCH-102.
 - **Port already in use** — another process is bound to `8000` or `5173`;
   stop it or edit the port in `run_local_mac.sh` / `web/vite.config.ts`.
