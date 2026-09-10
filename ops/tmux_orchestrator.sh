@@ -195,12 +195,13 @@ $TM send-keys -t "$SESSION:build" \
   "$SRC clear; cat <<'EOF'
   BUILD  —  the orchestrator runs one pass over the queue and exits.
 
-    ./ops/run_builder.sh              start a pass (guards, then orchestrator)
+    ./ops/run_builder.sh              start a single pass (guards, then orchestrator)
+    ./ops/run_builder.sh --loop       keep running passes until the queue is drained
     ./ops/run_builder.sh --status     read-only: queue, locks, recent log
-    caffeinate -ims ./ops/run_builder.sh    keep the Mac awake for a long pass
+    caffeinate -ims ./ops/run_builder.sh --loop    drain the backlog, keep Mac awake
 
   Knobs:  IMPL_MODEL (claude-sonnet-5)  MEDIATOR_MODEL (claude-opus-5)
-          CR_MAX_ROUNDS=2   MAX_TURNS   LOCAL_CHECKS
+          CR_MAX_ROUNDS=2   MAX_TURNS   LOOP_INTERVAL=30 (secs between passes)
 
   Nothing merges without you. Review PRs bottom-up.
 EOF" C-m
