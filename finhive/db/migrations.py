@@ -1,0 +1,257 @@
+"""Forward-only SQL migration runner (KCH-91).
+
+Reads numbered `migrations/NNNN_name.sql` files and applies the ones a target
+Postgres database hasn't seen yet, recording each in a `schema_migrations` table
+keyed by version, checksum and applied-at timestamp. There are no down-migrations:
+rolling a live schema back is riskier than rolling forward, so the only way to
+undo a change is a new migration that does so.
+
+The planning logic (`discover_migrations`, `plan_migrations`) is pure and has no
+database dependency, so it's fully unit-testable without Postgres or asyncpg
+installed. `apply_pending` is the only function that talks to a connection, and it
+duck-types against one (`execute` / `fetch` / `transaction`) rather than importing
+asyncpg, so callers can pass a real `asyncpg.Connection` or a test double.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import sys
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Protocol
+
+_FILENAME_RE = re.compile(r"^(?P<version>\d{4})_(?P<name>[a-z0-9_]+)\.sql$")
+
+_CREATE_SCHEMA_MIGRATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version BIGINT PRIMARY KEY,
+    name TEXT NOT NULL,
+    checksum TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
+_SELECT_APPLIED = "SELECT version, checksum, applied_at FROM schema_migrations"
+
+_INSERT_APPLIED = (
+    "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)"
+)
+
+
+class MigrationError(Exception):
+    """Base error for the migration runner."""
+
+
+class DuplicateVersionError(MigrationError):
+    def __init__(self, version: int, paths: list[Path]) -> None:
+        self.version = version
+        self.paths = paths
+        names = ", ".join(p.name for p in paths)
+        super().__init__(f"duplicate migration version {version:04d}: {names}")
+
+
+class ChecksumMismatchError(MigrationError):
+    """A previously-applied migration file's contents changed on disk."""
+
+    def __init__(self, version: int, name: str, expected: str, actual: str) -> None:
+        self.version = version
+        self.name = name
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"migration {version:04d}_{name}.sql was already applied with checksum "
+            f"{expected}, but the file on disk now checksums to {actual}. Migrations "
+            "are forward-only and immutable once applied -- add a new migration "
+            "instead of editing this one."
+        )
+
+
+@dataclass(frozen=True)
+class MigrationFile:
+    version: int
+    name: str
+    path: Path
+    checksum: str
+    sql: str
+
+
+@dataclass(frozen=True)
+class AppliedMigration:
+    version: int
+    checksum: str
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
+class MigrationPlan:
+    pending: list[MigrationFile]
+    mismatched: list[tuple[MigrationFile, AppliedMigration]]
+
+    @property
+    def is_clean(self) -> bool:
+        return not self.mismatched
+
+    @property
+    def is_up_to_date(self) -> bool:
+        return not self.pending and self.is_clean
+
+
+def checksum_of(sql: str) -> str:
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+
+
+def discover_migrations(migrations_dir: Path) -> list[MigrationFile]:
+    """Discover `NNNN_name.sql` files, sorted by version.
+
+    Files that don't match the naming convention (this README, stray files) are
+    ignored rather than erroring, so the directory can carry documentation
+    alongside the migrations themselves.
+    """
+    by_version: dict[int, list[Path]] = {}
+    for path in migrations_dir.glob("*.sql"):
+        match = _FILENAME_RE.match(path.name)
+        if not match:
+            continue
+        by_version.setdefault(int(match.group("version")), []).append(path)
+
+    for version, paths in by_version.items():
+        if len(paths) > 1:
+            raise DuplicateVersionError(version, sorted(paths))
+
+    migrations = []
+    for version, paths in by_version.items():
+        path = paths[0]
+        match = _FILENAME_RE.match(path.name)
+        assert match is not None
+        sql = path.read_text(encoding="utf-8")
+        migrations.append(
+            MigrationFile(
+                version=version,
+                name=match.group("name"),
+                path=path,
+                checksum=checksum_of(sql),
+                sql=sql,
+            )
+        )
+    return sorted(migrations, key=lambda m: m.version)
+
+
+def plan_migrations(
+    migrations: list[MigrationFile], applied: list[AppliedMigration]
+) -> MigrationPlan:
+    """Pure planning step: compare on-disk migrations against applied history.
+
+    A migration with no applied record is pending. A migration whose applied
+    checksum no longer matches the file on disk is mismatched -- it was edited
+    after being applied, which is exactly what must not happen.
+    """
+    applied_by_version = {a.version: a for a in applied}
+    pending: list[MigrationFile] = []
+    mismatched: list[tuple[MigrationFile, AppliedMigration]] = []
+
+    for migration in migrations:
+        record = applied_by_version.get(migration.version)
+        if record is None:
+            pending.append(migration)
+        elif record.checksum != migration.checksum:
+            mismatched.append((migration, record))
+
+    return MigrationPlan(pending=pending, mismatched=mismatched)
+
+
+class _Transaction(Protocol):
+    async def __aenter__(self) -> Any: ...
+    async def __aexit__(self, *exc_info: object) -> Any: ...
+
+
+class Connection(Protocol):
+    """The subset of `asyncpg.Connection` the runner needs."""
+
+    async def execute(self, query: str, *args: Any) -> Any: ...
+    async def fetch(self, query: str, *args: Any) -> Any: ...
+    def transaction(self) -> _Transaction: ...
+
+
+async def apply_pending(conn: Connection, migrations_dir: Path) -> list[MigrationFile]:
+    """Apply pending migrations, forward-only, against `conn`.
+
+    Raises `ChecksumMismatchError` before applying anything if a previously
+    applied file has been edited on disk. Returns the migrations newly applied
+    this call -- an empty list when the database is already up to date, which is
+    what makes running this twice in a row idempotent.
+    """
+    await conn.execute(_CREATE_SCHEMA_MIGRATIONS_TABLE)
+
+    rows = await conn.fetch(_SELECT_APPLIED)
+    applied = [
+        AppliedMigration(
+            version=row["version"], checksum=row["checksum"], applied_at=row["applied_at"]
+        )
+        for row in rows
+    ]
+
+    migrations = discover_migrations(migrations_dir)
+    result = plan_migrations(migrations, applied)
+
+    if not result.is_clean:
+        migration, record = result.mismatched[0]
+        raise ChecksumMismatchError(
+            migration.version, migration.name, record.checksum, migration.checksum
+        )
+
+    for migration in result.pending:
+        async with conn.transaction():
+            await conn.execute(migration.sql)
+            await conn.execute(
+                _INSERT_APPLIED, migration.version, migration.name, migration.checksum
+            )
+
+    return result.pending
+
+
+async def _run_cli() -> int:
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Forward-only SQL migration runner")
+    parser.add_argument("--database-url", default=os.environ.get("DATABASE_URL"))
+    parser.add_argument(
+        "--migrations-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "migrations",
+    )
+    args = parser.parse_args()
+
+    if not args.database_url:
+        print("DATABASE_URL is not set", file=sys.stderr)
+        return 2
+
+    import asyncpg
+
+    conn = await asyncpg.connect(args.database_url)
+    try:
+        applied = await apply_pending(conn, args.migrations_dir)
+    except MigrationError as exc:
+        print(f"migration failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        await conn.close()
+
+    if not applied:
+        print("up to date -- nothing to apply")
+    for migration in applied:
+        print(f"applied {migration.version:04d}_{migration.name}.sql")
+    return 0
+
+
+def main() -> int:
+    import asyncio
+
+    return asyncio.run(_run_cli())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
