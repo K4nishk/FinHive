@@ -23,6 +23,8 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -61,7 +63,9 @@ def test_setup_guides_exist() -> None:
 
 
 def test_mac_script_is_executable() -> None:
-    assert MAC_SCRIPT.stat().st_mode & 0o111, "run_local_mac.sh must be chmod +x"
+    assert MAC_SCRIPT.stat().st_mode & 0o111, (
+        "run_local_mac.sh must be chmod +x"
+    )
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not on PATH")
@@ -107,9 +111,23 @@ def test_windows_script_is_a_batch_file_not_powershell() -> None:
 
 
 def _port_is_open(host: str, port: int) -> bool:
-    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+    with contextlib.closing(
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ) as sock:
         sock.settimeout(1)
         return sock.connect_ex((host, port)) == 0
+
+
+def _spa_responds(host: str, port: int) -> bool:
+    """True only if something at host:port actually serves HTTP, not just
+    accepts a TCP connection -- an unrelated process squatting on the port
+    would satisfy `_port_is_open` but not this.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=2) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 @pytest.mark.skipif(
@@ -122,6 +140,12 @@ def _port_is_open(host: str, port: int) -> bool:
     ),
 )
 def test_mac_launcher_brings_up_a_reachable_spa() -> None:
+    if _port_is_open("127.0.0.1", 5173):
+        pytest.fail(
+            "port 5173 is already occupied before launch -- this test "
+            "cannot tell the launcher's SPA apart from whatever else is "
+            "listening; free the port and re-run"
+        )
     proc = subprocess.Popen(
         ["bash", str(MAC_SCRIPT), "--allow-partial"],
         cwd=ROOT,
@@ -133,7 +157,7 @@ def test_mac_launcher_brings_up_a_reachable_spa() -> None:
         deadline = time.monotonic() + 300
         spa_up = False
         while time.monotonic() < deadline:
-            if _port_is_open("127.0.0.1", 5173):
+            if _spa_responds("127.0.0.1", 5173):
                 spa_up = True
                 break
             if proc.poll() is not None:
@@ -142,7 +166,7 @@ def test_mac_launcher_brings_up_a_reachable_spa() -> None:
                     f"{proc.stdout.read()}"
                 )
             time.sleep(1)
-        assert spa_up, "SPA did not become reachable on :5173 within 300s"
+        assert spa_up, "SPA did not serve an HTTP response on :5173 within 300s"
     finally:
         proc.terminate()
         with contextlib.suppress(subprocess.TimeoutExpired):

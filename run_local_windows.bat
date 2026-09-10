@@ -112,12 +112,15 @@ popd
 
 :: --- Database: local Supabase (Postgres + Auth), or a configured Supabase branch ---
 if exist "%ROOT_DIR%ops\.env.local" (
+    :: Delayed expansion treats "!" as variable-expansion syntax, which
+    :: corrupts values like a password containing "!" (e.g. DATABASE_URL).
+    :: Disable it for the parse, then re-enable it for the rest of the script.
+    setlocal disabledelayedexpansion
     for /f "usebackq tokens=1,* delims==" %%a in ("%ROOT_DIR%ops\.env.local") do (
-        set "line=%%a"
-        if not "!line:~0,1!"=="#" (
-            set "%%a=%%b"
-        )
+        echo %%a| findstr /b /c:"#" >nul
+        if errorlevel 1 set "%%a=%%b"
     )
+    setlocal enabledelayedexpansion
 )
 
 if defined DATABASE_URL (
@@ -158,6 +161,11 @@ set MISSING_STAGES=
 if !errorlevel! == 0 (
     echo Applying migrations...
     python -m finhive.db.migrate
+    if not !errorlevel! == 0 (
+        echo ERROR: "python -m finhive.db.migrate" failed.
+        pause
+        exit /b 1
+    )
 ) else (
     set "MISSING_STAGES=!MISSING_STAGES! - migration runner (KCH-91)"
 )
@@ -167,6 +175,11 @@ if !errorlevel! == 0 (
 if !errorlevel! == 0 (
     echo Seeding service account...
     python -m finhive.db.seed_service_account
+    if not !errorlevel! == 0 (
+        echo ERROR: "python -m finhive.db.seed_service_account" failed.
+        pause
+        exit /b 1
+    )
 ) else (
     set "MISSING_STAGES=!MISSING_STAGES! - service account seed (KCH-94)"
 )
