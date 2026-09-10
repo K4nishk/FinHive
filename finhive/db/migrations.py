@@ -69,6 +69,33 @@ class ChecksumMismatchError(MigrationError):
         )
 
 
+class MissingMigrationError(MigrationError):
+    """A previously-applied migration's file is no longer on disk."""
+
+    def __init__(self, version: int) -> None:
+        self.version = version
+        super().__init__(
+            f"migration {version:04d} is recorded as applied in schema_migrations, "
+            "but no matching file exists in the migrations directory. Migrations "
+            "are forward-only and immutable once applied -- restore the file "
+            "instead of deleting it."
+        )
+
+
+class OutOfOrderMigrationError(MigrationError):
+    """A pending migration's version sits below the highest applied version."""
+
+    def __init__(self, version: int, highest_applied: int) -> None:
+        self.version = version
+        self.highest_applied = highest_applied
+        super().__init__(
+            f"migration {version:04d} is pending, but migration "
+            f"{highest_applied:04d} has already been applied. Migrations are "
+            "forward-only -- a new file cannot be numbered below the highest "
+            "applied version."
+        )
+
+
 @dataclass(frozen=True)
 class MigrationFile:
     version: int
@@ -89,10 +116,12 @@ class AppliedMigration:
 class MigrationPlan:
     pending: list[MigrationFile]
     mismatched: list[tuple[MigrationFile, AppliedMigration]]
+    missing: list[AppliedMigration]
+    out_of_order: list[MigrationFile]
 
     @property
     def is_clean(self) -> bool:
-        return not self.mismatched
+        return not self.mismatched and not self.missing and not self.out_of_order
 
     @property
     def is_up_to_date(self) -> bool:
@@ -146,9 +175,17 @@ def plan_migrations(
 
     A migration with no applied record is pending. A migration whose applied
     checksum no longer matches the file on disk is mismatched -- it was edited
-    after being applied, which is exactly what must not happen.
+    after being applied, which is exactly what must not happen. An applied
+    version with no matching file on disk is missing -- its migration file was
+    deleted. A pending version below the highest applied version is
+    out-of-order -- a new file was added numbered behind history that has
+    already been applied. Applied history must be an exact prefix of what's on
+    disk; any of these three states means it isn't, and the caller must fail
+    closed rather than apply anything.
     """
+    migrations_by_version = {m.version: m for m in migrations}
     applied_by_version = {a.version: a for a in applied}
+
     pending: list[MigrationFile] = []
     mismatched: list[tuple[MigrationFile, AppliedMigration]] = []
 
@@ -159,7 +196,28 @@ def plan_migrations(
         elif record.checksum != migration.checksum:
             mismatched.append((migration, record))
 
-    return MigrationPlan(pending=pending, mismatched=mismatched)
+    missing = sorted(
+        (
+            record
+            for version, record in applied_by_version.items()
+            if version not in migrations_by_version
+        ),
+        key=lambda a: a.version,
+    )
+
+    highest_applied = max(applied_by_version, default=None)
+    out_of_order = []
+    if highest_applied is not None:
+        out_of_order = sorted(
+            (m for m in pending if m.version < highest_applied), key=lambda m: m.version
+        )
+
+    return MigrationPlan(
+        pending=pending,
+        mismatched=mismatched,
+        missing=missing,
+        out_of_order=out_of_order,
+    )
 
 
 class _Transaction(Protocol):
@@ -175,41 +233,74 @@ class Connection(Protocol):
     def transaction(self) -> _Transaction: ...
 
 
-async def apply_pending(conn: Connection, migrations_dir: Path) -> list[MigrationFile]:
+# Arbitrary but stable bigint key for the session-level advisory lock that
+# serializes planning and application below -- "fhmg" (FinHive MiGrate) packed
+# into 32 bits. Any fixed constant works; it only needs to not collide with a
+# lock key some other subsystem takes on the same database.
+_ADVISORY_LOCK_KEY = 0x66686D67
+
+
+async def apply_pending(
+    conn: Connection, migrations_dir: Path
+) -> list[MigrationFile]:
     """Apply pending migrations, forward-only, against `conn`.
 
     Raises `ChecksumMismatchError` before applying anything if a previously
-    applied file has been edited on disk. Returns the migrations newly applied
-    this call -- an empty list when the database is already up to date, which is
-    what makes running this twice in a row idempotent.
+    applied file has been edited on disk, `MissingMigrationError` if a
+    previously applied file was deleted, or `OutOfOrderMigrationError` if a new
+    file was added numbered behind a version that's already been applied.
+    Returns the migrations newly applied this call -- an empty list when the
+    database is already up to date, which is what makes running this twice in
+    a row idempotent.
+
+    Planning (fetching applied history) and application happen while holding a
+    Postgres advisory lock, so two runners racing against the same database
+    serialize instead of both planning against the same snapshot and then both
+    trying to apply the same pending migration.
     """
     await conn.execute(_CREATE_SCHEMA_MIGRATIONS_TABLE)
 
-    rows = await conn.fetch(_SELECT_APPLIED)
-    applied = [
-        AppliedMigration(
-            version=row["version"], checksum=row["checksum"], applied_at=row["applied_at"]
-        )
-        for row in rows
-    ]
+    await conn.execute("SELECT pg_advisory_lock($1)", _ADVISORY_LOCK_KEY)
+    try:
+        rows = await conn.fetch(_SELECT_APPLIED)
+        applied = [
+            AppliedMigration(
+                version=row["version"],
+                checksum=row["checksum"],
+                applied_at=row["applied_at"],
+            )
+            for row in rows
+        ]
 
-    migrations = discover_migrations(migrations_dir)
-    result = plan_migrations(migrations, applied)
+        migrations = discover_migrations(migrations_dir)
+        result = plan_migrations(migrations, applied)
 
-    if not result.is_clean:
-        migration, record = result.mismatched[0]
-        raise ChecksumMismatchError(
-            migration.version, migration.name, record.checksum, migration.checksum
-        )
-
-    for migration in result.pending:
-        async with conn.transaction():
-            await conn.execute(migration.sql)
-            await conn.execute(
-                _INSERT_APPLIED, migration.version, migration.name, migration.checksum
+        if not result.is_clean:
+            if result.missing:
+                raise MissingMigrationError(result.missing[0].version)
+            if result.out_of_order:
+                highest_applied = max(a.version for a in applied)
+                raise OutOfOrderMigrationError(
+                    result.out_of_order[0].version, highest_applied
+                )
+            migration, record = result.mismatched[0]
+            raise ChecksumMismatchError(
+                migration.version, migration.name, record.checksum, migration.checksum
             )
 
-    return result.pending
+        for migration in result.pending:
+            async with conn.transaction():
+                await conn.execute(migration.sql)
+                await conn.execute(
+                    _INSERT_APPLIED,
+                    migration.version,
+                    migration.name,
+                    migration.checksum,
+                )
+
+        return result.pending
+    finally:
+        await conn.execute("SELECT pg_advisory_unlock($1)", _ADVISORY_LOCK_KEY)
 
 
 async def _run_cli() -> int:

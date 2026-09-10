@@ -20,6 +20,8 @@ from finhive.db.migrations import (
     AppliedMigration,
     ChecksumMismatchError,
     DuplicateVersionError,
+    MissingMigrationError,
+    OutOfOrderMigrationError,
     _run_cli,
     apply_pending,
     checksum_of,
@@ -78,7 +80,9 @@ def test_plan_is_up_to_date_when_nothing_pending_or_mismatched(tmp_path: Path) -
     migrations = discover_migrations(tmp_path)
     applied = [
         AppliedMigration(
-            version=1, checksum=migrations[0].checksum, applied_at=datetime.now(timezone.utc)
+            version=1,
+            checksum=migrations[0].checksum,
+            applied_at=datetime.now(timezone.utc),
         )
     ]
 
@@ -103,15 +107,63 @@ def test_plan_flags_unapplied_migrations_as_pending(tmp_path: Path) -> None:
 def test_plan_flags_edited_applied_migration_as_mismatched(tmp_path: Path) -> None:
     _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
     migrations = discover_migrations(tmp_path)
-    stale_checksum = checksum_of("CREATE TABLE t (a INT, b INT);")  # edited since applied
+    # edited since applied
+    stale_checksum = checksum_of("CREATE TABLE t (a INT, b INT);")
     applied = [
-        AppliedMigration(version=1, checksum=stale_checksum, applied_at=datetime.now(timezone.utc))
+        AppliedMigration(
+            version=1,
+            checksum=stale_checksum,
+            applied_at=datetime.now(timezone.utc),
+        )
     ]
 
     plan = plan_migrations(migrations, applied)
 
     assert not plan.is_clean
     assert plan.mismatched[0][0].version == 1
+
+
+def test_plan_flags_applied_version_with_no_file_on_disk_as_missing(
+    tmp_path: Path,
+) -> None:
+    """An applied migration whose file was deleted must not read as clean --
+    otherwise deleting a file silently drops it from history enforcement.
+    """
+    applied = [
+        AppliedMigration(
+            version=1,
+            checksum=checksum_of("CREATE TABLE t (a INT);"),
+            applied_at=datetime.now(timezone.utc),
+        )
+    ]
+
+    plan = plan_migrations(migrations=[], applied=applied)
+
+    assert not plan.is_clean
+    assert [a.version for a in plan.missing] == [1]
+
+
+def test_plan_flags_pending_version_below_highest_applied_as_out_of_order(
+    tmp_path: Path,
+) -> None:
+    """A new file numbered behind a version that's already applied must not
+    read as a normal pending migration -- applying it now would run it after
+    migrations that, in version order, were supposed to come after it.
+    """
+    _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+    migrations = discover_migrations(tmp_path)
+    applied = [
+        AppliedMigration(
+            version=2,
+            checksum=checksum_of("CREATE INDEX idx ON t (a);"),
+            applied_at=datetime.now(timezone.utc),
+        )
+    ]
+
+    plan = plan_migrations(migrations, applied)
+
+    assert not plan.is_clean
+    assert [m.version for m in plan.out_of_order] == [1]
 
 
 # ── apply_pending (async, against a fake connection) ────────────────────────
@@ -176,7 +228,9 @@ def test_apply_pending_twice_is_idempotent(tmp_path: Path) -> None:
     assert [row["version"] for row in conn.rows] == [1, 2]
 
 
-def test_apply_pending_fails_when_an_applied_migration_was_edited(tmp_path: Path) -> None:
+def test_apply_pending_fails_when_an_applied_migration_was_edited(
+    tmp_path: Path,
+) -> None:
     path = _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
     conn = _FakeConnection()
     asyncio.run(apply_pending(conn, tmp_path))
@@ -212,10 +266,53 @@ def test_apply_pending_raises_before_applying_any_pending_migration_on_mismatch(
     assert [row["version"] for row in conn.rows] == [1]
 
 
+def test_apply_pending_fails_when_an_applied_migrations_file_is_deleted(
+    tmp_path: Path,
+) -> None:
+    """Deleting an applied migration's file must not read as a clean, up to
+    date database -- the runner must fail closed instead of silently forgetting
+    that version happened.
+    """
+    path = _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+    conn = _FakeConnection()
+    asyncio.run(apply_pending(conn, tmp_path))
+
+    path.unlink()
+
+    with pytest.raises(MissingMigrationError) as exc_info:
+        asyncio.run(apply_pending(conn, tmp_path))
+
+    assert exc_info.value.version == 1
+
+
+def test_apply_pending_fails_when_a_new_file_is_numbered_below_the_highest_applied(
+    tmp_path: Path,
+) -> None:
+    """A new file numbered behind a version that's already applied must not be
+    applied out of order -- the runner must fail closed instead of running it
+    after migrations that were supposed to come first.
+    """
+    _write(tmp_path, "0002_add_index.sql", "CREATE INDEX idx ON t (a);")
+    conn = _FakeConnection()
+    asyncio.run(apply_pending(conn, tmp_path))
+
+    _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+
+    with pytest.raises(OutOfOrderMigrationError) as exc_info:
+        asyncio.run(apply_pending(conn, tmp_path))
+
+    assert exc_info.value.version == 1
+    assert exc_info.value.highest_applied == 2
+    # Nothing new was recorded as a side effect of the failed attempt.
+    assert [row["version"] for row in conn.rows] == [2]
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────
 
 
-def test_cli_fails_fast_when_database_url_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_fails_fast_when_database_url_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Missing DATABASE_URL must exit non-zero before ever importing asyncpg or
     attempting a connection.
     """
