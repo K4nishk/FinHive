@@ -9,7 +9,9 @@ and open stacked PRs, CodeRabbit reviews every branch. **Nothing merges without 
 | `seed_linear.py` | parses `linear_import.csv` → creates Linear issues (idempotent) | ✅ built |
 | `orchestrator.sh` | the build loop: implement → CodeRabbit gate → mediate → PR | ⬜ ticketed |
 | `run_builder.sh` | guard wrapper: skips if running / in flight / queue done | ⬜ ticketed |
-| `pr_gate.sh` | publishes the CLI gate's findings trail and sets `coderabbit/cli-gate` | ⬜ ticketed |
+| `pr_gate.sh` | publishes the CLI gate's findings trail and sets `coderabbit/cli-gate` | ✅ built |
+| `orchestrator.test.sh` | ledger + phase-selection tests for the loop | ✅ built |
+| `pr_gate.test.sh` | unit tests for the gate publisher's pure helpers | ✅ built |
 | `remediate_prs.sh` | answers CodeRabbit's PR comments in place | ⬜ ticketed |
 | `review_sweeper.sh` | settles deferred reviews from the debt ledger | ⬜ ticketed |
 
@@ -116,6 +118,87 @@ Passing one does not answer the others.
 
 A green `coderabbit/cli-gate` means *no **blocking** findings* — not *no findings*. Read
 the round detail in the PR comment for the rest.
+
+### Publishing the CLI gate result
+
+The CLI gate runs pre-push inside `orchestrator.sh`, so from GitHub's side its result
+is just a claim — the findings sit in gitignored logs under `ops/logs/`. Run
+`ops/pr_gate.sh ISSUE` to re-publish that trail as evidence on the PR: every round's
+blocking findings, the commit that answered each one, and the final round's verdict —
+then set the `coderabbit/cli-gate` commit status. Success only when the final round
+returned zero blocking findings; no logs at all or a final round that errored/hit quota
+both count as failure, not success. No Claude involved — bash, `git`, `gh`, `python3`, and
+the logs already on disk, so it still runs when spend is capped.
+
+### Drafts, re-gating, and clearing the backlog
+
+A PR the builder opens while the gate is unclean opens as a **draft**, and nothing used
+to promote it afterwards — so one bad gate left the PR a draft forever. `pr_gate.sh`
+now clears the draft itself when the verdict is success (`--no-promote` opts out). A
+draft is a statement about the gate, never a stale flag.
+
+```bash
+ops/pr_gate.sh KCH-78              # publish the trail, set the status, clear the draft if clean
+ops/pr_gate.sh --regate KCH-78     # re-review the branch against its own PR base first
+ops/pr_gate.sh --stack             # walk every open PR bottom-up, stopping at the first blocked one
+```
+
+`--regate` exists because the builder reviews each branch against the branch *below* it
+— the right diff while stacking, but it means the bottom PR's full contents are never
+reviewed as one unit. It reviews `feature/<issue>` against its own PR base and **appends**
+a round rather than overwriting one, so the fix history survives; set
+`GATE_REVIEW_BASE=development` for a whole-stack review. It runs in a
+throwaway **detached** worktree, so it is safe while a build is in flight: the shared
+checkout is untouched, and leaving the branch unclaimed keeps the builder's own
+`git checkout` of it from failing with "already used by worktree".
+
+`--stack` stops at the first PR whose gate is not clean. That is deliberate — a stack
+merges bottom-up, so a blocked PR blocks everything above it and publishing the rest is
+noise.
+
+Make the check required, once, with admin access to the repo (needs branch protection
+already enabled on `development`):
+
+```bash
+ops/pr_gate.sh --require-check
+```
+
+---
+
+## Review debt — cleared before any new feature
+
+`ops/.review_debt.tsv` holds issues whose **PR is open but whose gate is not clean**:
+quota, a dropped review, or blocking findings that survived. A pass drains it first,
+before it touches the queue.
+
+That ordering is not cosmetic. The stack merges bottom-up, so one unclean PR near the
+bottom blocks everything above it no matter how many features get built on top —
+building more only makes the eventual merge walk longer.
+
+Debt is **remediated in place, never rebuilt**. `remediate_issue()` checks out the
+existing branch (fast-forward only), feeds the last round's findings to the agent,
+commits `fix(ISSUE): address CodeRabbit round N`, re-gates against the **PR's own
+base**, and pushes to the same branch. The PR updates; the stack does not deepen and
+the review trail survives.
+
+Two guards keep an open PR from being overwritten:
+
+- `run_issue` refuses an issue that already has an open PR and banks it as debt.
+- A PR that opens with an unclean gate is banked as debt immediately, instead of
+  being left unrecorded — which used to make the next pass treat it as unbuilt and
+  rebuild it from scratch over the PR. KCH-84 and KCH-85 sat one pass away from
+  exactly that.
+
+```bash
+cat ops/.review_debt.tsv                        # what is queued
+DEBT_ONLY=1 ./ops/run_builder.sh                # clear debt, then STOP before the queue
+ops/pr_gate.sh --regate KCH-84                  # re-review one PR by hand
+```
+
+`DEBT_ONLY=1` matters more than it looks. Without it a pass drains the debt and
+carries straight on into the queue until 95% of the budget — roughly fourteen more
+issues at the default — stacking new PRs on top of the stack you just made mergeable.
+Use it whenever the intent is "unblock the stack, then merge".
 
 ---
 
