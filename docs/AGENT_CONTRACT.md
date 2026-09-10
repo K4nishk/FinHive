@@ -110,6 +110,13 @@ retargeted mid-review.
 - `ops/pr_gate.sh` — publishes the CLI gate's round-by-round trail as a PR comment and
   sets the `coderabbit/cli-gate` commit status, so the gate's result is visible on
   GitHub and can be made a required check.
+- `.coderabbit.yaml` — the repo-root config the CodeRabbit GitHub App and CLI both read:
+  path filters, per-layer review instructions restating CLAUDE.md, and
+  `reviews.request_changes_workflow: true`, which turns any actionable SaaS finding
+  into a blocking GitHub review rather than an advisory comment — it has no severity
+  threshold. Step 4's CLI gate is narrower: it only blocks on
+  `CR_BLOCKING` (`critical|major|blocker|high`). A finding the CLI gate would treat
+  as advisory can still block the SaaS review.
 - `ops/README.md` — operational rules for running the toolchain (locking, worktree
   safety, review surfaces). This contract describes *what* the loop must do; that file
   describes *how to operate it safely*.

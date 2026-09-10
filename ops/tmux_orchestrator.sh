@@ -217,8 +217,9 @@ $TM send-keys -t "$SESSION:review" \
   REVIEW  —  three independent surfaces. Passing one does not answer the others.
 
     1. CLI gate        pre-push, inside orchestrator.sh; blocking findings
-                       return to the agent up to CR_MAX_ROUNDS (2), then a
-                       mediator fixes, dismisses with rationale, or escalates.
+                       return to the agent up to CR_MAX_ROUNDS (2), then
+                       immediately escalate to a new Linear issue. No third
+                       cycle, mediator fix, or dismissal.
     2. SaaS PR review  ./ops/remediate_prs.sh   answers comments on open PRs,
                        pushing to the SAME branch so the stack never deepens.
     3. Deferred        ./ops/review_sweeper.sh  settles debt when CodeRabbit

@@ -109,15 +109,28 @@ Other knobs: `CR_MAX_ROUNDS` (2) · `MAX_TURNS` · `LOCAL_CHECKS` · `SKIP_KILL_
 Passing one does not answer the others.
 
 1. **CLI gate** (pre-push, inside `orchestrator.sh`) — blocking findings return to the
-   agent up to `CR_MAX_ROUNDS`, then a mediator fixes, dismisses with rationale, or
-   escalates to a new Linear issue carrying every attempted fix and why it failed.
-2. **SaaS PR review** (`remediate_prs.sh`) — answers comments posted after a PR opens.
+   agent up to `CR_MAX_ROUNDS`, then immediately escalate to a new Linear issue carrying
+   every attempted fix and why it failed. No third remediation cycle, mediator fix, or
+   dismissal — see `docs/AGENT_CONTRACT.md`.
+2. **SaaS PR review** (`remediate_prs.sh`) — triggered automatically when a PR opens
+   (`reviews.auto_review.enabled` in `.coderabbit.yaml`); answers comments posted after.
    Pushes to the **same branch**, so the stack never deepens.
 3. **Deferred** (`review_sweeper.sh`) — when CodeRabbit's quota runs dry the build does
    not wait; debt is banked and settled later.
 
 A green `coderabbit/cli-gate` means *no **blocking** findings* — not *no findings*. Read
 the round detail in the PR comment for the rest.
+
+### `.coderabbit.yaml`
+
+Repo-root config shared by the CLI and the SaaS app: path filters keep noise directories
+(`output/`, `bkp/`, lockfiles, `web/dist/`) out of review, `path_instructions` restate the
+CLAUDE.md conventions per layer (Decimal money, no `giving_date` in interest math, no
+`QTableWidget`, no raw SQL), and `reviews.request_changes_workflow: true` makes CodeRabbit
+submit an actual GitHub "Request changes" review whenever it posts any actionable
+comment, which blocks merge under branch protection requiring review approval. This has
+no severity threshold, unlike the CLI gate's `CR_BLOCKING` (`critical|major|blocker|high`):
+a finding the CLI gate treats as advisory can still block merge on the SaaS surface.
 
 ### Publishing the CLI gate result
 

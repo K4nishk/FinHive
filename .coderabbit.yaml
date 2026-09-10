@@ -1,0 +1,111 @@
+# CodeRabbit configuration — KCH-83.
+#
+# Wires the CodeRabbit GitHub App into the PR pipeline for both products in this
+# repo: the Loan Manager MVP1 desktop app (src/Loan Manager/) and the MVP2 API
+# (finhive/, web/). Conventions below restate CLAUDE.md; if the two ever
+# disagree, CLAUDE.md is authoritative and this file is stale.
+#
+# `reviews.request_changes_workflow` makes CodeRabbit submit an actual GitHub
+# "Request changes" review whenever it posts any actionable comment — combined
+# with branch protection requiring review approval, that blocks merge until
+# every actionable comment is resolved. It is not a severity filter: there is
+# no low-severity/advisory-only lane on this surface, unlike the local CLI gate
+# (ops/pr_gate.sh, CR_BLOCKING="critical|major|blocker|high"), which only
+# blocks on that severity band. A finding that the CLI gate would treat as
+# advisory can still block merge here.
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+    - "!**/*.db"
+    - "!**/*.pyc"
+    - "!**/__pycache__/**"
+    - "!.venv/**"
+    - "!bkp/**"
+    - "!output/**"
+    - "!web/dist/**"
+    - "!web/node_modules/**"
+    - "!ops/logs/**"
+
+  path_instructions:
+    - path: "**/*.py"
+      instructions: |
+        Follow CLAUDE.md: PEP 8, `from __future__ import annotations` at the top of
+        every module, `Decimal` (never `float`) for monetary values quantized with
+        ROUND_HALF_UP, and `datetime.now(timezone.utc)` instead of the deprecated
+        `datetime.utcnow()`. Flag any of these as blocking (critical/major).
+
+    - path: "src/Loan Manager/loan_manager/domain/**"
+      instructions: |
+        Pure Python only — no imports from `infrastructure/`, `presentation/`,
+        PySide6, or sqlalchemy. `giving_date` must never appear in interest, time
+        period, or status calculations; only `extension_period` counts. Interest is
+        `(amount * rate * months) / 1200` monthly or `(amount * rate * days) / 36500`
+        daily; commission reuses the same formula with `commission_rate`. Domain
+        services must carry unit tests for every branch. Treat a layer-boundary
+        import or a `giving_date` calculation as blocking.
+
+    - path: "src/Loan Manager/loan_manager/application/**"
+      instructions: |
+        Use cases only, one per file, with an `execute()` method. Import `domain/`
+        only — no direct DB queries, no UI code. DTOs are Pydantic `BaseModel`s.
+
+    - path: "src/Loan Manager/loan_manager/infrastructure/**"
+      instructions: |
+        Implements domain repository interfaces; may import `domain/` and
+        sqlalchemy, never PySide6. Repository methods return domain entities, not
+        ORM models — mapping happens here. No raw SQL outside migrations.
+
+    - path: "src/Loan Manager/loan_manager/presentation/**"
+      instructions: |
+        PySide6 UI only — no business logic, no direct repository access (go
+        through use cases). Use `QAbstractTableModel` + `QSortFilterProxyModel` for
+        data tables, never `QTableWidget`. Colours come from `ThemeManager` +
+        JSON config, never hardcoded hex. Date pickers use
+        `setCalendarPopup(True)` + `QTimer.singleShot(0, showPopup)` —
+        `showCalendarWidget()` does not exist in PySide6. Flag any of these as
+        blocking.
+
+    - path: "finhive/domain/**"
+      instructions: |
+        Pure domain logic for the MVP2 API. `Decimal` for money, 100% branch
+        coverage expected, no framework imports (FastAPI, asyncpg).
+
+    - path: "finhive/calc/**"
+      instructions: |
+        Money math only. `Decimal` with explicit rounding, mypy --strict clean —
+        this package is one of the two mypy --strict targets in the fast CI gate.
+
+    - path: "ops/**"
+      instructions: |
+        Bash orchestration for the agentic build loop. Preserve the safety rules
+        in ops/README.md: lock directories must stay gitignored, every worktree
+        toucher takes ops/.worktree.lock before touching the checkout, and nothing
+        here should run `git clean -fd` without first taking that lock. Flag a
+        change that removes a lock acquisition or narrows the CodeRabbit gate's
+        blocking-severity check as blocking.
+
+    - path: "**/*.sql"
+      instructions: |
+        No raw SQL string interpolation (f-string, %-format, .format()) —
+        parameterised queries only. Flag any interpolated SQL as blocking.
+
+  tools:
+    ruff:
+      enabled: true
+
+chat:
+  auto_reply: true
