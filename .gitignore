@@ -220,6 +220,7 @@ ops/.env.local
 ops/queue.tsv
 ops/.completed_issues
 ops/.review_debt.tsv
+ops/.stuck_issues.tsv
 ops/.issue_map.tsv
 ops/.escalations.tsv
 ops/.stuck_issues.tsv
