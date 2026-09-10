@@ -19,8 +19,17 @@
 -- application code writes through them, so DROP + ADD needs no backfill.
 -- The equality/sort indexes on plaintext borrower_name and depositor_name
 -- are dropped automatically along with their columns; their replacement --
--- an HMAC blind index over the ciphertext -- is a separate migration
--- (KCH-96), not this one.
+-- HMAC-SHA256(key_index, normalize(plaintext)), never derived from the
+-- random-IV ciphertext, which changes on every encryption and so cannot
+-- back a stable equality lookup -- is a separate migration (KCH-96), not
+-- this one. Amounts never get a blind index of any kind (ADR-2.4).
+--
+-- `proposed_mutations` and `agent_turns` are out of scope here: neither
+-- table exists yet (they land with the agent features in milestones M2/M3
+-- per linear_import.csv). Encrypting their JSONB snapshots is already
+-- tracked as its own M1a backlog item ("Encrypt audit JSONB snapshots
+-- containing NPI") to land alongside whichever migration creates them --
+-- not retrofitted onto this one.
 
 ALTER TABLE loans
     DROP COLUMN borrower_name,

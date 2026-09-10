@@ -17,17 +17,26 @@ equality lookups on these columns need the separate HMAC blind index
 
 No key derivation or storage lives here -- callers supply a raw 32-byte
 `key_data` (see KCH-97 for HKDF derivation and rotation via `key_version`).
+
+`encrypt_field`/`decrypt_field` are the generic string primitive, used for
+identity fields. Financial values go through `encrypt_amount`/
+`decrypt_amount` instead: they canonicalize a `Decimal` to two decimal
+places with ROUND_HALF_UP before encrypting, so "1", "1.0" and "1.00" are
+indistinguishable on the way in -- callers cannot produce divergent
+ciphertext for what is, financially, the same value.
 """
 
 from __future__ import annotations
 
 import os
+from decimal import ROUND_HALF_UP, Decimal
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 IV_LENGTH = 12  # 96 bits, per ADR-2.3/2.4
 KEY_LENGTH = 32  # AES-256
+_AMOUNT_QUANTUM = Decimal("0.01")
 
 
 class DecryptionError(Exception):
@@ -70,3 +79,22 @@ def decrypt_field(blob: bytes, key: bytes) -> str:
     except InvalidTag as exc:
         raise DecryptionError("ciphertext failed GCM authentication tag check") from exc
     return plaintext.decode("utf-8")
+
+
+def encrypt_amount(value: Decimal, key: bytes) -> bytes:
+    """Encrypt a financial value for storage in a `_ct` column.
+
+    Quantizes to two decimal places with ROUND_HALF_UP before encrypting --
+    per coding-conventions, the only rounding mode financial values use --
+    so equal amounts always produce a blob that decrypts back to the same
+    canonical string, regardless of how the caller's `Decimal` was built.
+    """
+    if value < 0:
+        raise ValueError(f"financial value must be non-negative, got {value}")
+    canonical = value.quantize(_AMOUNT_QUANTUM, rounding=ROUND_HALF_UP)
+    return encrypt_field(str(canonical), key)
+
+
+def decrypt_amount(blob: bytes, key: bytes) -> Decimal:
+    """Decrypt a blob produced by `encrypt_amount` back into a `Decimal`."""
+    return Decimal(decrypt_field(blob, key))

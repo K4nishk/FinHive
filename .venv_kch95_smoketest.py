@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 
 sys.path.insert(0, ".")
@@ -12,5 +14,6 @@ tampered[-1] ^= 0xFF
 try:
     decrypt_field(bytes(tampered), key)
     print("FAIL: no error raised")
+    sys.exit(1)
 except DecryptionError:
     print("tamper correctly rejected")

@@ -8,6 +8,7 @@ or wrong key fails the auth tag rather than decrypting to garbage.
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 
 import pytest
 
@@ -15,7 +16,9 @@ from finhive.db.encryption import (
     IV_LENGTH,
     KEY_LENGTH,
     DecryptionError,
+    decrypt_amount,
     decrypt_field,
+    encrypt_amount,
     encrypt_field,
 )
 
@@ -94,3 +97,35 @@ def test_decrypt_rejects_a_key_that_is_not_32_bytes(bad_key: bytes) -> None:
 
     with pytest.raises(ValueError):
         decrypt_field(blob, bad_key)
+
+
+def test_amount_round_trip_returns_a_decimal() -> None:
+    blob = encrypt_amount(Decimal("150000.00"), _KEY)
+
+    assert decrypt_amount(blob, _KEY) == Decimal("150000.00")
+
+
+@pytest.mark.parametrize("value", [Decimal("1"), Decimal("1.0"), Decimal("1.00")])
+def test_encrypt_amount_canonicalizes_non_canonical_decimals(value: Decimal) -> None:
+    blob = encrypt_amount(value, _KEY)
+
+    assert decrypt_amount(blob, _KEY) == Decimal("1.00")
+
+
+def test_encrypt_amount_rounds_half_up_to_two_decimal_places() -> None:
+    blob = encrypt_amount(Decimal("1.005"), _KEY)
+
+    assert decrypt_amount(blob, _KEY) == Decimal("1.01")
+
+
+def test_encrypt_amount_rejects_a_negative_value() -> None:
+    with pytest.raises(ValueError):
+        encrypt_amount(Decimal("-1"), _KEY)
+
+
+def test_decrypt_amount_fails_the_auth_tag_on_a_tampered_blob() -> None:
+    blob = bytearray(encrypt_amount(Decimal("150000.00"), _KEY))
+    blob[-1] ^= 0xFF
+
+    with pytest.raises(DecryptionError):
+        decrypt_amount(bytes(blob), _KEY)
