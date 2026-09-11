@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -101,7 +102,9 @@ def test_scripts_mirror_mvp1_version_check_convention(script: Path) -> None:
         (WINDOWS_GUIDE, "run_local_windows.bat"),
     ],
 )
-def test_setup_guide_references_its_script(guide: Path, script_name: str) -> None:
+def test_setup_guide_references_its_script(
+    guide: Path, script_name: str
+) -> None:
     assert script_name in guide.read_text()
 
 
@@ -124,7 +127,8 @@ def _spa_responds(host: str, port: int) -> bool:
     would satisfy `_port_is_open` but not this.
     """
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=2) as resp:
+        url = f"http://{host}:{port}/"
+        with urllib.request.urlopen(url, timeout=2) as resp:
             return resp.status == 200
     except (urllib.error.URLError, OSError):
         return False
@@ -152,6 +156,7 @@ def test_mac_launcher_brings_up_a_reachable_spa() -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        start_new_session=True,
     )
     try:
         deadline = time.monotonic() + 300
@@ -166,8 +171,16 @@ def test_mac_launcher_brings_up_a_reachable_spa() -> None:
                     f"{proc.stdout.read()}"
                 )
             time.sleep(1)
-        assert spa_up, "SPA did not serve an HTTP response on :5173 within 300s"
+        assert spa_up, (
+            "SPA did not serve an HTTP response on :5173 within 300s"
+        )
     finally:
-        proc.terminate()
-        with contextlib.suppress(subprocess.TimeoutExpired):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGTERM)
+        try:
             proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=10)

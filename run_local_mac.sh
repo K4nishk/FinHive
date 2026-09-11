@@ -157,6 +157,30 @@ if "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
     echo "Starting API on http://localhost:8000 ..."
     uvicorn finhive.dev_server:app --reload --port 8000 &
     API_PID=$!
+
+    echo "Waiting for the API to become ready..."
+    API_READY=0
+    for _ in $(seq 1 30); do
+        if ! kill -0 "$API_PID" 2>/dev/null; then
+            echo "ERROR: the API process exited before becoming ready."
+            break
+        fi
+        if "$PYTHON_CMD" -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(1)
+sys.exit(0 if s.connect_ex(('127.0.0.1', 8000)) == 0 else 1)
+" 2>/dev/null; then
+            API_READY=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$API_READY" != "1" ]; then
+        echo "ERROR: the API did not become ready on http://localhost:8000 within 30s."
+        exit 1
+    fi
+    echo "API is ready."
 else
     echo "Starting the SPA only — the backend API is not part of this run."
 fi
