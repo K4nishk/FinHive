@@ -153,7 +153,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+_port_is_open() {
+    "$PYTHON_CMD" -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(1)
+sys.exit(0 if s.connect_ex(('127.0.0.1', $1)) == 0 else 1)
+" 2>/dev/null
+}
+
 if "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
+    if _port_is_open 8000; then
+        echo "ERROR: port 8000 is already in use by another process."
+        echo "Stop whatever is listening on 8000 and re-run — otherwise the"
+        echo "readiness check below could mistake it for this run's API."
+        exit 1
+    fi
+
     echo "Starting API on http://localhost:8000 ..."
     uvicorn finhive.dev_server:app --reload --port 8000 &
     API_PID=$!
@@ -165,12 +181,7 @@ if "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
             echo "ERROR: the API process exited before becoming ready."
             break
         fi
-        if "$PYTHON_CMD" -c "
-import socket, sys
-s = socket.socket()
-s.settimeout(1)
-sys.exit(0 if s.connect_ex(('127.0.0.1', 8000)) == 0 else 1)
-" 2>/dev/null; then
+        if _port_is_open 8000; then
             API_READY=1
             break
         fi

@@ -207,6 +207,15 @@ if not "!MISSING_STAGES!"=="" (
 :: --- Launch API and SPA together ---
 !PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
 if !errorlevel! == 0 (
+    powershell -NoProfile -Command "try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 8000)).Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+    if !errorlevel! == 0 (
+        echo ERROR: port 8000 is already in use by another process.
+        echo Stop whatever is listening on 8000 and re-run -- otherwise the
+        echo readiness check below could mistake it for this run's API.
+        pause
+        exit /b 1
+    )
+
     echo Starting API on http://localhost:8000 ...
     start "FinHive API" cmd /c "uvicorn finhive.dev_server:app --reload --port 8000"
 
