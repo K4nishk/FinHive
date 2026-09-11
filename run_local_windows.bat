@@ -220,7 +220,13 @@ if !API_SHOULD_START! == 1 (
     )
 
     echo Starting API on http://localhost:8000 ...
-    start "FinHive API" cmd /c "uvicorn finhive.dev_server:app --reload --port 8000"
+    set API_PID=
+    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "(Start-Process -FilePath cmd -ArgumentList '/c','uvicorn finhive.dev_server:app --reload --port 8000' -PassThru).Id"`) do set API_PID=%%P
+    if not defined API_PID (
+        echo ERROR: failed to launch the API process.
+        pause
+        exit /b 1
+    )
 
     echo Waiting for the API to become ready...
     set API_READY=0
@@ -237,6 +243,7 @@ if !API_SHOULD_START! == 1 (
     )
     if not !API_READY! == 1 (
         echo ERROR: API not ready on :8000 within 30s.
+        taskkill /PID !API_PID! /T /F >nul 2>&1
         pause
         exit /b 1
     )
