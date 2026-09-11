@@ -41,6 +41,9 @@ jobs:
       - name: import-linter (architecture boundaries)
         run: lint-imports
 
+      - name: blind index lint (no derived index on an amount column, ADR-2.4)
+        run: pytest tests/unit/test_blind_index_lint.py -q
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
