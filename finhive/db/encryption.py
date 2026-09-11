@@ -16,7 +16,8 @@ equality lookups on these columns need the separate HMAC blind index
 (KCH-96) rather than comparing `_ct` values directly.
 
 No key derivation or storage lives here -- callers supply a raw 32-byte
-`key_data` (see KCH-97 for HKDF derivation and rotation via `key_version`).
+`key_data`. `finhive/db/keys.py` (KCH-97) derives `key_data` from a master
+key via HKDF and handles rotation via `key_version`.
 
 `encrypt_field`/`decrypt_field` are the generic string primitive, used for
 identity fields. Financial values go through `encrypt_amount`/
