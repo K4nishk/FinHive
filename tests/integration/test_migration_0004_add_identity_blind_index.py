@@ -17,7 +17,7 @@ import pytest
 
 asyncpg = pytest.importorskip("asyncpg")
 
-from finhive.db.blind_index import compute_blind_index
+from finhive.db.blind_index import compute_blind_index, derive_key_index
 from finhive.db.encryption import KEY_LENGTH, decrypt_field, encrypt_field
 from finhive.db.migrations import apply_pending
 
@@ -26,6 +26,10 @@ pytestmark = pytest.mark.integration
 _DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 _KEY = b"\x04" * KEY_LENGTH
+# `compute_blind_index` takes an already-derived `key_index`, not `_KEY`
+# itself (that's the `key_data` used for `encrypt_field` below) -- derive it
+# once here the way a real caller (KeyRing) would.
+_KEY_INDEX = derive_key_index(_KEY)
 
 _TABLES = ["report_records", "reports", "report_meta", "loan_history", "loan_meta", "loans"]
 
@@ -56,11 +60,11 @@ async def _insert_loan(
         org_id,
         reference_id,
         encrypt_field(borrower_name, _KEY),
-        compute_blind_index(borrower_name, _KEY, column="borrower_name"),
+        compute_blind_index(borrower_name, _KEY_INDEX, column="borrower_name"),
         encrypt_field(borrower_group, _KEY),
-        compute_blind_index(borrower_group, _KEY, column="borrower_group"),
+        compute_blind_index(borrower_group, _KEY_INDEX, column="borrower_group"),
         encrypt_field(depositor_name, _KEY),
-        compute_blind_index(depositor_name, _KEY, column="depositor_name"),
+        compute_blind_index(depositor_name, _KEY_INDEX, column="depositor_name"),
         encrypt_field("150000.00", _KEY),
         "2026-01-01",
         "Active",
@@ -91,7 +95,7 @@ def test_exact_match_autocomplete_and_group_auto_fill_survive_encryption() -> No
             # A5.8 -- exact-match filtering: a differently-cased/padded query
             # still finds every row MVP1's own normalize-then-filter rule would.
             query_index = compute_blind_index(
-                "  SHARMA TRADERS  ", _KEY, column="borrower_name"
+                "  SHARMA TRADERS  ", _KEY_INDEX, column="borrower_name"
             )
             exact_match_rows = await conn.fetch(
                 "SELECT reference_id FROM loans WHERE borrower_name_bidx = $1 ORDER BY reference_id",
@@ -108,7 +112,9 @@ def test_exact_match_autocomplete_and_group_auto_fill_survive_encryption() -> No
             # their group deterministically.
             group_row = await conn.fetchrow(
                 "SELECT borrower_group_ct FROM loans WHERE borrower_name_bidx = $1 LIMIT 1",
-                compute_blind_index("Sharma Traders", _KEY, column="borrower_name"),
+                compute_blind_index(
+                    "Sharma Traders", _KEY_INDEX, column="borrower_name"
+                ),
             )
 
             return {

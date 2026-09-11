@@ -1,19 +1,21 @@
-"""Master key loading, HKDF derivation and rotation (ADR-2.3 "Key management", KCH-97).
+"""Master key loading, HKDF derivation and rotation (ADR-2.3 "Key
+management", KCH-97).
 
 `finhive/db/encryption.py` and `finhive/db/blind_index.py` both take a raw
-32-byte `key_data` from their caller and do no key management of their own.
-This module is that caller: it loads one 32-byte master per `key_version`
-from the environment, derives `key_data` from the master via HKDF with an
-info string distinct from every other key this project derives (mirroring
-how `blind_index.derive_key_index` derives `key_index` from `key_data`), and
-re-encrypts a field from one `key_version`'s key to another's for rotation.
+32-byte `key_data` (or `key_index`) from their caller and do no key
+management of their own. This module is that caller: it loads one 32-byte
+master per `key_version` from the environment, derives `key_data` and
+`key_index` independently from that master via HKDF -- each with its own
+info string distinct from every other key this project derives, so exposure
+of one derived key never reveals the other -- and re-encrypts a field from
+one `key_version`'s key to another's for rotation.
 
-Master keys live in `ops/.env.local` for M1a (gitignored, never committed) --
-see `docs/LOCAL_SETUP_MACOS.md` "Encryption master key" and
+Master keys live in `ops/.env.local` for M1a (gitignored, never committed)
+-- see `docs/LOCAL_SETUP_MACOS.md` "Encryption master key" and
 `docs/KEY_MANAGEMENT.md` for generation, rotation and backup/restore. M3+
 moves them to Supabase Vault or a KMS, fetched at boot and held in memory
-only -- `load_key_ring`'s `env` parameter exists so that swap doesn't need to
-change any caller, only what mapping gets passed in.
+only -- `load_key_ring`'s `env` parameter exists so that swap doesn't need
+to change any caller, only what mapping gets passed in.
 
 Environment variables:
 
@@ -59,20 +61,23 @@ _KEY_DATA_INFO = b"finhive-aes-gcm-key-v1"
 
 
 class ConfigError(Exception):
-    """A required key-management environment variable is missing or malformed."""
+    """A required key-management env variable is missing or malformed."""
 
 
 def derive_key_data(master_key: bytes) -> bytes:
     """HKDF-derive the AES-GCM key from a 32-byte master.
 
-    `blind_index.derive_key_index` then derives `key_index` from this
-    `key_data` with its own distinct info string, so the two keys used for
-    one `key_version` are never the same bytes -- ADR-2.3 "Key management":
-    "Never the same key for both -- reusing it lets a blind index leak
-    information about the encryption key's use."
+    `blind_index.derive_key_index` derives `key_index` directly from the
+    same master with its own distinct info string -- never chained through
+    this function's output -- so the two keys used for one `key_version` are
+    never the same bytes, and exposing one never exposes the other. ADR-2.3
+    "Key management": "Never the same key for both -- reusing it lets a
+    blind index leak information about the encryption key's use."
     """
     if len(master_key) != KEY_LENGTH:
-        raise ValueError(f"master key must be {KEY_LENGTH} bytes, got {len(master_key)}")
+        raise ValueError(
+            f"master key must be {KEY_LENGTH} bytes, got {len(master_key)}"
+        )
     return HKDF(
         algorithm=hashes.SHA256(),
         length=KEY_LENGTH,
@@ -87,13 +92,16 @@ def _decode_master_key(raw: str, *, env_name: str) -> bytes:
     except (binascii.Error, ValueError) as exc:
         raise ConfigError(f"{env_name} is not valid base64") from exc
     if len(key) != KEY_LENGTH:
-        raise ConfigError(f"{env_name} must decode to {KEY_LENGTH} bytes, got {len(key)}")
+        raise ConfigError(
+            f"{env_name} must decode to {KEY_LENGTH} bytes, got {len(key)}"
+        )
     return key
 
 
 @dataclass(frozen=True)
 class KeyRing:
-    """Every master key still loaded, plus which `key_version` new writes use.
+    """Every master key still loaded, plus which `key_version` new writes
+    use.
 
     `key_data`/`key_index` derive on every call rather than caching, since
     this is a handful of HKDF derivations per request, not a hot loop --
@@ -105,10 +113,18 @@ class KeyRing:
     masters: Mapping[int, bytes]
 
     def key_data(self, version: int | None = None) -> bytes:
-        return derive_key_data(self._master(self.current_version if version is None else version))
+        return derive_key_data(self._master(self._resolve(version)))
 
     def key_index(self, version: int | None = None) -> bytes:
-        return derive_key_index(self.key_data(version))
+        """The HMAC key for the blind index, derived directly from the
+        `key_version`'s master -- never through `key_data` -- so leaking
+        `key_data` (e.g. from an encrypt/decrypt call) never also leaks
+        this.
+        """
+        return derive_key_index(self._master(self._resolve(version)))
+
+    def _resolve(self, version: int | None) -> int:
+        return self.current_version if version is None else version
 
     def _master(self, version: int) -> bytes:
         try:
@@ -121,16 +137,18 @@ class KeyRing:
 
 
 def load_key_ring(env: Mapping[str, str] | None = None) -> KeyRing:
-    """Load every `FINHIVE_MASTER_KEY_V<n>` present in `env` (defaults to `os.environ`).
+    """Load every `FINHIVE_MASTER_KEY_V<n>` in `env` (default `os.environ`).
 
-    Raises `ConfigError` if `FINHIVE_KEY_VERSION` is missing, non-numeric, or
-    names a version with no corresponding master key set -- new writes must
-    always have a usable key.
+    Raises `ConfigError` if `FINHIVE_KEY_VERSION` is missing, non-numeric,
+    or names a version with no corresponding master key set -- new writes
+    must always have a usable key.
     """
     env = os.environ if env is None else env
     current_raw = env.get(_CURRENT_VERSION_ENV)
     if not current_raw:
-        raise ConfigError(f"missing required environment variable: {_CURRENT_VERSION_ENV}")
+        raise ConfigError(
+            f"missing required environment variable: {_CURRENT_VERSION_ENV}"
+        )
     try:
         current_version = int(current_raw)
     except ValueError:
@@ -155,7 +173,9 @@ def load_key_ring(env: Mapping[str, str] | None = None) -> KeyRing:
     return KeyRing(current_version=current_version, masters=masters)
 
 
-def rotate_field(blob: bytes, *, from_version: int, to_version: int, ring: KeyRing) -> bytes:
+def rotate_field(
+    blob: bytes, *, from_version: int, to_version: int, ring: KeyRing
+) -> bytes:
     """Re-encrypt a `_ct` blob from `from_version`'s key to `to_version`'s.
 
     Only performs the decrypt/re-encrypt -- the caller writes the returned
@@ -166,19 +186,27 @@ def rotate_field(blob: bytes, *, from_version: int, to_version: int, ring: KeyRi
 
 
 def rotate_identity_field(
-    blob: bytes, *, from_version: int, to_version: int, ring: KeyRing, column: str
+    blob: bytes,
+    *,
+    from_version: int,
+    to_version: int,
+    ring: KeyRing,
+    column: str,
 ) -> tuple[bytes, bytes]:
-    """Re-encrypt a `_ct` blob and recompute its paired `_bidx` under `to_version`.
+    """Re-encrypt a `_ct` blob and recompute its paired `_bidx` for
+    `to_version`.
 
-    `key_index` is derived per `key_version` (via that version's `key_data`),
-    so rotating the ciphertext without recomputing the blind index would
-    leave a `_bidx` value that no longer matches what `to_version`'s key
-    computes for the same plaintext -- silently breaking A5.8 exact-match
-    filtering for that row. Never used for amount columns (ADR-2.4): those
-    have no blind index to recompute, so `rotate_field` alone is correct
-    there.
+    `key_index` is derived per `key_version`, directly from that version's
+    master, so rotating the ciphertext without recomputing the blind index
+    would leave a `_bidx` value that no longer matches what `to_version`'s
+    key computes for the same plaintext -- silently breaking A5.8
+    exact-match filtering for that row. Never used for amount columns
+    (ADR-2.4): those have no blind index to recompute, so `rotate_field`
+    alone is correct there.
     """
     plaintext = decrypt_field(blob, ring.key_data(from_version))
     new_blob = encrypt_field(plaintext, ring.key_data(to_version))
-    new_bidx = compute_blind_index(plaintext, ring.key_data(to_version), column=column)
+    new_bidx = compute_blind_index(
+        plaintext, ring.key_index(to_version), column=column
+    )
     return new_blob, new_bidx

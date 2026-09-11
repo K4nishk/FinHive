@@ -9,17 +9,21 @@ procedure. Code: `finhive/db/keys.py`, `finhive/db/encryption.py`,
 ## Derivation
 
 One 32-byte master key per `key_version`. Everything else is derived, never
-stored:
+stored, and `key_data` and `key_index` are derived **independently** from
+the master -- never one from the other:
 
 ```
-master  --HKDF(info="finhive-aes-gcm-key-v1")-->      key_data   (AES-256-GCM)
-key_data --HKDF(info="finhive-blind-index-hmac-key-v1")--> key_index (HMAC-SHA256)
+master --HKDF(info="finhive-aes-gcm-key-v1")-->          key_data  (AES-256-GCM)
+master --HKDF(info="finhive-blind-index-hmac-key-v1")--> key_index (HMAC-SHA256)
 ```
 
-Distinct info strings at each step mean `key_data` and `key_index` can never
-collide or be swapped, even though both trace back to the same master
-(ADR-2.3: "Never the same key for both -- reusing it lets a blind index leak
-information about the encryption key's use").
+Distinct info strings mean `key_data` and `key_index` can never collide or
+be swapped, and deriving both directly from the master rather than chaining
+one through the other means exposure of `key_data` -- which happens on
+every encrypt/decrypt call, far more often than the master itself is
+touched -- never also reveals `key_index` (ADR-2.3: "Never the same key for
+both -- reusing it lets a blind index leak information about the
+encryption key's use").
 
 ## Where the master lives
 
@@ -61,8 +65,18 @@ Rotation is incremental -- never a big-bang re-encrypt of every row:
    master decrypts it, and both masters are loaded throughout the migration.
 4. Once no row references `key_version = 1` (`SELECT 1 FROM loans WHERE
    key_version = 1 LIMIT 1` returns nothing, checked across every table with a
-   `key_version` column), retire it: remove `FINHIVE_MASTER_KEY_V1` and
+   `key_version` column) **and** every cold archive, audit snapshot, or
+   backup that could contain `key_version = 1` ciphertext has also been
+   inventoried and migrated (a `pg_dump`, a report export, a disk snapshot --
+   anything taken before step 3 completed is still on version 1 even after
+   every live table is clean), retire it: remove `FINHIVE_MASTER_KEY_V1` and
    destroy the backed-up copy of that master (see below).
+
+   Do not destroy the old master until this full inventory is done -- a live
+   table scan alone does not prove version 1 is unused, and a lost master
+   makes any ciphertext still on that version permanently unrecoverable.
+   Test a restore from each archive/snapshot and verify row-level equality
+   against a known-good sample before considering it migrated.
 
 ## Backup and restore
 

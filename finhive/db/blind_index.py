@@ -12,11 +12,15 @@ keep working without ever decrypting the whole table.
 is computed over exactly the value MVP1 filters, autocompletes and
 group-auto-fills on.
 
-`key_index` is never `key_data` reused, and it is never supplied by the
-caller: it is derived here, via HKDF, from the same `key_data` callers pass to
-`encrypt_field`, using an info string that exists nowhere else. Reusing one
-key for both AES-GCM and the HMAC would let the blind index leak information
-about the encryption key's use -- ADR-2.3 "Key management".
+`key_index` is never `key_data` reused, and it is never derived *from*
+`key_data`: `derive_key_index` takes the master key directly and derives
+`key_index` with an info string that exists nowhere else, independently of
+however `key_data` gets derived. Chaining `key_index` through `key_data`
+(deriving one from the other) would mean any exposure of `key_data` -- which
+happens on every encrypt/decrypt call, far more often than the master itself
+is touched -- also hands over the blind-index key. Reusing or chaining key
+material like that would let the blind index leak information about the
+encryption key's use -- ADR-2.3 "Key management".
 
 CRITICAL (ADR-2.4): a blind index must NEVER be computed for an amount
 column. Loan amounts cluster on round numbers (INR 10,000, 15,000, 20,000), so
@@ -79,26 +83,35 @@ def normalize(value: str) -> str:
     return value.strip().lower()
 
 
-def derive_key_index(key_data: bytes) -> bytes:
-    """HKDF-derive the HMAC key from the AES key `key_data`.
+def derive_key_index(master_key: bytes) -> bytes:
+    """HKDF-derive the HMAC key directly from the 32-byte master key.
 
-    Uses an info string distinct from every other key this project derives,
-    so `key_index` can never collide with, or be mistaken for, `key_data` --
-    ADR-2.3 "Key management": "Never the same key for both -- reusing it lets
-    a blind index leak information about the encryption key's use."
+    Independent of `key_data` (the AES-GCM key derived from the same
+    master) -- both are derived straight from the master with distinct info
+    strings, never one from the other, so exposure of `key_data` never
+    reveals `key_index` -- ADR-2.3 "Key management": "Never the same key for
+    both -- reusing it lets a blind index leak information about the
+    encryption key's use."
     """
-    if len(key_data) != KEY_LENGTH:
-        raise ValueError(f"key must be {KEY_LENGTH} bytes for AES-256, got {len(key_data)}")
+    if len(master_key) != KEY_LENGTH:
+        raise ValueError(
+            f"key must be {KEY_LENGTH} bytes for AES-256, got {len(master_key)}"
+        )
     return HKDF(
         algorithm=hashes.SHA256(),
         length=KEY_LENGTH,
         salt=None,
         info=_KEY_INDEX_INFO,
-    ).derive(key_data)
+    ).derive(master_key)
 
 
-def compute_blind_index(plaintext: str, key_data: bytes, *, column: str) -> bytes:
+def compute_blind_index(plaintext: str, key_index: bytes, *, column: str) -> bytes:
     """HMAC-SHA256(key_index, normalize(plaintext))[:16] for an IDENTITY column.
+
+    Takes the already-derived `key_index` (see `derive_key_index`) rather
+    than a master or `key_data` and deriving internally -- the caller is the
+    one who knows which key material it has, and deriving here would tempt a
+    future caller into passing `key_data` and chaining the derivation again.
 
     `column` names the destination `_bidx` column's source field and is
     checked against `IDENTITY_BLIND_INDEX_COLUMNS` before anything is hashed:
@@ -109,9 +122,10 @@ def compute_blind_index(plaintext: str, key_data: bytes, *, column: str) -> byte
     if column not in IDENTITY_BLIND_INDEX_COLUMNS:
         raise ValueError(
             f"refusing to compute a blind index for column {column!r}: only "
-            f"{sorted(IDENTITY_BLIND_INDEX_COLUMNS)} may have one -- ADR-2.4 forbids "
-            "a derived index of any kind on an amount column"
+            f"{sorted(IDENTITY_BLIND_INDEX_COLUMNS)} may have one -- ADR-2.4 "
+            "forbids a derived index of any kind on an amount column"
         )
-    key_index = derive_key_index(key_data)
-    digest = hmac.new(key_index, normalize(plaintext).encode("utf-8"), hashlib.sha256).digest()
+    digest = hmac.new(
+        key_index, normalize(plaintext).encode("utf-8"), hashlib.sha256
+    ).digest()
     return digest[:BLIND_INDEX_LENGTH]
