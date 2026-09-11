@@ -56,6 +56,11 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
+# From here, "python" resolves inside the venv activated above; repoint
+# PYTHON_CMD at it so every later check-then-run pair below (import probe
+# and module invocation) uses the same interpreter instead of the system one
+# PYTHON_CMD held before activation.
+PYTHON_CMD="python"
 
 echo "Installing backend dependencies..."
 pip install --quiet --upgrade pip
@@ -88,7 +93,7 @@ fi
 # --- Migrations (finhive/db/migrations.py, added by KCH-91) ---
 if "$PYTHON_CMD" -c "import finhive.db.migrations" 2>/dev/null; then
     echo "Applying migrations..."
-    python -m finhive.db.migrations
+    "$PYTHON_CMD" -m finhive.db.migrations
 else
     echo "NOTE: migration runner not yet available (KCH-91) — skipping."
 fi
@@ -96,7 +101,7 @@ fi
 # --- Seed service account (finhive/db/seed_service_account.py, added by KCH-92) ---
 if "$PYTHON_CMD" -c "import finhive.db.seed_service_account" 2>/dev/null; then
     echo "Seeding service account..."
-    python -m finhive.db.seed_service_account
+    "$PYTHON_CMD" -m finhive.db.seed_service_account
 else
     echo "NOTE: service account seed not yet available (KCH-92) — skipping."
 fi

@@ -45,17 +45,22 @@ def test_two_connections_racing_apply_pending_do_not_double_apply(
 ) -> None:
     _write(tmp_path, "0001_init.sql", "CREATE TABLE IF NOT EXISTS lock_test_t (a INT);")
 
-    async def _run() -> tuple[list, list]:
+    async def _run() -> list[list]:
         conn_a = await asyncpg.connect(_DATABASE_URL)
         conn_b = await asyncpg.connect(_DATABASE_URL)
         try:
             await conn_a.execute("DROP TABLE IF EXISTS schema_migrations")
             await conn_a.execute("DROP TABLE IF EXISTS lock_test_t")
 
-            return await asyncio.gather(
+            results = await asyncio.gather(
                 apply_pending(conn_a, tmp_path),
                 apply_pending(conn_b, tmp_path),
             )
+            rows = await conn_a.fetch(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+            assert [r["version"] for r in rows] == [1]
+            return results
         finally:
             await conn_a.close()
             await conn_b.close()

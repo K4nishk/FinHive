@@ -164,7 +164,12 @@ def discover_migrations(migrations_dir: Path) -> list[MigrationFile]:
     produce a clean plan that quietly never runs the intended migration.
     """
     by_version: dict[int, list[Path]] = {}
-    for path in migrations_dir.glob("*.sql"):
+    for path in migrations_dir.iterdir():
+        # Matched case-insensitively so a wrongly-cased extension (0001_init.SQL)
+        # reaches the filename-convention check below and raises, instead of
+        # silently missing glob("*.sql") on a case-sensitive filesystem.
+        if not path.is_file() or path.suffix.lower() != ".sql":
+            continue
         match = _FILENAME_RE.match(path.name)
         if not match:
             raise MigrationError(
@@ -245,6 +250,7 @@ def plan_migrations(
         out_of_order = sorted(
             (m for m in pending if m.version < highest_applied), key=lambda m: m.version
         )
+        pending = [m for m in pending if m.version >= highest_applied]
 
     return MigrationPlan(
         pending=pending,
@@ -345,7 +351,14 @@ async def apply_pending(
 
         return result.pending
     finally:
-        await conn.execute("SELECT pg_advisory_unlock($1)", _ADVISORY_LOCK_KEY)
+        try:
+            await conn.execute("SELECT pg_advisory_unlock($1)", _ADVISORY_LOCK_KEY)
+        except Exception:
+            # Session-level advisory locks release when the session ends, so a
+            # failed unlock here is safe to swallow -- raising would replace
+            # whatever MigrationError the try block raised with a masking
+            # connection error instead.
+            pass
 
 
 async def _run_cli() -> int:

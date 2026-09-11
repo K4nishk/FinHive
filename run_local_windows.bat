@@ -68,6 +68,9 @@ if not exist "!VENV_DIR!" (
     !PYTHON_CMD! -m venv "!VENV_DIR!"
 )
 call "!VENV_DIR!\Scripts\activate.bat"
+:: From here, plain `python` resolves inside the venv activated above (built
+:: from !PYTHON_CMD! at line 30) -- do not reorder the checks below ahead of
+:: this activation, or `python` would silently select a different interpreter.
 
 echo Installing backend dependencies...
 python -m pip install --quiet --upgrade pip
@@ -110,6 +113,11 @@ python -c "import finhive.db.migrations" >nul 2>&1
 if !errorlevel! == 0 (
     echo Applying migrations...
     python -m finhive.db.migrations
+    if not !errorlevel! == 0 (
+        echo ERROR: migrations failed -- aborting local bring-up.
+        pause
+        exit /b 1
+    )
 ) else (
     echo NOTE: migration runner not yet available ^(KCH-91^) -- skipping.
 )

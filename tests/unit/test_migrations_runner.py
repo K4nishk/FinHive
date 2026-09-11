@@ -11,6 +11,7 @@ No Postgres or asyncpg required: the fake connection duck-types the
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from finhive.db.migrations import (
     NameMismatchError,
     OutOfOrderMigrationError,
     _run_cli,
+    _SELECT_APPLIED,
     apply_pending,
     checksum_of,
     discover_migrations,
@@ -251,6 +253,11 @@ class _FakeConnection:
             )
 
     async def fetch(self, query: str, *args: object) -> list[dict]:
+        # apply_pending only ever fetches applied history; asserting the query
+        # here (rather than ignoring it and always returning self.rows) means a
+        # future fetch call this fake doesn't expect fails loudly instead of
+        # silently getting handed schema_migrations rows it never asked for.
+        assert query == _SELECT_APPLIED, f"unexpected fetch query: {query!r}"
         return list(self.rows)
 
     def transaction(self) -> _FakeTransaction:
@@ -414,3 +421,37 @@ def test_cli_fails_fast_when_database_url_is_unset(
     exit_code = asyncio.run(_run_cli())
 
     assert exit_code == 2
+
+
+def test_cli_returns_one_on_migration_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_local_windows.bat and run_local_mac.sh key their abort-on-failure
+    behaviour off this exit code, distinct from the 2 returned above for a
+    missing DATABASE_URL -- a MigrationError raised while applying migrations
+    must map to exit code 1.
+
+    asyncpg is stubbed via sys.modules rather than requiring the real package,
+    so this test exercises the CLI's error handling regardless of whether
+    asyncpg is installed in the environment running the suite.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setattr("sys.argv", ["finhive-migrate"])
+
+    class _FakeAsyncpgConnection:
+        async def close(self) -> None:
+            pass
+
+    class _FakeAsyncpgModule:
+        @staticmethod
+        async def connect(url: str) -> _FakeAsyncpgConnection:
+            return _FakeAsyncpgConnection()
+
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpgModule())
+
+    async def _raise_checksum_mismatch(conn: object, migrations_dir: Path) -> list:
+        raise ChecksumMismatchError(1, "init", "expected-checksum", "actual-checksum")
+
+    monkeypatch.setattr("finhive.db.migrations.apply_pending", _raise_checksum_mismatch)
+
+    exit_code = asyncio.run(_run_cli())
+
+    assert exit_code == 1
