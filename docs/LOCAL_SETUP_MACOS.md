@@ -81,6 +81,28 @@ this seed needs. Re-running `python -m finhive.db.seed_service_account` (or
 `./run_local_mac.sh`) is idempotent: it looks the org and auth user up by
 name/email before creating either.
 
+## Encryption master key (KCH-97)
+
+Every NPI column (`finhive/db/encryption.py`, `finhive/db/blind_index.py`)
+needs a 32-byte master key, loaded by `finhive/db/keys.py`. Generate one and
+add it to `ops/.env.local`:
+
+```bash
+python3 -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+```
+
+```bash
+export FINHIVE_KEY_VERSION=1
+export FINHIVE_MASTER_KEY_V1="<base64 output from above>"
+```
+
+`FINHIVE_KEY_VERSION` names which `key_version` new writes are encrypted
+under; `FINHIVE_MASTER_KEY_V<n>` supplies the master for version `n`. Keep an
+old version's var set until every row has been rotated off it -- see
+`docs/KEY_MANAGEMENT.md` for the rotation and backup/restore procedure. A
+lost key means unrecoverable data: back the master key up before it is ever
+used to encrypt real data.
+
 ## Current milestone state
 
 M1a is being built incrementally. The script's migration and API steps
