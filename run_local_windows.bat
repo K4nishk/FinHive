@@ -4,8 +4,9 @@ setlocal enabledelayedexpansion
 ::
 :: Mirrors the MVP1 launcher conventions (src\Loan Manager\run_windows.bat): a
 :: readable version-check failure, a project-local .venv, quiet installs.
-:: Steps whose infrastructure hasn't landed yet (migration runner: KCH-91,
-:: service-account seed: KCH-92, FastAPI app: KCH-93) print a notice and skip
+:: Migrations (finhive\db\migrations.py, KCH-91) run unconditionally and abort
+:: the script on failure. Steps whose infrastructure hasn't landed yet
+:: (service-account seed: KCH-92, FastAPI app: KCH-93) print a notice and skip
 :: rather than failing the whole run -- see docs\LOCAL_SETUP_WINDOWS.md.
 
 echo === FinHive -- Windows Local Setup ===
@@ -109,17 +110,12 @@ if defined DATABASE_URL (
 )
 
 :: --- Migrations (finhive\db\migrations.py, added by KCH-91) ---
-python -c "import finhive.db.migrations" >nul 2>&1
-if !errorlevel! == 0 (
-    echo Applying migrations...
-    python -m finhive.db.migrations
-    if not !errorlevel! == 0 (
-        echo ERROR: migrations failed -- aborting local bring-up.
-        pause
-        exit /b 1
-    )
-) else (
-    echo NOTE: migration runner not yet available ^(KCH-91^) -- skipping.
+echo Applying migrations...
+python -m finhive.db.migrations
+if not !errorlevel! == 0 (
+    echo ERROR: migrations failed -- aborting local bring-up.
+    pause
+    exit /b 1
 )
 
 :: --- Seed service account (finhive\db\seed_service_account.py, added by KCH-92) ---

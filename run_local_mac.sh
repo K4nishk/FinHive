@@ -3,8 +3,9 @@
 #
 # Mirrors the MVP1 launcher conventions (src/Loan Manager/run_mac.sh): a
 # readable version-check failure, a project-local .venv, quiet installs.
-# Steps whose infrastructure hasn't landed yet (migration runner: KCH-91,
-# service-account seed: KCH-92, FastAPI app: KCH-93) print a notice and skip
+# Migrations (finhive/db/migrations.py, KCH-91) run unconditionally and abort
+# the script on failure. Steps whose infrastructure hasn't landed yet
+# (service-account seed: KCH-92, FastAPI app: KCH-93) print a notice and skip
 # rather than failing the whole run — see docs/LOCAL_SETUP_MACOS.md.
 set -e
 
@@ -91,11 +92,10 @@ else
 fi
 
 # --- Migrations (finhive/db/migrations.py, added by KCH-91) ---
-if "$PYTHON_CMD" -c "import finhive.db.migrations" 2>/dev/null; then
-    echo "Applying migrations..."
-    "$PYTHON_CMD" -m finhive.db.migrations
-else
-    echo "NOTE: migration runner not yet available (KCH-91) — skipping."
+echo "Applying migrations..."
+if ! "$PYTHON_CMD" -m finhive.db.migrations; then
+    echo "ERROR: migrations failed -- aborting local bring-up." >&2
+    exit 1
 fi
 
 # --- Seed service account (finhive/db/seed_service_account.py, added by KCH-92) ---
