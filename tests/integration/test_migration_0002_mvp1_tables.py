@@ -7,9 +7,11 @@ skipped otherwise, per the `integration` marker's contract in pyproject.toml.
 Unlike 0001's test, this one doesn't need the `auth` schema, so a bare
 Postgres container works, not just a Supabase instance.
 
-TEST_DATABASE_URL only, never DATABASE_URL: `_reset` drops users, orgs, and
-all business tables, so pointing this at an application database would be
-destructive.
+TEST_DATABASE_URL only, never DATABASE_URL. `_reset` never touches `public`
+directly -- it drops and recreates a dedicated schema and points the
+connection's search_path at it, so a misconfigured URL that happens to point
+at a real application database still can't lose that database's tables; the
+reset is confined to its own isolated schema.
 """
 
 from __future__ import annotations
@@ -29,21 +31,20 @@ pytestmark = pytest.mark.integration
 _DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
-_MVP1_TABLES = [
-    "report_records",
-    "reports",
-    "report_meta",
-    "loan_history",
-    "loan_meta",
-    "loans",
-]
+# A dedicated schema, never `public`, so that a misconfigured
+# TEST_DATABASE_URL pointing at a real application database can't lose that
+# database's tables -- `_reset` can only ever affect this schema.
+_TEST_SCHEMA = "kch93_migration_test"
 
 
 async def _reset(conn: asyncpg.Connection) -> None:
     # Forward-only: drop anything a prior run left behind rather than editing
-    # an "applied" migration in place.
-    for table in [*_MVP1_TABLES, "users", "orgs", "schema_migrations"]:
-        await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    # an "applied" migration in place. Recreating the schema (rather than
+    # dropping tables by name) also picks up any table a future migration
+    # adds without this list needing to know about it.
+    await conn.execute(f"DROP SCHEMA IF EXISTS {_TEST_SCHEMA} CASCADE")
+    await conn.execute(f"CREATE SCHEMA {_TEST_SCHEMA}")
+    await conn.execute(f"SET search_path TO {_TEST_SCHEMA}")
 
 
 @pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL")
@@ -197,8 +198,12 @@ def test_report_record_cannot_attach_to_another_orgs_report() -> None:
                     "2026-01-01",
                     30,
                     "days",
-                    Decimal("2.5").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-                    Decimal("1.0").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                    Decimal("2.5").quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ),
+                    Decimal("1.0").quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ),
                 )
             except asyncpg.ForeignKeyViolationError:
                 return True

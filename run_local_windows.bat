@@ -205,12 +205,44 @@ if not "!MISSING_STAGES!"=="" (
 )
 
 :: --- Launch API and SPA together ---
+set API_SHOULD_START=0
 !PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
-if !errorlevel! == 0 (
+if !errorlevel! == 0 set API_SHOULD_START=1
+
+if !API_SHOULD_START! == 1 (
+    powershell -NoProfile -Command ^
+        "try{(New-Object Net.Sockets.TcpClient('127.0.0.1',8000)).Close();exit 0}catch{exit 1}" >nul 2>&1
+    if !errorlevel! == 0 (
+        echo ERROR: port 8000 is already in use.
+        echo Stop whatever is listening and re-run.
+        pause
+        exit /b 1
+    )
+
     echo Starting API on http://localhost:8000 ...
     start "FinHive API" cmd /c "uvicorn finhive.dev_server:app --reload --port 8000"
+
+    echo Waiting for the API to become ready...
+    set API_READY=0
+    for /l %%i in (1,1,30) do (
+        if !API_READY! == 0 (
+            powershell -NoProfile -Command ^
+                "try{(New-Object Net.Sockets.TcpClient('127.0.0.1',8000)).Close();exit 0}catch{exit 1}" >nul 2>&1
+            if !errorlevel! == 0 (
+                set API_READY=1
+            ) else (
+                timeout /t 1 /nobreak >nul
+            )
+        )
+    )
+    if not !API_READY! == 1 (
+        echo ERROR: API not ready on :8000 within 30s.
+        pause
+        exit /b 1
+    )
+    echo API is ready.
 ) else (
-    echo Starting the SPA only -- the backend API is not part of this run.
+    echo Starting the SPA only -- no backend API.
 )
 
 echo Starting SPA on http://localhost:5173 ...
