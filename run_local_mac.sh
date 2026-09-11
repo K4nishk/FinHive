@@ -124,7 +124,10 @@ else
 fi
 
 # --- API (finhive/dev_server.py, added by KCH-102) ---
-if ! "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
+DEV_SERVER_AVAILABLE=0
+if "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
+    DEV_SERVER_AVAILABLE=1
+else
     MISSING_STAGES+=("backend API (KCH-102)")
 fi
 
@@ -162,7 +165,7 @@ sys.exit(0 if s.connect_ex(('127.0.0.1', $1)) == 0 else 1)
 " 2>/dev/null
 }
 
-if "$PYTHON_CMD" -c "import finhive.dev_server" 2>/dev/null; then
+if [ "$DEV_SERVER_AVAILABLE" = "1" ] && [ "${#MISSING_STAGES[@]}" -eq 0 ]; then
     if _port_is_open 8000; then
         echo "ERROR: port 8000 is already in use by another process."
         echo "Stop whatever is listening on 8000 and re-run — otherwise the"

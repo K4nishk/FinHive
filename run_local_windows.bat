@@ -185,8 +185,11 @@ if !errorlevel! == 0 (
 )
 
 :: --- API (finhive\dev_server.py, added by KCH-102) ---
+set DEV_SERVER_AVAILABLE=0
 !PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
-if not !errorlevel! == 0 (
+if !errorlevel! == 0 (
+    set DEV_SERVER_AVAILABLE=1
+) else (
     set "MISSING_STAGES=!MISSING_STAGES! - backend API (KCH-102)"
 )
 
@@ -205,8 +208,10 @@ if not "!MISSING_STAGES!"=="" (
 )
 
 :: --- Launch API and SPA together ---
-!PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
-if !errorlevel! == 0 (
+set API_SHOULD_START=0
+if "!DEV_SERVER_AVAILABLE!"=="1" if "!MISSING_STAGES!"=="" set API_SHOULD_START=1
+
+if "!API_SHOULD_START!"=="1" (
     powershell -NoProfile -Command "try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 8000)).Close(); exit 0 } catch { exit 1 }" >nul 2>&1
     if !errorlevel! == 0 (
         echo ERROR: port 8000 is already in use by another process.
