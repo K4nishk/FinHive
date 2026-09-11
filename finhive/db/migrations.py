@@ -274,6 +274,11 @@ class Connection(Protocol):
 # lock key some other subsystem takes on the same database.
 _ADVISORY_LOCK_KEY = 0x66686D67
 
+# Bounds how long a runner waits for another runner's advisory lock before
+# giving up. Without this, a hung runner holding the lock wedges every other
+# runner -- including local dev launchers -- indefinitely.
+_LOCK_TIMEOUT_SECONDS = 30
+
 
 async def apply_pending(
     conn: Connection, migrations_dir: Path
@@ -294,10 +299,10 @@ async def apply_pending(
     serialize instead of both planning against the same snapshot and then both
     trying to apply the same pending migration.
     """
-    await conn.execute(_CREATE_SCHEMA_MIGRATIONS_TABLE)
-
+    await conn.execute(f"SET lock_timeout = '{_LOCK_TIMEOUT_SECONDS}s'")
     await conn.execute("SELECT pg_advisory_lock($1)", _ADVISORY_LOCK_KEY)
     try:
+        await conn.execute(_CREATE_SCHEMA_MIGRATIONS_TABLE)
         rows = await conn.fetch(_SELECT_APPLIED)
         applied = [
             AppliedMigration(

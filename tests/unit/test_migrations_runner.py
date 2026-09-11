@@ -74,6 +74,16 @@ def test_discover_migrations_rejects_sql_file_with_invalid_name(
         discover_migrations(tmp_path)
 
 
+def test_discover_migrations_rejects_short_version_prefix(tmp_path: Path) -> None:
+    """The exact typo named in the docstring above: a three-digit version
+    prefix must be rejected rather than silently skipped.
+    """
+    _write(tmp_path, "001_init.sql", "CREATE TABLE t (a INT);")
+
+    with pytest.raises(MigrationError):
+        discover_migrations(tmp_path)
+
+
 def test_discover_migrations_rejects_duplicate_version(tmp_path: Path) -> None:
     _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
     _write(tmp_path, "0001_also_init.sql", "CREATE TABLE u (a INT);")
@@ -287,6 +297,22 @@ def test_apply_pending_fails_when_an_applied_migration_was_edited(
     assert exc_info.value.version == 1
     # Nothing new was recorded as a side effect of the failed attempt.
     assert [row["version"] for row in conn.rows] == [1]
+
+
+def test_apply_pending_releases_the_advisory_lock_on_failure(tmp_path: Path) -> None:
+    """A failed plan must still release the advisory lock -- otherwise a
+    checksum mismatch on one run wedges every subsequent runner behind a lock
+    that's never coming back.
+    """
+    path = _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+    conn = _FakeConnection()
+    asyncio.run(apply_pending(conn, tmp_path))
+    path.write_text("CREATE TABLE t (a INT, b INT);", encoding="utf-8")
+
+    with pytest.raises(ChecksumMismatchError):
+        asyncio.run(apply_pending(conn, tmp_path))
+
+    assert conn.executed_sql[-1] == "SELECT pg_advisory_unlock($1)"
 
 
 def test_apply_pending_fails_when_an_applied_migration_was_renamed(

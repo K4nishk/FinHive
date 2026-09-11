@@ -106,7 +106,7 @@ if defined DATABASE_URL (
 )
 
 :: --- Migrations (finhive\db\migrations.py, added by KCH-91) ---
-!PYTHON_CMD! -c "import finhive.db.migrations" >nul 2>&1
+python -c "import finhive.db.migrations" >nul 2>&1
 if !errorlevel! == 0 (
     echo Applying migrations...
     python -m finhive.db.migrations
@@ -115,7 +115,7 @@ if !errorlevel! == 0 (
 )
 
 :: --- Seed service account (finhive\db\seed_service_account.py, added by KCH-92) ---
-!PYTHON_CMD! -c "import finhive.db.seed_service_account" >nul 2>&1
+python -c "import finhive.db.seed_service_account" >nul 2>&1
 if !errorlevel! == 0 (
     echo Seeding service account...
     python -m finhive.db.seed_service_account
@@ -124,7 +124,7 @@ if !errorlevel! == 0 (
 )
 
 :: --- Launch API and SPA together ---
-!PYTHON_CMD! -c "import finhive.dev_server" >nul 2>&1
+python -c "import finhive.dev_server" >nul 2>&1
 if !errorlevel! == 0 (
     echo Starting API on http://localhost:8000 ...
     start "FinHive API" cmd /c "uvicorn finhive.dev_server:app --reload --port 8000"
