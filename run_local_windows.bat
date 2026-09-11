@@ -105,11 +105,11 @@ if defined DATABASE_URL (
     )
 )
 
-:: --- Migrations (finhive\db\migrate.py, added by KCH-91) ---
-!PYTHON_CMD! -c "import finhive.db.migrate" >nul 2>&1
+:: --- Migrations (finhive\db\migrations.py, added by KCH-91) ---
+!PYTHON_CMD! -c "import finhive.db.migrations" >nul 2>&1
 if !errorlevel! == 0 (
     echo Applying migrations...
-    python -m finhive.db.migrate
+    python -m finhive.db.migrations
 ) else (
     echo NOTE: migration runner not yet available ^(KCH-91^) -- skipping.
 )

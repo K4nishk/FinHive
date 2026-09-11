@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )
 """
 
-_SELECT_APPLIED = "SELECT version, checksum, applied_at FROM schema_migrations"
+_SELECT_APPLIED = "SELECT version, name, checksum, applied_at FROM schema_migrations"
 
 _INSERT_APPLIED = (
     "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)"
@@ -66,6 +66,21 @@ class ChecksumMismatchError(MigrationError):
             f"{expected}, but the file on disk now checksums to {actual}. Migrations "
             "are forward-only and immutable once applied -- add a new migration "
             "instead of editing this one."
+        )
+
+
+class NameMismatchError(MigrationError):
+    """A previously-applied migration's file was renamed on disk."""
+
+    def __init__(self, version: int, expected: str, actual: str) -> None:
+        self.version = version
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"migration {version:04d} was recorded as applied under the name "
+            f"'{expected}', but the file on disk for that version is now named "
+            f"'{actual}'. Migrations are forward-only and immutable once applied "
+            "-- renaming an applied migration's file is not allowed."
         )
 
 
@@ -108,6 +123,7 @@ class MigrationFile:
 @dataclass(frozen=True)
 class AppliedMigration:
     version: int
+    name: str
     checksum: str
     applied_at: datetime
 
@@ -116,12 +132,18 @@ class AppliedMigration:
 class MigrationPlan:
     pending: list[MigrationFile]
     mismatched: list[tuple[MigrationFile, AppliedMigration]]
+    renamed: list[tuple[MigrationFile, AppliedMigration]]
     missing: list[AppliedMigration]
     out_of_order: list[MigrationFile]
 
     @property
     def is_clean(self) -> bool:
-        return not self.mismatched and not self.missing and not self.out_of_order
+        return (
+            not self.mismatched
+            and not self.renamed
+            and not self.missing
+            and not self.out_of_order
+        )
 
     @property
     def is_up_to_date(self) -> bool:
@@ -135,15 +157,21 @@ def checksum_of(sql: str) -> str:
 def discover_migrations(migrations_dir: Path) -> list[MigrationFile]:
     """Discover `NNNN_name.sql` files, sorted by version.
 
-    Files that don't match the naming convention (this README, stray files) are
-    ignored rather than erroring, so the directory can carry documentation
-    alongside the migrations themselves.
+    Non-`.sql` files (this README, stray docs) are ignored, so the directory
+    can carry documentation alongside the migrations themselves. A `.sql` file
+    that doesn't match the `NNNN_name.sql` naming convention raises instead of
+    being silently skipped -- a typo in a migration's filename must not
+    produce a clean plan that quietly never runs the intended migration.
     """
     by_version: dict[int, list[Path]] = {}
     for path in migrations_dir.glob("*.sql"):
         match = _FILENAME_RE.match(path.name)
         if not match:
-            continue
+            raise MigrationError(
+                f"{path.name} does not match the required migration filename "
+                "convention NNNN_name.sql (a zero-padded 4-digit version, an "
+                "underscore, then a lowercase snake_case name)"
+            )
         by_version.setdefault(int(match.group("version")), []).append(path)
 
     for version, paths in by_version.items():
@@ -173,26 +201,32 @@ def plan_migrations(
 ) -> MigrationPlan:
     """Pure planning step: compare on-disk migrations against applied history.
 
-    A migration with no applied record is pending. A migration whose applied
-    checksum no longer matches the file on disk is mismatched -- it was edited
-    after being applied, which is exactly what must not happen. An applied
-    version with no matching file on disk is missing -- its migration file was
-    deleted. A pending version below the highest applied version is
-    out-of-order -- a new file was added numbered behind history that has
-    already been applied. Applied history must be an exact prefix of what's on
-    disk; any of these three states means it isn't, and the caller must fail
-    closed rather than apply anything.
+    A migration with no applied record is pending. A migration whose recorded
+    name no longer matches the file on disk for that version is renamed --
+    renaming the file after it was applied would otherwise bypass the
+    checksum check entirely. A migration whose applied checksum no longer
+    matches the file on disk is mismatched -- it was edited after being
+    applied, which is exactly what must not happen. An applied version with no
+    matching file on disk is missing -- its migration file was deleted. A
+    pending version below the highest applied version is out-of-order -- a new
+    file was added numbered behind history that has already been applied.
+    Applied history must be an exact prefix of what's on disk; any of these
+    states means it isn't, and the caller must fail closed rather than apply
+    anything.
     """
     migrations_by_version = {m.version: m for m in migrations}
     applied_by_version = {a.version: a for a in applied}
 
     pending: list[MigrationFile] = []
     mismatched: list[tuple[MigrationFile, AppliedMigration]] = []
+    renamed: list[tuple[MigrationFile, AppliedMigration]] = []
 
     for migration in migrations:
         record = applied_by_version.get(migration.version)
         if record is None:
             pending.append(migration)
+        elif record.name != migration.name:
+            renamed.append((migration, record))
         elif record.checksum != migration.checksum:
             mismatched.append((migration, record))
 
@@ -215,6 +249,7 @@ def plan_migrations(
     return MigrationPlan(
         pending=pending,
         mismatched=mismatched,
+        renamed=renamed,
         missing=missing,
         out_of_order=out_of_order,
     )
@@ -246,9 +281,10 @@ async def apply_pending(
     """Apply pending migrations, forward-only, against `conn`.
 
     Raises `ChecksumMismatchError` before applying anything if a previously
-    applied file has been edited on disk, `MissingMigrationError` if a
-    previously applied file was deleted, or `OutOfOrderMigrationError` if a new
-    file was added numbered behind a version that's already been applied.
+    applied file has been edited on disk, `NameMismatchError` if a previously
+    applied file was renamed, `MissingMigrationError` if a previously applied
+    file was deleted, or `OutOfOrderMigrationError` if a new file was added
+    numbered behind a version that's already been applied.
     Returns the migrations newly applied this call -- an empty list when the
     database is already up to date, which is what makes running this twice in
     a row idempotent.
@@ -266,6 +302,7 @@ async def apply_pending(
         applied = [
             AppliedMigration(
                 version=row["version"],
+                name=row["name"],
                 checksum=row["checksum"],
                 applied_at=row["applied_at"],
             )
@@ -283,6 +320,9 @@ async def apply_pending(
                 raise OutOfOrderMigrationError(
                     result.out_of_order[0].version, highest_applied
                 )
+            if result.renamed:
+                migration, record = result.renamed[0]
+                raise NameMismatchError(migration.version, record.name, migration.name)
             migration, record = result.mismatched[0]
             raise ChecksumMismatchError(
                 migration.version, migration.name, record.checksum, migration.checksum

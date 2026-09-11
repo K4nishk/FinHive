@@ -1,8 +1,11 @@
 """Advisory-lock serialization for the migration runner (KCH-91).
 
-Requires a real Postgres reachable via TEST_DATABASE_URL or DATABASE_URL --
-skipped otherwise, per the `integration` marker's contract in pyproject.toml
-("needs a database: ephemeral Supabase branch or local Postgres").
+Requires a real Postgres reachable via TEST_DATABASE_URL -- skipped otherwise,
+per the `integration` marker's contract in pyproject.toml ("needs a database:
+ephemeral Supabase branch or local Postgres"). This test drops and recreates
+tables, so it must never fall back to DATABASE_URL: that variable can point at
+a real application database, and running this against it would destroy its
+migration history.
 
 Two real asyncpg connections race `apply_pending` against the same pending
 migration concurrently. Without the advisory lock serializing planning and
@@ -27,7 +30,7 @@ from finhive.db.migrations import apply_pending  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 
 def _write(tmp_path: Path, filename: str, sql: str) -> Path:
@@ -36,9 +39,7 @@ def _write(tmp_path: Path, filename: str, sql: str) -> Path:
     return path
 
 
-@pytest.mark.skipif(
-    not _DATABASE_URL, reason="needs TEST_DATABASE_URL or DATABASE_URL"
-)
+@pytest.mark.skipif(not _DATABASE_URL, reason="needs TEST_DATABASE_URL")
 def test_two_connections_racing_apply_pending_do_not_double_apply(
     tmp_path: Path,
 ) -> None:

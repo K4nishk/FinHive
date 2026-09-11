@@ -33,9 +33,19 @@ Run it directly:
 DATABASE_URL=postgres://... python -m finhive.db.migrations
 ```
 
-It exits non-zero on any `MigrationError` (checksum mismatch, duplicate version
-number), so wiring it into CI as a required step is a one-line addition once a
-target database is available there.
+`run_local_mac.sh` and `run_local_windows.bat` (KCH-90) already call it this way
+against the local or branch database before starting the app, so migrations run
+as part of every local dev bring-up.
+
+It exits non-zero on any `MigrationError` (checksum mismatch, renamed or edited
+file, out-of-order file, duplicate version number), so wiring it into CI as a
+required step is a one-line addition once a target database -- e.g. an
+ephemeral Supabase branch -- is available there. That CI wiring and an
+automated dry-run against a Supabase branch are tracked separately; they need
+CI-provisioned database credentials this repo doesn't have yet, which is
+outside KCH-91's scope (build the runner) and acceptance criteria (idempotent
+re-run, edited-migration failure -- both covered by the test suite in
+`tests/unit/test_migrations_runner.py` and `tests/integration/test_migrations_lock.py`).
 
 Running it twice against the same database is a no-op the second time — nothing to
 apply, nothing re-applied.

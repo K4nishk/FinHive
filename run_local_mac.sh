@@ -85,10 +85,10 @@ else
     exit 1
 fi
 
-# --- Migrations (finhive/db/migrate.py, added by KCH-91) ---
-if "$PYTHON_CMD" -c "import finhive.db.migrate" 2>/dev/null; then
+# --- Migrations (finhive/db/migrations.py, added by KCH-91) ---
+if "$PYTHON_CMD" -c "import finhive.db.migrations" 2>/dev/null; then
     echo "Applying migrations..."
-    python -m finhive.db.migrate
+    python -m finhive.db.migrations
 else
     echo "NOTE: migration runner not yet available (KCH-91) — skipping."
 fi

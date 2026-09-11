@@ -20,7 +20,9 @@ from finhive.db.migrations import (
     AppliedMigration,
     ChecksumMismatchError,
     DuplicateVersionError,
+    MigrationError,
     MissingMigrationError,
+    NameMismatchError,
     OutOfOrderMigrationError,
     _run_cli,
     apply_pending,
@@ -49,14 +51,27 @@ def test_discover_migrations_orders_by_version(tmp_path: Path) -> None:
     assert [m.name for m in migrations] == ["init", "add_index"]
 
 
-def test_discover_migrations_ignores_non_matching_files(tmp_path: Path) -> None:
+def test_discover_migrations_ignores_non_sql_files(tmp_path: Path) -> None:
     _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
     _write(tmp_path, "README.md", "# migrations")
-    _write(tmp_path, "not_numbered.sql", "SELECT 1;")
 
     migrations = discover_migrations(tmp_path)
 
     assert [m.version for m in migrations] == [1]
+
+
+def test_discover_migrations_rejects_sql_file_with_invalid_name(
+    tmp_path: Path,
+) -> None:
+    """A .sql file that doesn't match NNNN_name.sql must raise rather than be
+    silently skipped -- a typo like `001_init.sql` (three digits) must not
+    produce an apparently clean plan while the intended migration never runs.
+    """
+    _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+    _write(tmp_path, "not_numbered.sql", "SELECT 1;")
+
+    with pytest.raises(MigrationError):
+        discover_migrations(tmp_path)
 
 
 def test_discover_migrations_rejects_duplicate_version(tmp_path: Path) -> None:
@@ -81,6 +96,7 @@ def test_plan_is_up_to_date_when_nothing_pending_or_mismatched(tmp_path: Path) -
     applied = [
         AppliedMigration(
             version=1,
+            name=migrations[0].name,
             checksum=migrations[0].checksum,
             applied_at=datetime.now(timezone.utc),
         )
@@ -112,6 +128,7 @@ def test_plan_flags_edited_applied_migration_as_mismatched(tmp_path: Path) -> No
     applied = [
         AppliedMigration(
             version=1,
+            name="init",
             checksum=stale_checksum,
             applied_at=datetime.now(timezone.utc),
         )
@@ -123,6 +140,30 @@ def test_plan_flags_edited_applied_migration_as_mismatched(tmp_path: Path) -> No
     assert plan.mismatched[0][0].version == 1
 
 
+def test_plan_flags_renamed_applied_migration_as_renamed(tmp_path: Path) -> None:
+    """A migration whose file was renamed after being applied must not read as
+    clean even when the SQL content -- and therefore the checksum -- is
+    unchanged, otherwise renaming a file bypasses the immutable-file check
+    entirely.
+    """
+    _write(tmp_path, "0001_renamed.sql", "CREATE TABLE t (a INT);")
+    migrations = discover_migrations(tmp_path)
+    applied = [
+        AppliedMigration(
+            version=1,
+            name="init",
+            checksum=migrations[0].checksum,
+            applied_at=datetime.now(timezone.utc),
+        )
+    ]
+
+    plan = plan_migrations(migrations, applied)
+
+    assert not plan.is_clean
+    assert plan.mismatched == []
+    assert plan.renamed[0][0].version == 1
+
+
 def test_plan_flags_applied_version_with_no_file_on_disk_as_missing(
     tmp_path: Path,
 ) -> None:
@@ -132,6 +173,7 @@ def test_plan_flags_applied_version_with_no_file_on_disk_as_missing(
     applied = [
         AppliedMigration(
             version=1,
+            name="init",
             checksum=checksum_of("CREATE TABLE t (a INT);"),
             applied_at=datetime.now(timezone.utc),
         )
@@ -155,6 +197,7 @@ def test_plan_flags_pending_version_below_highest_applied_as_out_of_order(
     applied = [
         AppliedMigration(
             version=2,
+            name="add_index",
             checksum=checksum_of("CREATE INDEX idx ON t (a);"),
             applied_at=datetime.now(timezone.utc),
         )
@@ -242,6 +285,29 @@ def test_apply_pending_fails_when_an_applied_migration_was_edited(
         asyncio.run(apply_pending(conn, tmp_path))
 
     assert exc_info.value.version == 1
+    # Nothing new was recorded as a side effect of the failed attempt.
+    assert [row["version"] for row in conn.rows] == [1]
+
+
+def test_apply_pending_fails_when_an_applied_migration_was_renamed(
+    tmp_path: Path,
+) -> None:
+    """Renaming an already-applied migration's file must fail even though its
+    SQL content -- and therefore its checksum -- is unchanged. Otherwise a
+    rename bypasses the checksum check that catches edits.
+    """
+    path = _write(tmp_path, "0001_init.sql", "CREATE TABLE t (a INT);")
+    conn = _FakeConnection()
+    asyncio.run(apply_pending(conn, tmp_path))
+
+    path.rename(tmp_path / "0001_renamed.sql")
+
+    with pytest.raises(NameMismatchError) as exc_info:
+        asyncio.run(apply_pending(conn, tmp_path))
+
+    assert exc_info.value.version == 1
+    assert exc_info.value.expected == "init"
+    assert exc_info.value.actual == "renamed"
     # Nothing new was recorded as a side effect of the failed attempt.
     assert [row["version"] for row in conn.rows] == [1]
 
