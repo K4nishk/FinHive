@@ -17,9 +17,9 @@ import pytest
 
 asyncpg = pytest.importorskip("asyncpg")
 
-from finhive.db.blind_index import compute_blind_index
-from finhive.db.encryption import KEY_LENGTH, decrypt_field, encrypt_field
-from finhive.db.migrations import apply_pending
+from finhive.db.blind_index import compute_blind_index  # noqa: E402
+from finhive.db.encryption import KEY_LENGTH, decrypt_field, encrypt_field  # noqa: E402
+from finhive.db.migrations import apply_pending  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -33,13 +33,13 @@ _TABLES = [
 ]
 
 
-async def _reset(conn: "asyncpg.Connection") -> None:
+async def _reset(conn: asyncpg.Connection) -> None:
     for table in [*_TABLES, "users", "orgs", "schema_migrations"]:
         await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
 
 async def _insert_loan(
-    conn: "asyncpg.Connection",
+    conn: asyncpg.Connection,
     org_id: str,
     reference_id: str,
     borrower_name: str,
