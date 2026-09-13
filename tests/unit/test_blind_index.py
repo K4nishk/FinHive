@@ -29,6 +29,11 @@ from finhive.db.encryption import KEY_LENGTH
 _KEY = b"\x01" * KEY_LENGTH
 _OTHER_KEY = b"\x02" * KEY_LENGTH
 
+# compute_blind_index takes an already-derived key_index,
+# not a master -- derive once here the way KeyRing would.
+_KEY_INDEX = derive_key_index(_KEY)
+_OTHER_KEY_INDEX = derive_key_index(_OTHER_KEY)
+
 
 # ── normalize ──────────────────────────────────
 
@@ -49,15 +54,15 @@ def test_normalize_trims_and_lowercases(raw: str, expected: str) -> None:
 # ── key separation (ADR-2.3) ────────────────────
 
 
-def test_derive_key_index_differs_from_key_data() -> None:
+def test_derive_key_index_differs_from_the_master() -> None:
     assert derive_key_index(_KEY) != _KEY
 
 
-def test_derive_key_index_is_deterministic_for_the_same_key_data() -> None:
+def test_derive_key_index_is_deterministic() -> None:
     assert derive_key_index(_KEY) == derive_key_index(_KEY)
 
 
-def test_derive_key_index_differs_across_key_data() -> None:
+def test_derive_key_index_differs_across_masters() -> None:
     assert derive_key_index(_KEY) != derive_key_index(_OTHER_KEY)
 
 
@@ -73,7 +78,9 @@ def test_derive_key_index_rejects_wrong_length(
 
 
 def test_blind_index_is_16_bytes() -> None:
-    index = compute_blind_index("Sharma Traders", _KEY, column="borrower_name")
+    index = compute_blind_index(
+        "Sharma Traders", _KEY_INDEX, column="borrower_name",
+    )
 
     assert len(index) == BLIND_INDEX_LENGTH == 16
 
@@ -82,9 +89,11 @@ def test_same_plaintext_and_key_always_produce_the_same_index() -> None:
     """The opposite property from encrypt_field -- a blind index must be
     stable, or A5.8 exact-match filtering could never find a row twice.
     """
-    first = compute_blind_index("Sharma Traders", _KEY, column="borrower_name")
+    first = compute_blind_index(
+        "Sharma Traders", _KEY_INDEX, column="borrower_name",
+    )
     second = compute_blind_index(
-        "Sharma Traders", _KEY, column="borrower_name",
+        "Sharma Traders", _KEY_INDEX, column="borrower_name",
     )
 
     assert first == second
@@ -95,15 +104,16 @@ def test_index_is_stable_regardless_of_case_or_padding() -> None:
     normalize-then-filter rule matches.
     """
     canonical = compute_blind_index(
-        "Sharma Traders", _KEY, column="borrower_name",
+        "Sharma Traders", _KEY_INDEX,
+        column="borrower_name",
     )
 
     assert compute_blind_index(
-        "  SHARMA TRADERS  ", _KEY,
+        "  SHARMA TRADERS  ", _KEY_INDEX,
         column="borrower_name",
     ) == canonical
     assert compute_blind_index(
-        "sharma traders", _KEY,
+        "sharma traders", _KEY_INDEX,
         column="borrower_name",
     ) == canonical
 
@@ -113,9 +123,13 @@ def test_distinct_names_produce_distinct_indexes() -> None:
     collapse onto the same bucket.
     """
     sharma = compute_blind_index(
-        "Sharma Traders", _KEY, column="borrower_name",
+        "Sharma Traders", _KEY_INDEX,
+        column="borrower_name",
     )
-    gupta = compute_blind_index("Gupta Finance", _KEY, column="borrower_name")
+    gupta = compute_blind_index(
+        "Gupta Finance", _KEY_INDEX,
+        column="borrower_name",
+    )
 
     assert sharma != gupta
 
@@ -125,34 +139,31 @@ def test_name_and_group_lookups_agree_for_group_auto_fill() -> None:
     resolve deterministically under the same key, independent of column.
     """
     name_index = compute_blind_index(
-        "Sharma Traders", _KEY,
+        "Sharma Traders", _KEY_INDEX,
         column="borrower_name",
     )
     group_index = compute_blind_index(
-        "Sharma Traders", _KEY,
+        "Sharma Traders", _KEY_INDEX,
         column="borrower_group",
     )
 
-    # Different columns use the same key_index derivation but the values are
-    # independent hashes -- same plaintext does not imply same index across
-    # columns, only stability within one column.
     assert name_index == compute_blind_index(
-        "Sharma Traders", _KEY,
+        "Sharma Traders", _KEY_INDEX,
         column="borrower_name",
     )
     assert group_index == compute_blind_index(
-        "Sharma Traders", _KEY,
+        "Sharma Traders", _KEY_INDEX,
         column="borrower_group",
     )
 
 
 def test_different_keys_produce_different_indexes() -> None:
     under_key = compute_blind_index(
-        "Sharma Traders", _KEY,
+        "Sharma Traders", _KEY_INDEX,
         column="borrower_name",
     )
     under_other_key = compute_blind_index(
-        "Sharma Traders", _OTHER_KEY,
+        "Sharma Traders", _OTHER_KEY_INDEX,
         column="borrower_name",
     )
 
@@ -161,7 +172,9 @@ def test_different_keys_produce_different_indexes() -> None:
 
 @pytest.mark.parametrize("column", sorted(IDENTITY_BLIND_INDEX_COLUMNS))
 def test_every_identity_column_is_accepted(column: str) -> None:
-    index = compute_blind_index("Sharma Traders", _KEY, column=column)
+    index = compute_blind_index(
+        "Sharma Traders", _KEY_INDEX, column=column,
+    )
 
     assert len(index) == BLIND_INDEX_LENGTH
 
@@ -179,12 +192,16 @@ def test_compute_blind_index_refuses_every_amount_column(column: str) -> None:
     static half, over every migration file.
     """
     with pytest.raises(ValueError, match="ADR-2.4"):
-        compute_blind_index("150000.00", _KEY, column=column)
+        compute_blind_index(
+            "150000.00", _KEY_INDEX, column=column,
+        )
 
 
 def test_compute_blind_index_refuses_an_unknown_column() -> None:
     with pytest.raises(ValueError):
-        compute_blind_index("whatever", _KEY, column="reference_id")
+        compute_blind_index(
+            "whatever", _KEY_INDEX, column="reference_id",
+        )
 
 
 def test_identity_and_forbidden_column_sets_are_disjoint() -> None:
