@@ -1,0 +1,9 @@
+{
+  "name": "light",
+  "status_colours": {
+    "Active":  {"background": "#d4edda", "text": "#155724", "bold": true},
+    "Overdue": {"background": "#f8d7da", "text": "#721c24", "bold": true},
+    "Pending": {"background": "#fff3cd", "text": "#856404", "bold": true},
+    "Paidoff": {"background": "#d6d8db", "text": "#383d41", "bold": true}
+  }
+}

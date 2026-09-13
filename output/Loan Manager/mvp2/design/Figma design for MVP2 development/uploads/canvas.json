@@ -1,0 +1,39 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Dashboard" },
+    { "file": "Loans.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 900, "title": "Loans table" },
+    { "file": "AgentChat.dc.html", "x": 0, "y": 1040, "w": 1440, "h": 1300, "title": "Ask FinHive — ReAct trace" },
+    { "file": "Approvals.dc.html", "x": 1560, "y": 1040, "w": 1440, "h": 900, "title": "Approval queue — mutation diffs" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -230,
+      "w": 620,
+      "text": "FinHive Loan Manager — MVP2\nReact + Chakra UI, dark theme.\n\nStatus hues carried forward exactly from MVP1's dark_config.json (Active #025c33, Overdue #6b0307, Pending #804001, Paidoff #022a52), re-tinted for legibility on a dark ground. Amber #e0a336 is the new brand accent and marks everything agent-originated.\n\nType: IBM Plex Sans + IBM Plex Mono (tabular figures for money and reference IDs)."
+    },
+    {
+      "id": "note-agent",
+      "x": 0,
+      "y": 2420,
+      "w": 620,
+      "text": "The ReAct trace is the product, not a loading state.\n\nStep 2 is the whole argument for an agent over a search box: 'sharma group' is not a stored value, so the model resolves it to sharma_traders BEFORE querying. A naive implementation would filter on the raw string, return zero rows, and confidently say 'no loans found'.\n\nToken count, cost and latency are shown per turn — this is the metering substrate for the eval harness."
+    },
+    {
+      "id": "note-approvals",
+      "x": 1560,
+      "y": 2420,
+      "w": 620,
+      "text": "The safety gate. The agent never writes to the loans table.\n\nEvery mutating tool writes a proposal row instead. The diff is rendered from stored before/after JSONB snapshots — never from the agent's prose description of what it did.\n\nOnly the owner role sees Approve, enforced server-side by Postgres RLS rather than by hiding a button. The batch applies in one transaction."
+    },
+    {
+      "id": "note-table",
+      "x": 1560,
+      "y": -230,
+      "w": 620,
+      "text": "Row 3 shows the inline date-edit state. MVP1's most defect-dense area was filter state and date handling — three architectural rewrites — so the filter chips deliberately show applied state as a single visible source of truth, and the footer restates the filtered totals so a wrong filter is obvious rather than silent."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}
