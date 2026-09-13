@@ -62,8 +62,8 @@ cd "$REPO_DIR" || exit 1
 [ -f "$OPS_DIR/.env.local" ] && . "$OPS_DIR/.env.local"
 
 BASE_BRANCH="${BASE_BRANCH:-development}"
-IMPL_MODEL="${IMPL_MODEL:-claude-sonnet-5}"
-MEDIATOR_MODEL="${MEDIATOR_MODEL:-claude-opus-5}"
+IMPL_MODEL="${IMPL_MODEL:-claude-sonnet-4-6}"
+MEDIATOR_MODEL="${MEDIATOR_MODEL:-claude-opus-4-6}"
 MAX_TURNS="${MAX_TURNS:-60}"
 CR_MAX_ROUNDS="${CR_MAX_ROUNDS:-2}"
 CR_BLOCKING="${CR_BLOCKING:-critical|major|blocker|high}"

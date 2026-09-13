@@ -93,12 +93,12 @@ Carried from `AssetAuditor/ops`. Each cost a real session.
 
 | Env | Default | Used by |
 |---|---|---|
-| `IMPL_MODEL` | `claude-sonnet-5` | implementing agent · CodeRabbit fix rounds |
-| `MEDIATOR_MODEL` | `claude-opus-5` | mediator only — adjudicating disputed findings |
+| `IMPL_MODEL` | `claude-sonnet-4-6` | implementing agent · CodeRabbit fix rounds |
+| `MEDIATOR_MODEL` | `claude-opus-4-6` | mediator only — adjudicating disputed findings |
 
 Implementation works against a spec that already exists and burns most of the tokens, so
 it runs on the cheaper tier. Mediation is a judgement call a human reads later, so it
-keeps the stronger model. Override per run: `IMPL_MODEL=claude-opus-5 ./ops/run_builder.sh`.
+keeps the stronger model. Override per run: `IMPL_MODEL=claude-opus-4-6 ./ops/run_builder.sh`.
 
 Other knobs: `CR_MAX_ROUNDS` (2) · `MAX_TURNS` · `LOCAL_CHECKS` · `SKIP_KILL_GATE`.
 

@@ -200,7 +200,7 @@ $TM send-keys -t "$SESSION:build" \
     ./ops/run_builder.sh --status     read-only: queue, locks, recent log
     caffeinate -ims ./ops/run_builder.sh --loop    drain the backlog, keep Mac awake
 
-  Knobs:  IMPL_MODEL (claude-sonnet-5)  MEDIATOR_MODEL (claude-opus-5)
+  Knobs:  IMPL_MODEL (claude-sonnet-4-6)  MEDIATOR_MODEL (claude-opus-4-6)
           CR_MAX_ROUNDS=2   MAX_TURNS   LOOP_INTERVAL=30 (secs between passes)
 
   Nothing merges without you. Review PRs bottom-up.
