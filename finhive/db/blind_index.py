@@ -123,6 +123,11 @@ def compute_blind_index(
     allow-list) raises `ValueError` rather than silently producing a
     deterministic, frequency-analyzable index over NPI (ADR-2.4).
     """
+    if len(key_index) != KEY_LENGTH:
+        raise ValueError(
+            f"key_index must be {KEY_LENGTH} bytes,"
+            f" got {len(key_index)}"
+        )
     if column not in IDENTITY_BLIND_INDEX_COLUMNS:
         raise ValueError(
             f"refusing to compute a blind index for column"

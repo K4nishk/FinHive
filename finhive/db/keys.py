@@ -188,6 +188,10 @@ def rotate_field(
 
     Only performs the decrypt/re-encrypt -- the caller writes the returned
     blob together with `key_version = to_version` in the same row update.
+
+    The caller MUST rotate every `_ct` field in the row before setting
+    `key_version = to_version` -- rotating a subset and bumping the
+    version makes the un-rotated fields unreadable.
     """
     plaintext = decrypt_field(blob, ring.key_data(from_version))
     return encrypt_field(plaintext, ring.key_data(to_version))
