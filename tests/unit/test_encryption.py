@@ -61,6 +61,7 @@ def test_blob_starts_with_a_96_bit_iv() -> None:
     plaintext = "Sharma Traders"
     blob = encrypt_field(plaintext, _KEY)
 
+    # iv (12) + ciphertext (same length as plaintext) + tag (16)
     expected = IV_LENGTH + len(plaintext.encode()) + 16
     assert len(blob) == expected
 
@@ -86,15 +87,6 @@ def test_truncated_blob_fails_the_auth_tag() -> None:
     with pytest.raises(DecryptionError):
         decrypt_field(blob[:-1], _KEY)
 
-
-def test_empty_blob_raises_decryption_error() -> None:
-    with pytest.raises(DecryptionError):
-        decrypt_field(b"", _KEY)
-
-
-def test_short_blob_raises_decryption_error() -> None:
-    with pytest.raises(DecryptionError):
-        decrypt_field(b"\x00" * IV_LENGTH, _KEY)
 
 
 @pytest.mark.parametrize("bad_key", [

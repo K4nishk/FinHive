@@ -1,4 +1,4 @@
-"""HMAC blind index for encrypted IDENTITY columns
+"""HMAC blind index for encrypted IDENTITY columns only
 (ADR-2.3, ADR-2.4, KCH-96).
 
 `finhive/db/encryption.py` makes `_ct` columns unusable for equality lookup by
@@ -13,10 +13,13 @@ keep working without ever decrypting the whole table.
 is computed over exactly the value MVP1 filters, autocompletes and
 group-auto-fills on.
 
-`key_index` is never `key_data` reused, and it is never supplied by the
-caller: it is derived here, via HKDF, from the same `key_data` callers pass to
-`encrypt_field`, using an info string that exists nowhere else. Reusing one
-key for both AES-GCM and the HMAC would let the blind index leak information
+`key_index` is never `key_data` reused, and it is never derived *from*
+`key_data`: `derive_key_index` takes the master key directly and derives
+`key_index` with an info string that exists nowhere else, independently of
+however `key_data` gets derived. Chaining `key_index` through `key_data`
+would mean any exposure of `key_data` -- which happens on every
+encrypt/decrypt call -- also hands over the blind-index key. Reusing or
+chaining key material like that would let the blind index leak information
 about the encryption key's use -- ADR-2.3 "Key management".
 
 CRITICAL (ADR-2.4): a blind index must NEVER be computed for an amount
@@ -40,8 +43,11 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from finhive.db.encryption import KEY_LENGTH
 
-BLIND_INDEX_LENGTH = 16  # truncated on purpose
-# Distinct info string so key_index != key_data.
+BLIND_INDEX_LENGTH = 16  # 128-bit output, per ADR-2.3
+# Deterministic indexes still reveal equality and frequency.
+
+# Distinct from any other info string this project derives a key
+# with -- key_index cannot be recomputed as key_data.
 _KEY_INDEX_INFO = b"finhive-blind-index-hmac-key-v1"
 
 # The only columns ADR-2.3/ADR-2.4 permit a blind index on.
@@ -77,51 +83,62 @@ def normalize(value: str) -> str:
     return value.strip().lower()
 
 
-def derive_key_index(key_data: bytes) -> bytes:
-    """HKDF-derive the HMAC key from the AES key `key_data`.
+def derive_key_index(master_key: bytes) -> bytes:
+    """HKDF-derive the HMAC key directly from a 32-byte master.
 
-    Uses an info string distinct from every other key this project derives,
-    so `key_index` can never collide with, or be mistaken for, `key_data` --
-    ADR-2.3 "Key management": "Never the same key for both -- reusing it lets
-    a blind index leak information about the encryption key's use."
+    Independent of `key_data` (the AES-GCM key derived from the
+    same master) -- both are derived straight from the master with
+    distinct info strings, never one from the other, so exposure
+    of `key_data` never reveals `key_index` -- ADR-2.3 "Key
+    management".
     """
-    if len(key_data) != KEY_LENGTH:
+    if len(master_key) != KEY_LENGTH:
         raise ValueError(
             f"key must be {KEY_LENGTH} bytes"
-            f" for AES-256, got {len(key_data)}"
+            f" for AES-256, got {len(master_key)}"
         )
     return HKDF(
         algorithm=hashes.SHA256(),
         length=KEY_LENGTH,
         salt=None,
         info=_KEY_INDEX_INFO,
-    ).derive(key_data)
+    ).derive(master_key)
 
 
 def compute_blind_index(
     plaintext: str,
-    key_data: bytes,
+    key_index: bytes,
     *,
     column: str,
 ) -> bytes:
     """HMAC-SHA256(key_index, normalize(plaintext))[:16].
 
-    `column` names the destination `_bidx` column's source field and is
-    checked against `IDENTITY_BLIND_INDEX_COLUMNS` before anything is hashed:
-    passing an amount column (or any column not on the allow-list) raises
-    `ValueError` rather than silently producing a deterministic,
-    frequency-analyzable index over NPI (ADR-2.4).
+    Takes the already-derived `key_index` (see `derive_key_index`)
+    rather than a master or `key_data` -- the caller is the one who
+    knows which key material it has.
+
+    `column` names the destination `_bidx` column's source field and
+    is checked against `IDENTITY_BLIND_INDEX_COLUMNS` before anything
+    is hashed: passing an amount column (or any column not on the
+    allow-list) raises `ValueError` rather than silently producing a
+    deterministic, frequency-analyzable index over NPI (ADR-2.4).
     """
+    if len(key_index) != KEY_LENGTH:
+        raise ValueError(
+            f"key_index must be {KEY_LENGTH} bytes,"
+            f" got {len(key_index)}"
+        )
     if column not in IDENTITY_BLIND_INDEX_COLUMNS:
         raise ValueError(
-            f"refusing to compute a blind index for column {column!r}: only "
-            f"{sorted(IDENTITY_BLIND_INDEX_COLUMNS)}"
+            f"refusing to compute a blind index for column"
+            f" {column!r}: only"
+            f" {sorted(IDENTITY_BLIND_INDEX_COLUMNS)}"
             " may have one -- ADR-2.4 forbids"
             " a derived index on an amount"
         )
-    key_index = derive_key_index(key_data)
-    msg = normalize(plaintext).encode("utf-8")
     digest = hmac.new(
-        key_index, msg, hashlib.sha256,
+        key_index,
+        normalize(plaintext).encode("utf-8"),
+        hashlib.sha256,
     ).digest()
     return digest[:BLIND_INDEX_LENGTH]

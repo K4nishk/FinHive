@@ -17,15 +17,27 @@ import pytest
 
 asyncpg = pytest.importorskip("asyncpg")
 
-from finhive.db.blind_index import compute_blind_index  # noqa: E402
-from finhive.db.encryption import KEY_LENGTH, decrypt_field, encrypt_field  # noqa: E402
+from finhive.db.blind_index import (  # noqa: E402
+    compute_blind_index,
+    derive_key_index,
+)
+from finhive.db.encryption import (  # noqa: E402
+    KEY_LENGTH,
+    decrypt_field,
+    encrypt_field,
+)
+from finhive.db.keys import derive_key_data  # noqa: E402
 from finhive.db.migrations import apply_pending  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
 _DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
-_KEY = b"\x04" * KEY_LENGTH
+_MIGRATIONS_DIR = (
+    Path(__file__).resolve().parents[2] / "migrations"
+)
+_MASTER = b"\x04" * KEY_LENGTH
+_KEY_DATA = derive_key_data(_MASTER)
+_KEY_INDEX = derive_key_index(_MASTER)
 
 _TABLES = [
     "report_records", "reports", "report_meta",
@@ -58,13 +70,22 @@ async def _insert_loan(
         """,
         org_id,
         reference_id,
-        encrypt_field(borrower_name, _KEY),
-        compute_blind_index(borrower_name, _KEY, column="borrower_name"),
-        encrypt_field(borrower_group, _KEY),
-        compute_blind_index(borrower_group, _KEY, column="borrower_group"),
-        encrypt_field(depositor_name, _KEY),
-        compute_blind_index(depositor_name, _KEY, column="depositor_name"),
-        encrypt_field("150000.00", _KEY),
+        encrypt_field(borrower_name, _KEY_DATA),
+        compute_blind_index(
+            borrower_name, _KEY_INDEX,
+            column="borrower_name",
+        ),
+        encrypt_field(borrower_group, _KEY_DATA),
+        compute_blind_index(
+            borrower_group, _KEY_INDEX,
+            column="borrower_group",
+        ),
+        encrypt_field(depositor_name, _KEY_DATA),
+        compute_blind_index(
+            depositor_name, _KEY_INDEX,
+            column="depositor_name",
+        ),
+        encrypt_field("150000.00", _KEY_DATA),
         "2026-01-01",
         "Active",
     )
@@ -100,7 +121,7 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
             # A5.8 -- exact-match filtering: a differently-cased/padded query
             # still finds every row MVP1 would.
             query_index = compute_blind_index(
-                "  SHARMA TRADERS  ", _KEY, column="borrower_name"
+                "  SHARMA TRADERS  ", _KEY_INDEX, column="borrower_name"
             )
             exact_match_rows = await conn.fetch(
                 "SELECT reference_id"
@@ -127,7 +148,7 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
                 " WHERE borrower_name_bidx = $1"
                 " LIMIT 1",
                 compute_blind_index(
-                    "Sharma Traders", _KEY,
+                    "Sharma Traders", _KEY_INDEX,
                     column="borrower_name",
                 ),
             )
@@ -139,13 +160,14 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
                 ],
                 "distinct_names": sorted(
                     decrypt_field(
-                        r["borrower_name_ct"], _KEY,
+                        r["borrower_name_ct"],
+                        _KEY_DATA,
                     )
                     for r in distinct_rows
                 ),
                 "auto_group": decrypt_field(
                     group_row["borrower_group_ct"],
-                    _KEY,
+                    _KEY_DATA,
                 ),
             }
         finally:

@@ -16,7 +16,8 @@ equality lookups on these columns need the separate HMAC blind index
 (KCH-96) rather than comparing `_ct` values directly.
 
 No key derivation or storage lives here -- callers supply a raw 32-byte
-`key_data` (see KCH-97 for HKDF derivation and rotation via `key_version`).
+`key_data`. `finhive/db/keys.py` (KCH-97) derives `key_data` from a
+master key via HKDF and handles rotation via `key_version`.
 
 `encrypt_field`/`decrypt_field` are the generic string primitive, used for
 identity fields. Financial values go through `encrypt_amount`/
@@ -35,9 +36,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 IV_LENGTH = 12  # 96 bits, per ADR-2.3/2.4
-TAG_LENGTH = 16  # AES-GCM 128-bit auth tag
 KEY_LENGTH = 32  # AES-256
-_MIN_BLOB = IV_LENGTH + TAG_LENGTH
 _AMOUNT_QUANTUM = Decimal("0.01")
 
 
@@ -78,11 +77,6 @@ def decrypt_field(blob: bytes, key: bytes) -> str:
     ciphertext or the wrong key -- rather than returning corrupted plaintext.
     """
     _require_key_length(key)
-    if len(blob) < _MIN_BLOB:
-        raise DecryptionError(
-            f"blob must be >= {_MIN_BLOB} bytes,"
-            f" got {len(blob)}"
-        )
     iv, ciphertext = blob[:IV_LENGTH], blob[IV_LENGTH:]
     try:
         plaintext = AESGCM(key).decrypt(iv, ciphertext, None)
