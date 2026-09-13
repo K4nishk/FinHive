@@ -238,3 +238,22 @@ def test_json_decimal_nested_in_snapshot() -> None:
 
     assert result["before"]["amount"] == "50000.00"
     assert result["after"]["amount"] == "60000.10"
+
+
+def test_json_rejects_float_at_top_level() -> None:
+    with pytest.raises(TypeError, match="float"):
+        encrypt_json({"amount": 150000.0}, _KEY)
+
+
+def test_json_rejects_float_nested_in_dict() -> None:
+    obj = {"before": {"amount": 50000.0}}
+
+    with pytest.raises(TypeError, match=r"float.*\.amount"):
+        encrypt_json(obj, _KEY)
+
+
+def test_json_rejects_float_nested_in_list() -> None:
+    obj = [{"step": 1}, {"cost": 0.5}]
+
+    with pytest.raises(TypeError, match=r"float.*\.cost"):
+        encrypt_json(obj, _KEY)
