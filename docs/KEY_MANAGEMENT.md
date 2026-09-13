@@ -17,8 +17,9 @@ master --HKDF(info="finhive-aes-gcm-key-v1")-->          key_data  (AES-256-GCM)
 master --HKDF(info="finhive-blind-index-hmac-key-v1")--> key_index (HMAC-SHA256)
 ```
 
-Distinct info strings mean `key_data` and `key_index` can never collide or
-be swapped, and deriving both directly from the master rather than chaining
+Distinct info strings give domain separation -- the two derived keys are
+computationally independent, and callers must pass each to the correct
+function. Deriving both directly from the master rather than chaining
 one through the other means exposure of `key_data` -- which happens on
 every encrypt/decrypt call, far more often than the master itself is
 touched -- never also reveals `key_index` (ADR-2.3: "Never the same key for
