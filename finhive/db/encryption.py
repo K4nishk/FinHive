@@ -29,8 +29,10 @@ ciphertext for what is, financially, the same value.
 
 from __future__ import annotations
 
+import json
 import os
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -104,3 +106,65 @@ def encrypt_amount(value: Decimal, key: bytes) -> bytes:
 def decrypt_amount(blob: bytes, key: bytes) -> Decimal:
     """Decrypt a blob produced by `encrypt_amount` back into a `Decimal`."""
     return Decimal(decrypt_field(blob, key))
+
+
+def _decimal_default(o: object) -> str:
+    if isinstance(o, Decimal):
+        return str(
+            o.quantize(
+                _AMOUNT_QUANTUM, rounding=ROUND_HALF_UP,
+            )
+        )
+    raise TypeError(
+        f"Object of type {type(o).__name__}"
+        f" is not JSON serializable"
+    )
+
+
+def _reject_floats(obj: Any, path: str = "$") -> None:
+    """Walk a structure and reject ``float`` before it reaches
+    ``json.dumps``, where it would silently bypass ``Decimal``
+    quantization.
+    """
+    if isinstance(obj, float):
+        raise TypeError(
+            f"float at {path}: use Decimal"
+        )
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _reject_floats(v, f"{path}.{k}")
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            _reject_floats(v, f"{path}[{i}]")
+
+
+def encrypt_json(obj: Any, key: bytes) -> bytes:
+    """Encrypt an arbitrary JSON-serializable value.
+
+    Serializes to compact JSON (keys sorted for deterministic
+    ordering) then encrypts the UTF-8 bytes with AES-256-GCM.
+    Used for JSONB blobs whose shape varies across rows --
+    ``proposed_mutations.before_state``/``.after_state`` and
+    ``agent_turns.react_trace`` -- where per-field encryption
+    is impractical (KCH-98, ADR-2.4).
+
+    ``Decimal`` values are quantized to two decimal places
+    with ROUND_HALF_UP before serialization, matching the
+    canonical representation ``encrypt_amount`` uses.
+
+    ``float`` values are rejected outright -- the project
+    rule is Decimal-only for money.
+    """
+    _reject_floats(obj)
+    payload = json.dumps(
+        obj,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=_decimal_default,
+    )
+    return encrypt_field(payload, key)
+
+
+def decrypt_json(blob: bytes, key: bytes) -> Any:
+    """Decrypt a blob produced by `encrypt_json`."""
+    return json.loads(decrypt_field(blob, key))
