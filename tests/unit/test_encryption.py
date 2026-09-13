@@ -207,3 +207,34 @@ def test_json_wrong_key_fails_auth_tag() -> None:
 
     with pytest.raises(DecryptionError):
         decrypt_json(blob, _OTHER_KEY)
+
+
+def test_json_serializes_decimal_amounts() -> None:
+    obj = {
+        "amount": Decimal("150000.005"),
+        "borrower": "Sharma",
+    }
+    blob = encrypt_json(obj, _KEY)
+    result = decrypt_json(blob, _KEY)
+
+    assert result["amount"] == "150000.01"
+    assert result["borrower"] == "Sharma"
+
+
+def test_json_decimal_quantizes_round_half_up() -> None:
+    obj = {"val": Decimal("1.005")}
+    blob = encrypt_json(obj, _KEY)
+
+    assert decrypt_json(blob, _KEY)["val"] == "1.01"
+
+
+def test_json_decimal_nested_in_snapshot() -> None:
+    obj = {
+        "before": {"amount": Decimal("50000")},
+        "after": {"amount": Decimal("60000.10")},
+    }
+    blob = encrypt_json(obj, _KEY)
+    result = decrypt_json(blob, _KEY)
+
+    assert result["before"]["amount"] == "50000.00"
+    assert result["after"]["amount"] == "60000.10"

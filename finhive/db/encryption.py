@@ -108,6 +108,17 @@ def decrypt_amount(blob: bytes, key: bytes) -> Decimal:
     return Decimal(decrypt_field(blob, key))
 
 
+def _decimal_default(o: object) -> str:
+    if isinstance(o, Decimal):
+        return str(
+            o.quantize(_AMOUNT_QUANTUM, rounding=ROUND_HALF_UP)
+        )
+    raise TypeError(
+        f"Object of type {type(o).__name__}"
+        f" is not JSON serializable"
+    )
+
+
 def encrypt_json(obj: Any, key: bytes) -> bytes:
     """Encrypt an arbitrary JSON-serializable value for a `_ct` column.
 
@@ -117,9 +128,16 @@ def encrypt_json(obj: Any, key: bytes) -> bytes:
     -- `proposed_mutations.before_state`/`.after_state` and
     `agent_turns.react_trace` -- where per-field encryption is
     impractical (KCH-98, ADR-2.4).
+
+    ``Decimal`` values are quantized to two decimal places with
+    ROUND_HALF_UP before serialization, matching the canonical
+    representation ``encrypt_amount`` uses.
     """
     payload = json.dumps(
-        obj, separators=(",", ":"), sort_keys=True,
+        obj,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=_decimal_default,
     )
     return encrypt_field(payload, key)
 
