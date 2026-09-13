@@ -142,6 +142,22 @@ reviews:
         Do NOT flag the absence of full-stack or platform-specific tests as a
         bug in this PR.
 
+    - path: "migrations/README.md"
+      instructions: |
+        This is Markdown documentation for the migration runner (KCH-91).
+        PEP 8 line-length rules do not apply to Markdown files. Do NOT
+        flag line length in this file. Focus only on factual accuracy
+        relative to the code it documents.
+
+    - path: "tests/integration/**"
+      instructions: |
+        Integration tests use TEST_DATABASE_URL (never DATABASE_URL) as
+        their isolation boundary — a dedicated test database, not the
+        application database. Tests drop and recreate their own tables
+        in setup and teardown. Per-test schema isolation is a CI
+        infrastructure concern, not a test-code concern — do NOT flag
+        the absence of per-test schemas as a bug in the test itself.
+
     - path: "**/*.sql"
       instructions: |
         No raw SQL string interpolation (f-string, %-format, .format()) —
