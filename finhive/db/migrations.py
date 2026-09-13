@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import os
 import re
@@ -409,12 +410,10 @@ async def apply_pending(
             except Exception as exc:
                 unlock_error = exc
         if not lock_acquired:
-            try:
+            with contextlib.suppress(Exception):
                 await conn.execute(
                     f"SET lock_timeout = '{saved_lock_timeout}'"
                 )
-            except Exception:
-                pass
         if unlock_error is not None:
             raise MigrationError(
                 "failed to release advisory lock:"

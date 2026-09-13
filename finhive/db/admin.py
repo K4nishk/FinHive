@@ -71,7 +71,7 @@ class AdminClient:
         body = json.dumps(
             {"email": email, "password": password, "email_confirm": True}
         ).encode("utf-8")
-        req = urlrequest.Request(
+        req = urlrequest.Request(  # noqa: S310
             self._base_url + _USERS_PATH,
             data=body,
             method="POST",
@@ -102,7 +102,7 @@ class AdminClient:
     def _find_user_by_email(self, email: str) -> str | None:
         target = email.strip().lower()
         for page in range(1, _MAX_PAGES + 1):
-            req = urlrequest.Request(
+            req = urlrequest.Request(  # noqa: S310
                 f"{self._base_url}{_USERS_PATH}"
                 f"?page={page}&per_page={_PER_PAGE}",
                 method="GET",

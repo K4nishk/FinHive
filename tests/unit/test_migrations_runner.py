@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from finhive.db.migrations import (
+    _SELECT_APPLIED,
     AppliedMigration,
     ChecksumMismatchError,
     DuplicateVersionError,
@@ -29,7 +30,6 @@ from finhive.db.migrations import (
     NameMismatchError,
     OutOfOrderMigrationError,
     _run_cli,
-    _SELECT_APPLIED,
     apply_pending,
     checksum_of,
     discover_migrations,
