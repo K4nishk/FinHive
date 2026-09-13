@@ -29,8 +29,10 @@ ciphertext for what is, financially, the same value.
 
 from __future__ import annotations
 
+import json
 import os
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -104,3 +106,24 @@ def encrypt_amount(value: Decimal, key: bytes) -> bytes:
 def decrypt_amount(blob: bytes, key: bytes) -> Decimal:
     """Decrypt a blob produced by `encrypt_amount` back into a `Decimal`."""
     return Decimal(decrypt_field(blob, key))
+
+
+def encrypt_json(obj: Any, key: bytes) -> bytes:
+    """Encrypt an arbitrary JSON-serializable value for a `_ct` column.
+
+    Serializes to compact JSON (no unnecessary whitespace, keys sorted
+    for deterministic ordering) then encrypts the UTF-8 bytes with
+    AES-256-GCM. Used for JSONB blobs whose shape varies across rows
+    -- `proposed_mutations.before_state`/`.after_state` and
+    `agent_turns.react_trace` -- where per-field encryption is
+    impractical (KCH-98, ADR-2.4).
+    """
+    payload = json.dumps(
+        obj, separators=(",", ":"), sort_keys=True,
+    )
+    return encrypt_field(payload, key)
+
+
+def decrypt_json(blob: bytes, key: bytes) -> Any:
+    """Decrypt a blob produced by `encrypt_json`."""
+    return json.loads(decrypt_field(blob, key))

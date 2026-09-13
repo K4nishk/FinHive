@@ -18,8 +18,10 @@ from finhive.db.encryption import (
     DecryptionError,
     decrypt_amount,
     decrypt_field,
+    decrypt_json,
     encrypt_amount,
     encrypt_field,
+    encrypt_json,
 )
 
 _KEY = b"\x01" * KEY_LENGTH
@@ -139,3 +141,69 @@ def test_decrypt_amount_fails_the_auth_tag_on_a_tampered_blob() -> None:
 
     with pytest.raises(DecryptionError):
         decrypt_amount(bytes(blob), _KEY)
+
+
+# ── encrypt_json / decrypt_json (KCH-98) ────────
+
+
+def test_json_round_trip_dict() -> None:
+    obj = {"amount": "150000.00", "borrower": "Sharma"}
+    blob = encrypt_json(obj, _KEY)
+
+    assert decrypt_json(blob, _KEY) == obj
+
+
+def test_json_round_trip_list() -> None:
+    obj = [{"step": 1, "tool": "get_loan"}, {"step": 2}]
+    blob = encrypt_json(obj, _KEY)
+
+    assert decrypt_json(blob, _KEY) == obj
+
+
+def test_json_round_trip_nested() -> None:
+    obj = {
+        "before": {"amount": "50000.00", "status": "active"},
+        "after": {"amount": "60000.00", "status": "extended"},
+    }
+    blob = encrypt_json(obj, _KEY)
+
+    assert decrypt_json(blob, _KEY) == obj
+
+
+def test_json_ciphertext_never_contains_plaintext() -> None:
+    obj = {"borrower": "Sharma Traders", "amount": "150000"}
+    blob = encrypt_json(obj, _KEY)
+
+    assert b"Sharma" not in blob
+    assert b"150000" not in blob
+
+
+def test_json_same_object_encrypts_differently_each_call() -> None:
+    obj = {"amount": "150000.00"}
+    first = encrypt_json(obj, _KEY)
+    second = encrypt_json(obj, _KEY)
+
+    assert first != second
+    assert decrypt_json(first, _KEY) == decrypt_json(second, _KEY)
+
+
+def test_json_key_order_is_deterministic() -> None:
+    a = encrypt_json({"z": 1, "a": 2}, _KEY)
+    b = encrypt_json({"a": 2, "z": 1}, _KEY)
+
+    assert decrypt_json(a, _KEY) == decrypt_json(b, _KEY)
+
+
+def test_json_tampered_blob_fails_auth_tag() -> None:
+    blob = bytearray(encrypt_json({"x": 1}, _KEY))
+    blob[-1] ^= 0xFF
+
+    with pytest.raises(DecryptionError):
+        decrypt_json(bytes(blob), _KEY)
+
+
+def test_json_wrong_key_fails_auth_tag() -> None:
+    blob = encrypt_json({"x": 1}, _KEY)
+
+    with pytest.raises(DecryptionError):
+        decrypt_json(blob, _OTHER_KEY)
