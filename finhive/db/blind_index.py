@@ -43,8 +43,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from finhive.db.encryption import KEY_LENGTH
 
-BLIND_INDEX_LENGTH = 16  # bytes, per ADR-2.3 -- truncated on purpose
-# to blunt frequency analysis by introducing collisions.
+BLIND_INDEX_LENGTH = 16  # 128-bit output, per ADR-2.3
+# Deterministic indexes still reveal equality and frequency.
 
 # Distinct from any other info string this project derives a key
 # with -- key_index cannot be recomputed as key_data.

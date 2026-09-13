@@ -58,9 +58,12 @@ def test_same_plaintext_encrypts_differently_each_call() -> None:
 
 
 def test_blob_starts_with_a_96_bit_iv() -> None:
-    blob = encrypt_field("Sharma Traders", _KEY)
+    plaintext = "Sharma Traders"
+    blob = encrypt_field(plaintext, _KEY)
 
-    assert len(blob) >= IV_LENGTH
+    # iv (12) + ciphertext (same length as plaintext) + tag (16)
+    expected = IV_LENGTH + len(plaintext.encode()) + 16
+    assert len(blob) == expected
 
 
 def test_tampered_ciphertext_fails_auth_tag() -> None:
