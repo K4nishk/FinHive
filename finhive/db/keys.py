@@ -163,7 +163,15 @@ def load_key_ring(env: Mapping[str, str] | None = None) -> KeyRing:
         suffix = name[len(_MASTER_KEY_ENV_PREFIX) :]
         if not suffix.isdigit():
             continue
-        masters[int(suffix)] = _decode_master_key(raw, env_name=name)
+        version = int(suffix)
+        if version in masters:
+            raise ConfigError(
+                f"duplicate master key for key_version"
+                f" {version}: {name}"
+            )
+        masters[version] = _decode_master_key(
+            raw, env_name=name,
+        )
 
     if current_version not in masters:
         raise ConfigError(

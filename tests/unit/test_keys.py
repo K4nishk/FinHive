@@ -145,6 +145,19 @@ def test_load_key_ring_rejects_invalid_base64() -> None:
         )
 
 
+def test_load_key_ring_rejects_duplicate_parsed_versions() -> None:
+    with pytest.raises(ConfigError, match="duplicate"):
+        load_key_ring(
+            {
+                "FINHIVE_KEY_VERSION": "1",
+                "FINHIVE_MASTER_KEY_V1": _b64(_MASTER),
+                "FINHIVE_MASTER_KEY_V01": _b64(
+                    _OTHER_MASTER,
+                ),
+            }
+        )
+
+
 def test_load_key_ring_rejects_a_master_of_the_wrong_length() -> None:
     with pytest.raises(ConfigError, match="32 bytes"):
         load_key_ring(
