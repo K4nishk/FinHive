@@ -82,7 +82,19 @@ DEBT_ONLY="${DEBT_ONLY:-0}"
 # regardless of this number.
 SESSION_BUDGET_USD="${SESSION_BUDGET_USD:-20}"
 BUDGET_THRESHOLD_PCT="${BUDGET_THRESHOLD_PCT:-95}"
-KILL_TMUX_ON_WINDDOWN="${KILL_TMUX_ON_WINDDOWN:-1}"
+# Default OFF. wind_down runs on EVERY exit path, including a normal completed
+# pass, so this used to kill the cockpit after an ordinary run — indistinguishable
+# from a crash, and it deletes the pane scrollback that holds the raw agent
+# output. "No tmux session" meant three different things. Opt in if you want it.
+KILL_TMUX_ON_WINDDOWN="${KILL_TMUX_ON_WINDDOWN:-0}"
+
+# Wall-clock cap on a single agent call. Longest genuinely successful call in
+# ops/logs is 440s by the CLI's own duration_ms, so 1800 is ~4x headroom.
+# (Multi-hour "durations" in the log are dead-socket idle, not work.)
+AGENT_TIMEOUT="${AGENT_TIMEOUT:-1800}"
+# Consecutive no-commit issues before the pass halts. A systemic fault fails
+# every issue identically, so the third is already proof it is not the issue.
+CONSEC_ERR_MAX="${CONSEC_ERR_MAX:-3}"
 TMUX_SESSION="${FINHIVE_TMUX_SESSION:-finhive}"
 export SESSION_BUDGET_USD BUDGET_THRESHOLD_PCT
 
@@ -98,6 +110,22 @@ PR_GATE="${FH_TMP_OPS:-$OPS_DIR}/pr_gate.sh"
 
 say()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 fail() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
+
+# Numeric knobs are all fed to `[ -eq/-ge/-gt ]`. A non-numeric value makes the
+# test ERROR, and an errored test reads as false — silently DISABLING the guard
+# instead of failing loudly. That is exactly the DEBT_N="0\n0" defect fixed in
+# this pass, and these are sourced from ops/.env.local, so the same hazard.
+# AGENT_TIMEOUT=0 is rejected separately: perl's alarm(0) cancels the alarm.
+# (Validated here, after fail() exists — not at the assignments above.)
+for _k in MAX_TURNS STUCK_MAX MAX_ISSUES AGENT_TIMEOUT CONSEC_ERR_MAX CR_MAX_ROUNDS; do
+  eval "_v=\${$_k}"
+  case "$_v" in
+    ''|*[!0-9]*) fail "$_k must be a non-negative integer, got '$_v'"; exit 1 ;;
+  esac
+done
+[ "$AGENT_TIMEOUT"   -gt 0 ] || { fail "AGENT_TIMEOUT must be > 0 (alarm(0) disables the timeout)"; exit 1; }
+[ "$CONSEC_ERR_MAX"  -gt 0 ] || { fail "CONSEC_ERR_MAX must be > 0 (0 disables the circuit breaker)"; exit 1; }
+unset _k _v
 
 # ── preflight ────────────────────────────────────────────────────────────────
 # macOS ships bash 3.2 (2007). Everything below is written to run on it — no
@@ -173,12 +201,26 @@ run_agent() {
   # appended across passes, so grepping it would match a previous run's verdict.
   AGENT_JSON="$jf"
 
-  claude -p --output-format json --model "$model" --max-turns "$MAX_TURNS" \
-         --permission-mode "$PERM_MODE" "$prompt" > "$jf" 2>>"$LOG_DIR/${issue}_agent.log"
+  # MAX_TURNS bounds turns, not wall clock. An unbounded call held the worktree
+  # lock for 3h+ on 2026-09-13 with no output. timeout/gtimeout are not on this
+  # box; perl's alarm is, and needs no dependency.
+  # </dev/null: this runs inside `while read ... done < "$QUEUE_RUN"`, so a child
+  # that reads stdin would swallow the rest of the queue.
+  perl -e 'alarm shift; exec @ARGV' "$AGENT_TIMEOUT" \
+    claude -p --output-format json --model "$model" --max-turns "$MAX_TURNS" \
+         --permission-mode "$PERM_MODE" "$prompt" \
+         </dev/null > "$jf" 2>>"$LOG_DIR/${issue}_agent.log"
+  local crc=$?
 
   local line; line="$(python3 "$USAGE" record "$jf" --issue "$issue" --phase "$phase" --model "$model" 2>/dev/null)"
   AGENT_KIND="$(printf '%s' "$line" | sed -n 's/.*kind=\([a-z]*\).*/\1/p')"
-  [ -n "$AGENT_KIND" ] || AGENT_KIND="ok"
+  # Fail closed. An empty $jf (killed or hung call) and a non-zero rc both used
+  # to fall through to "ok", so a call that produced nothing was committed and
+  # gated as if it had succeeded.
+  if [ -z "$AGENT_KIND" ]; then
+    if [ "$crc" -eq 0 ] && [ -s "$jf" ]; then AGENT_KIND="ok"; else AGENT_KIND="error"; fi
+  fi
+  [ "$crc" -eq 0 ] || fail "  agent call exited $crc (timeout $AGENT_TIMEOUTs)"
 
   # Keep the human-readable answer next to the JSON; the log is what a person reads.
   python3 -c "
@@ -489,7 +531,10 @@ run_gate() {
     # flag, and passing one makes the CLI print usage and exit non-zero, which
     # looks exactly like a clean review to a naive check. --committed scopes the
     # review to what this branch actually added over its base.
-    if ! coderabbit review --committed --base "$gate_base" > "$out" 2>&1; then
+    # </dev/null for the same reason as the claude call: this runs inside
+    # `while read ... done < "$QUEUE_RUN"`, so a child that reads stdin would
+    # consume the rest of the queue and silently truncate the pass.
+    if ! coderabbit review --committed --base "$gate_base" </dev/null > "$out" 2>&1; then
       # A gate that cannot run is not a pass. Say so and let the human look.
       if grep -qiE 'not logged in|auth login|unauthor' "$out"; then
         say "  gate unavailable (not authenticated) — run: coderabbit auth login"
@@ -770,6 +815,24 @@ The loop reads this line to decide whether to open a PR. Without it, work that i
     return 3
   fi
 
+  # An agent that errored — timeout, error_max_turns, dropped connection —
+  # leaves a half-edited worktree. Committing it anyway is how 5 truncated runs
+  # (61 turns each, $15.97) became merged PRs #9/#17/#18/#19. Until now nothing
+  # in this file tested AGENT_KIND for anything but "limit", so every one of
+  # those reached `git add -A` below and then a gate, a push and `gh pr create`.
+  # The wall-clock timeout added above makes this path MORE frequent, not less:
+  # it converts a silent 3h hang into a committed partial tree at the cap.
+  # Discard only the uncommitted tree; any commit the agent made itself stays on
+  # the branch for a human to look at, and returning 1 means no gate, no push,
+  # no PR — and a strike toward the circuit breaker.
+  if [ "$AGENT_KIND" != "ok" ]; then
+    fail "  agent $AGENT_KIND — discarding partial work, no PR will be opened"
+    git checkout -- . 2>/dev/null || true
+    git clean -fdq 2>/dev/null || true
+    if [ "$(git rev-parse HEAD)" = "$before" ]; then drop_empty_branch "$branch"; fi
+    return 1
+  fi
+
   git add -A 2>/dev/null || true
   git commit -q -m "$issue: ${title:-implement}" >/dev/null 2>&1 || true
 
@@ -884,14 +947,18 @@ ENDED=""
 # would try to BUILD an issue it had just fixed. run_issue's open-PR guard would
 # refuse, but only after logging a failure and counting a strike toward parking.
 debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
-DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
+# wc -l, not `grep -c . || echo 0`: on an EMPTY file grep -c prints "0" AND
+# exits 1, so the fallback fires too and DEBT_N becomes the two-line string
+# "0\n0". Every numeric test below then errors and reads as false, which
+# silently skipped both the integrity guard and the whole debt phase.
+DEBT_N="$(wc -l < "$DEBT_RUN" 2>/dev/null | tr -d ' ')"; DEBT_N="${DEBT_N:-0}"
 
 # Two readers, one truth. The stop message below reads $DEBT directly while this
 # phase reads the $DEBT_RUN snapshot, and when the snapshot was silently never
 # written the pass reported "debt still open" for work it had never looked at.
 # A disagreement between them is a bug in this script, not a state to skip past.
 if [ "${DEBT_N:-0}" -eq 0 ] && [ -s "$DEBT" ]; then
-  fail "$DEBT has $(grep -c . "$DEBT" || echo 0) row(s) but the snapshot is empty — debt_issues failed"
+  fail "$DEBT has $(wc -l < "$DEBT" 2>/dev/null | tr -d ' ') row(s) but the snapshot is empty — debt_issues failed"
   fail "  refusing to continue; the debt would be silently skipped"
   exit 1
 fi
@@ -904,6 +971,20 @@ if [ "${DEBT_N:-0}" -gt 0 ]; then
     budget_state; bstate=$?
     if [ "$bstate" -ne 0 ]; then ENDED="budget reached during remediation"; break; fi
     remediate_issue "$issue"; rrc=$?
+    # The debt loop needs its own breaker. The 366-pass spiral of 2026-09-10/11
+    # was entirely phase=mediate — i.e. THIS loop — so a breaker that only
+    # guards the feature loop below would not have stopped it.
+    if [ "$rrc" -eq 0 ]; then
+      DEBT_ERRS=0
+    else
+      DEBT_ERRS=$((${DEBT_ERRS:-0} + 1))
+      if [ "$DEBT_ERRS" -ge "$CONSEC_ERR_MAX" ]; then
+        fail "HALTED — ${DEBT_ERRS} consecutive remediations failed; this is systemic, not $issue."
+        fail "  Run ./ops/preflight.sh before retrying."
+        ENDED="halted after ${DEBT_ERRS} consecutive remediation failures"
+        break
+      fi
+    fi
     case "$rrc" in
       0) SESSION_FIXED="$SESSION_FIXED $issue" ;;
       3) ENDED="platform usage limit mid-remediation"; break ;;
@@ -925,7 +1006,8 @@ fi
 
 # Snapshot the queue only now, so anything remediation just completed is gone.
 next_issues > "$QUEUE_RUN"
-TOTAL="$(grep -c . "$QUEUE_RUN" 2>/dev/null || echo 0)"
+TOTAL="$(wc -l < "$QUEUE_RUN" 2>/dev/null | tr -d ' ')"; TOTAL="${TOTAL:-0}"
+case "$TOTAL" in ''|*[!0-9]*) fail "non-numeric queue count: $TOTAL"; exit 1 ;; esac
 if [ "${TOTAL:-0}" -eq 0 ]; then
   say "Queue exhausted — nothing left to build."
   wind_down "${ENDED:-queue drained}"; exit 0
@@ -952,6 +1034,24 @@ while IFS= read -r issue; do
   fi
 
   run_issue "$issue"; irc=$?
+  # Circuit breaker. On 2026-09-13, 62 consecutive issues failed 401 over 3
+  # hours and each was logged as a routine per-issue ERROR. A systemic fault
+  # (bad auth, revoked key, network) fails EVERY issue identically, so the
+  # second identical failure is already proof it is not issue-specific.
+  if [ "$irc" -eq 0 ] || [ "$irc" -eq 4 ]; then
+    CONSEC_ERRS=0
+  else
+    CONSEC_ERRS=$((${CONSEC_ERRS:-0} + 1))
+    if [ "$CONSEC_ERRS" -ge "$CONSEC_ERR_MAX" ]; then
+      fail ""
+      fail "HALTED — ${CONSEC_ERRS} consecutive issues failed with no commits."
+      fail "  This is a systemic fault, not $issue. Run ./ops/preflight.sh."
+      fail "  Last agent log: $LOG_DIR/${issue}_agent.log"
+      tail -3 "$LOG_DIR/${issue}_agent.log" 2>/dev/null | sed 's/^/    /' | while IFS= read -r l; do fail "$l"; done
+      ENDED="halted after ${CONSEC_ERRS} consecutive failures"
+      break
+    fi
+  fi
   if [ "$irc" -eq 0 ]; then
     built=$((built + 1))
     SESSION_BUILT="$SESSION_BUILT $issue"
@@ -986,3 +1086,13 @@ done < "$QUEUE_RUN"
 say ""
 say "Pass complete — $built issue(s) built, $(pending_issues | grep -c . || true) still pending."
 wind_down "$ENDED"
+
+# Propagate the stop reason. Without this the script fell off the end at exit 0,
+# so run_builder.sh could not tell a hard stop from success and --loop restarted
+# it every 30s — 366 times against a usage limit that was already hit.
+case "$ENDED" in
+  *"usage limit"*|*"halted after"*)
+    say "Exiting 3 — $ENDED (the wrapper must not retry this)"
+    exit 3 ;;
+esac
+exit 0

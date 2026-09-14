@@ -52,7 +52,7 @@ remaining_count() {
   [ -f "$QUEUE" ] || { echo 0; return; }
   comm -23 \
     <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$QUEUE" | cut -f2 | sort) \
-    <(sort "$DONE" 2>/dev/null || true) | grep -c . || echo 0
+    <(sort "$DONE" 2>/dev/null || true) | wc -l | tr -d ' '
 }
 
 # ── --status: read-only, touches nothing ─────────────────────────────────────
@@ -104,6 +104,11 @@ run_pass() {
       return 1
     fi
   fi
+  # Record the holder. An empty lock directory cannot be told apart from an
+  # abandoned one — orchestrator.sh has always done this for .worktree.lock;
+  # this lock never did, so a crashed builder blocked every pass for 6h and
+  # --status could only report existence, never liveness.
+  printf '%s\n' "$$" > "$LOCK/pid" 2>/dev/null || true
 
   # guard 2: never start while an issue is mid-flight
   # "Held" and "abandoned" look identical from outside, and only guard 1 had a
@@ -157,13 +162,30 @@ run_pass() {
   # shellcheck disable=SC1091
   [ -f "$OPS_DIR/.env.local" ] && . "$OPS_DIR/.env.local"
 
+  # Prove the toolchain works before spending anything. Skipping this is what
+  # let 62 issues fail 401 in a row on 2026-09-13.
+  if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+    # FH_LOCK_HOLDER: preflight fails on a held lock, and we are holding it.
+    # Without this the builder can never start — preflight sees .builder.lock,
+    # reads no pid, calls it stale, and exits 1. Standalone runs pass because
+    # no lock is held, which is exactly why this was missed.
+    if ! FH_LOCK_HOLDER=$$ "$OPS_DIR/preflight.sh" >> "$LOG" 2>&1; then
+      say "Preflight FAILED — refusing to start. Run ./ops/preflight.sh to see why."
+      rm -rf "$LOCK" 2>/dev/null
+      return 2
+    fi
+  fi
+
   say "Starting orchestrator — $remaining issue(s) remaining."
   "$OPS_DIR/orchestrator.sh" >> "$LOG" 2>&1
   local rc=$?
   say "Orchestrator exited with $rc."
 
   rm -rf "$LOCK" 2>/dev/null
-  return 0
+  # Propagate. This used to `return 0` unconditionally, so a hard stop was
+  # indistinguishable from success and --loop restarted it every 30s — 366
+  # times against a platform limit that was already hit.
+  return "$rc"
 }
 
 # Safety net: ensure lock cleanup on unexpected exit
@@ -184,7 +206,15 @@ if [ "$LOOP" -eq 1 ]; then
       2) say "Loop: cannot continue. Exiting."
          break
          ;;
+      3) say "Loop: platform usage limit or systemic failure — stopping."
+         break
+         ;;
     esac
+    # A pass that halted on consecutive failures must not be retried in 30s.
+    if tail -40 "$LOG" 2>/dev/null | grep -q "HALTED —"; then
+      say "Loop: builder halted on consecutive failures — stopping."
+      break
+    fi
     remaining="$(remaining_count)"
     if [ "${remaining:-0}" -eq 0 ]; then
       say "Queue exhausted — loop complete."

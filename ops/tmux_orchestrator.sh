@@ -64,7 +64,7 @@ remaining_count() {
   [ -f "$OPS_DIR/queue.tsv" ] || { echo 0; return; }
   comm -23 \
     <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$OPS_DIR/queue.tsv" 2>/dev/null | cut -f2 | sort) \
-    <(sort "$OPS_DIR/.completed_issues" 2>/dev/null) | grep -c . || echo 0
+    <(sort "$OPS_DIR/.completed_issues" 2>/dev/null) | wc -l | tr -d ' '
 }
 
 lock_age() {
@@ -208,7 +208,7 @@ EOF" C-m
 
 $TM split-window -h -t "$SESSION:build" -c "$REPO_DIR" -p 45
 $TM send-keys -t "$SESSION:build.1" \
-  "$SRC clear; touch '$LOG_DIR/builder.log'; tail -f '$LOG_DIR/builder.log'" C-m
+  "$SRC clear; tail -n 50 -F '$LOG_DIR/builder.log'" C-m
 
 # ── window 1: review ──────────────────────────────────────────────
 # The three review surfaces are independent; passing one does not answer the others.

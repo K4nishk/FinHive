@@ -88,8 +88,21 @@ debt_clear KCH-84
 debt_add KCH-84 findings          # the clears above emptied the ledger
 DEBT_RUN="$FIX/.debt.run"
 debt_issues > "$DEBT_RUN" 2>/dev/null || : > "$DEBT_RUN"
-DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
+count_rows() { local n; n="$(wc -l < "$1" 2>/dev/null | tr -d ' ')"; echo "${n:-0}"; }
+DEBT_N="$(count_rows "$DEBT_RUN")"
 assert_eq "the snapshot is written before it is counted" "1" "$DEBT_N"
+
+# The 2026-09-13 regression this suite missed for two sessions. The old line was
+#   DEBT_N="$(grep -c . "$DEBT_RUN" 2>/dev/null || echo 0)"
+# and every case above passes it, because they all count a NON-empty file. On an
+# empty file `grep -c .` prints "0" and exits 1, so `|| echo 0` fires too and the
+# result is the two-line string "0\n0" — which makes every downstream `[ -eq ]`
+# error out and read as false. That silently skipped the debt guard AND the whole
+# debt phase on every clean run. Counting zero is the case that matters.
+: > "$FIX/.debt.empty"
+assert_eq "an empty snapshot counts as exactly 0" "0" "$(count_rows "$FIX/.debt.empty")"
+assert_eq "a zero count survives a numeric test" "ok" \
+  "$([ "$(count_rows "$FIX/.debt.empty")" -eq 0 ] 2>/dev/null && echo ok || echo errored)"
 assert_eq "the snapshot matches the ledger" "$(debt_issues)" "$(cat "$DEBT_RUN")"
 
 contradiction() {  # 1 when the ledger has rows the snapshot does not
