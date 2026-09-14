@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { syncMe } from "./syncMe.ts";
-import type { AuthClient, MeResponse, Session } from "./types.ts";
+import { syncMe } from "./syncMe";
+import type { AuthClient, MeResponse, Session } from "./types";
 
 function makeSession(accessToken: string): Session {
   return {
@@ -46,7 +46,10 @@ test("syncMe: refreshes once and retries on a 401-style failure", async () => {
     return me;
   };
   const authClient: Pick<AuthClient, "refreshSession"> = {
-    refreshSession: async () => ({ data: { session: freshSession }, error: null }),
+    refreshSession: async () => ({
+      data: { session: freshSession },
+      error: null,
+    }),
   };
 
   const result = await syncMe(authClient, fetchMe, staleSession);
@@ -62,7 +65,10 @@ test("syncMe: fails without a second retry when the refreshed session also 401s"
     throw new Error("401");
   };
   const authClient: Pick<AuthClient, "refreshSession"> = {
-    refreshSession: async () => ({ data: { session: stillBadSession }, error: null }),
+    refreshSession: async () => ({
+      data: { session: stillBadSession },
+      error: null,
+    }),
   };
 
   const result = await syncMe(authClient, fetchMe, staleSession);
@@ -76,7 +82,10 @@ test("syncMe: fails when the refresh itself errors", async () => {
     throw new Error("401");
   };
   const authClient: Pick<AuthClient, "refreshSession"> = {
-    refreshSession: async () => ({ data: { session: null }, error: new Error("refresh failed") }),
+    refreshSession: async () => ({
+      data: { session: null },
+      error: new Error("refresh failed"),
+    }),
   };
 
   const result = await syncMe(authClient, fetchMe, staleSession);

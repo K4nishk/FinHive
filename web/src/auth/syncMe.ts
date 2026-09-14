@@ -29,7 +29,12 @@ export async function syncMe(
       return { kind: "failed" };
     }
 
-    const retried = await syncMe(authClient, fetchMe, data.session, attempt + 1);
+    const retried = await syncMe(
+      authClient,
+      fetchMe,
+      data.session,
+      attempt + 1,
+    );
     if (retried.kind !== "loaded") {
       return { kind: "failed" };
     }

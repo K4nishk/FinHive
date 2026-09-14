@@ -23,7 +23,11 @@ export type AuthEvent =
   | { type: "ME_LOAD_FAILED" }
   | { type: "SIGNED_OUT" };
 
-const signedOutState: AuthState = { session: null, me: null, status: "unauthenticated" };
+const signedOutState: AuthState = {
+  session: null,
+  me: null,
+  status: "unauthenticated",
+};
 
 export function authReducer(state: AuthState, event: AuthEvent): AuthState {
   switch (event.type) {

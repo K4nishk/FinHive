@@ -1,7 +1,12 @@
 // Agent-blind (ARD v2.1.0 section 4): must not import from finhive/agent or
 // subscribe to agent state. This component only hides UI; the server's RLS /
 // required_role checks are the actual control (ARD v2.1.0 section 8).
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import { resolveRoleGateDecision, type RoleGateVariant } from "./roleGateLogic";
@@ -15,7 +20,10 @@ export interface RoleGateProps {
   redirectTo?: string;
 }
 
-type DisableableElement = ReactElement<{ disabled?: boolean; "aria-disabled"?: boolean }>;
+type DisableableElement = ReactElement<{
+  disabled?: boolean;
+  "aria-disabled"?: boolean;
+}>;
 
 export function RoleGate({
   allow,
@@ -25,7 +33,12 @@ export function RoleGate({
   redirectTo = "/",
 }: RoleGateProps) {
   const { me } = useAuth();
-  const decision = resolveRoleGateDecision(me?.role, allow, variant, redirectTo);
+  const decision = resolveRoleGateDecision(
+    me?.role,
+    allow,
+    variant,
+    redirectTo,
+  );
 
   switch (decision.kind) {
     case "children":

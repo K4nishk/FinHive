@@ -39,7 +39,11 @@ export interface AuthProviderProps {
   fetchMe?: (accessToken: string) => Promise<MeResponse>;
 }
 
-export function AuthProvider({ authClient, children, fetchMe = defaultFetchMe }: AuthProviderProps) {
+export function AuthProvider({
+  authClient,
+  children,
+  fetchMe = defaultFetchMe,
+}: AuthProviderProps) {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
 
   useEffect(() => {
@@ -95,7 +99,12 @@ export function AuthProvider({ authClient, children, fetchMe = defaultFetchMe }:
   }, [authClient]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session: state.session, me: state.me, status: state.status, signOut }),
+    () => ({
+      session: state.session,
+      me: state.me,
+      status: state.status,
+      signOut,
+    }),
     [state.session, state.me, state.status, signOut],
   );
 

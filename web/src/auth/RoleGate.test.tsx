@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { AuthContext, type AuthContextValue } from "./AuthProvider.tsx";
-import { RoleGate } from "./RoleGate.tsx";
-import type { MeResponse } from "./types.ts";
+import { AuthContext, type AuthContextValue } from "./AuthProvider";
+import { RoleGate } from "./RoleGate";
+import type { MeResponse } from "./types";
 
 function authValue(me: MeResponse | null): AuthContextValue {
   return {
@@ -36,22 +36,24 @@ const viewer: MeResponse = { ...owner, role: "viewer" };
 
 test("RoleGate: an allowed role renders its children", () => {
   const html = renderToStaticMarkup(
-    withAuth(owner, (
+    withAuth(
+      owner,
       <RoleGate allow={["owner"]}>
         <button>Delete loan</button>
-      </RoleGate>
-    )),
+      </RoleGate>,
+    ),
   );
   assert.match(html, /Delete loan/);
 });
 
 test("RoleGate hide (default): a disallowed role sees the fallback, not the control", () => {
   const html = renderToStaticMarkup(
-    withAuth(viewer, (
+    withAuth(
+      viewer,
       <RoleGate allow={["owner"]} fallback={<span>Not available</span>}>
         <button>Delete loan</button>
-      </RoleGate>
-    )),
+      </RoleGate>,
+    ),
   );
   assert.doesNotMatch(html, /Delete loan/);
   assert.match(html, /Not available/);
@@ -59,22 +61,24 @@ test("RoleGate hide (default): a disallowed role sees the fallback, not the cont
 
 test("RoleGate hide: with no fallback, a disallowed role renders nothing", () => {
   const html = renderToStaticMarkup(
-    withAuth(viewer, (
+    withAuth(
+      viewer,
       <RoleGate allow={["owner"]}>
         <button>Delete loan</button>
-      </RoleGate>
-    )),
+      </RoleGate>,
+    ),
   );
   assert.equal(html, "");
 });
 
 test("RoleGate disable: a disallowed role gets a disabled control, not a hidden one", () => {
   const html = renderToStaticMarkup(
-    withAuth(viewer, (
+    withAuth(
+      viewer,
       <RoleGate allow={["owner"]} variant="disable">
         <button>Delete loan</button>
-      </RoleGate>
-    )),
+      </RoleGate>,
+    ),
   );
   assert.match(html, /Delete loan/);
   assert.match(html, /disabled=""/);
@@ -82,11 +86,12 @@ test("RoleGate disable: a disallowed role gets a disabled control, not a hidden 
 
 test("RoleGate: an unresolved (null) me is treated as disallowed", () => {
   const html = renderToStaticMarkup(
-    withAuth(null, (
+    withAuth(
+      null,
       <RoleGate allow={["owner"]} fallback={<span>Not available</span>}>
         <button>Delete loan</button>
-      </RoleGate>
-    )),
+      </RoleGate>,
+    ),
   );
   assert.match(html, /Not available/);
 });
