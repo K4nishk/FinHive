@@ -372,7 +372,7 @@ regate() {
   # dropped at 2m00s. Retry the transport failures; leave the rest alone.
   local attempt=1 rc=0 kind
   while :; do
-    ( cd "$wt" && coderabbit review --committed --base "$rbase" ) > "$out" 2>&1
+    ( cd "$wt" && coderabbit review --committed --base "$rbase" ) </dev/null > "$out" 2>&1
     rc=$?
     kind="$(round_failure_kind "$out")"
     [ "$kind" != "transport" ] && break
