@@ -97,8 +97,11 @@ FULL_TOOLS = [
 
 # (label, prompt, tool that SHOULD be called first, must NOT be called)
 STAGE2_CASES = [
+    # STRICT: resolve_entity must come FIRST. Calling query_loans directly means
+    # filtering on the raw string "sharma group", which is not a stored value —
+    # it matches nothing and the model reports "no loans found" confidently (§5.2).
     ("entity-first", "How many loans are overdue for the sharma group?",
-     {"resolve_entity", "query_loans"}, {"extend_loan", "create_loan"}),
+     {"resolve_entity"}, {"extend_loan", "create_loan"}),
     ("date-relative", "What is due this quarter?",
      {"get_current_context", "query_loans"}, {"extend_loan", "create_loan"}),
     ("no-arithmetic", "What is the interest on loan 2026_03_004 at 12% for 3 months?",
@@ -161,6 +164,23 @@ def bad_args(resp: dict) -> list[str]:
     except (KeyError, IndexError):
         pass
     return out
+
+
+def _args_summary(resp: dict) -> str:
+    """name(arg=value, ...) per tool call — an unresolved raw slug is only
+    visible here, never in the tool name alone."""
+    out = []
+    try:
+        for c in resp["choices"][0]["message"].get("tool_calls") or []:
+            try:
+                a = json.loads(c["function"]["arguments"] or "{}")
+                inner = ", ".join(f"{k}={v!r}" for k, v in a.items())
+            except json.JSONDecodeError:
+                inner = "<unparseable>"
+            out.append(f"{c['function']['name']}({inner})")
+    except (KeyError, IndexError):
+        pass
+    return " + ".join(out)
 
 
 def cost_of(resp: dict) -> float:
@@ -234,9 +254,10 @@ def main() -> int:
             elif broken:
                 mark, note = f"{R}BADARG{RST}", f"unparseable arguments: {', '.join(broken)}"
             elif hit:
-                mark, note = f"{G}OK    {RST}", ", ".join(sorted(names))
+                mark, note = f"{G}OK    {RST}", _args_summary(r)
             else:
-                mark, note = f"{Y}MISS  {RST}", f"expected one of {sorted(expect)}, got {sorted(names) or 'prose'}"
+                got = _args_summary(r) or "prose"
+                mark, note = f"{Y}MISS  {RST}", f"expected {sorted(expect)}, got {got}"
             print(f"    {mark} {label:<14} {note}")
 
     print("─" * 66)

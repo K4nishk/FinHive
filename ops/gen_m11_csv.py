@@ -319,8 +319,14 @@ ROWS = [
      "emits parameterised SQL instead of calling tools), which needs its own spike.\n\n"
      "On a free tier the cost column measures QUOTA, not money. Do not report "
      "$0.0000 as if spend were being controlled.\n\n"
-     "Acceptance: one model is named in settings.json with evidence it passes all "
-     "three stage-2 cases, or D-4a is escalated with the failing output attached.",
+     "RESULT 2026-09-22: mistral-small-24b returned 404 'No endpoints found that "
+     "support tool use' — D-4a's premise confirmed. llama-3.3-70b and qwen-2.5-72b "
+     "both emit tool calls and neither invoked a PROPOSE tool unprompted. Qwen "
+     "chosen: it called get_current_context on a date-relative query where llama "
+     "substituted status='overdue'. Total spend $0.0044.\n\n"
+     "Acceptance: settings.json names the model, and the two measured failure "
+     "modes (unresolved slug; rate unit) are encoded as structural guards in the "
+     "tool-model and READ-tool issues — not left as prompt wording.",
      "1", "2", "mvp1.1,llm,spike"),
 
     ("agent", "Define tool argument models and the READ/PROPOSE registry",
@@ -328,6 +334,15 @@ ROWS = [
      "validating what comes back. Registry is a dict[str, Callable] with a mode "
      "field; PROPOSE tools have no write path to loans at all (ARB D-2, D-6).\n\n"
      "Every model sets ConfigDict(extra='forbid').\n\n"
+     "MEASURED 2026-09-22 (D-4a spike, ops/probe_openrouter.py): given \"at 12%\", "
+     "BOTH llama-3.3-70b and qwen-2.5-72b emitted rate=0.12 — the ML convention, "
+     "not FinHive's. InterestCalculator divides by 1200 (12x100), so rate MUST be "
+     "12. Passing 0.12 understates interest 100x: INR 4,500 becomes INR 45, "
+     "silently, and the model narrates the wrong figure with confidence.\n\n"
+     "So EVERY numeric field carries its unit in the description AND a validating "
+     "range: rate is a percentage 0-100 (ge=0, le=100), not a fraction; amount is "
+     "whole INR rupees; months and days are integers. A field whose unit is only "
+     "implied WILL be guessed wrong.\n\n"
      "TRAP, reproduced on this repo: Pydantic defaults to extra='ignore'. A tool "
      "model given giving_date SILENTLY DROPS it and the call succeeds. CLAUDE.md says "
      "giving_date is never used in interest or time calculations — with the default "
@@ -382,6 +397,14 @@ ROWS = [
      "days total, and carry a 'no due date agreed' flag.\n\n"
      "TRAP 2: derive status via StatusEngine at read; the column is stale after a "
      "batch approve.\n\n"
+     "TRAP 3, MEASURED 2026-09-22 (D-4a spike): both candidate models called "
+     "query_loans(borrower_group='sharma group') DIRECTLY — the raw, unresolved "
+     "string — despite resolve_entity's description saying 'Call this BEFORE "
+     "querying by name'. Prompt instruction does NOT hold. query_loans must "
+     "REJECT a borrower_group or depositor_group that is not a known slug and "
+     "return an error telling the model to resolve first. Structural, not "
+     "prompted — otherwise the filter matches nothing and the agent reports 'no "
+     "loans found' with complete confidence (§5.2).\n\n"
      "Acceptance: an undated fixture loan never contributes to a day-weighted overdue "
      "total, and query_loans returns no borrower names.",
      "2", "3", "mvp1.1,tools"),

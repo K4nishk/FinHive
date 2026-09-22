@@ -206,7 +206,7 @@ A rate column leaks the *distribution of terms* across the book — that some lo
 | D-15 | Encryption at rest mandatory in MVP1.1 | ✅ **APPROVED** |
 | D-8 | M1.1 binds D-2, D-12, OQ-01; batch proposals; null due_date stays Overdue; M1.1 ahead of M1a/M1b/M2/M3 | ✅ **APPROVED** |
 | D-12 | Amounts must not cross an LLM endpoint in cleartext | ✅ **CONFIRMED** |
-| D-4a | OpenAI-compatible client — **amended**, see below | ✅ **APPROVED, MODIFIED** |
+| D-4a | OpenAI-compatible client via OpenRouter; model **qwen/qwen-2.5-72b-instruct** | ✅ **CLOSED 2026-09-22** |
 | D-16 | Local Docker Postgres — **approved, DEFERRED to M1a**; SQLite carries the PoC | ✅ **APPROVED, DEFERRED** |
 | OQ-01 | Cross-border narrowed to inference — **plus a new proposal**, see D-17 | ✅ **AMENDED** |
 | D-17 | LLM emits parameterised SQL instead of calling tools | ⏳ **SPIKE FIRST** |
@@ -243,6 +243,42 @@ sit behind D-2. The probe flags this as UNSAFE.
 
 If nothing passes, do not force it — the fallback is D-17, which needs its own
 spike.
+
+**GATE CLOSED 2026-09-22 — `qwen/qwen-2.5-72b-instruct`.** Total spend $0.0044.
+
+| Model | Tool call | Stage 2 |
+|---|---|---|
+| `qwen/qwen-2.5-72b-instruct` | yes | **chosen** — called `get_current_context` on a date-relative query |
+| `meta-llama/llama-3.3-70b-instruct` | yes | substituted `status='overdue'` for "this quarter" |
+| `deepseek/deepseek-chat` | yes | returned prose on entity resolution |
+| `mistralai/mistral-small-24b` | **404 — no tool support** | D-4a's premise, confirmed |
+
+No model called a PROPOSE tool unprompted, so none is disqualified under D-2.
+
+**Three findings, all of which would have shipped silently.** They are why the
+spike moved ahead of the tool schemas rather than sitting at row 31.
+
+1. **Unresolved slugs.** Both finalists called
+   `query_loans(borrower_group='sharma group')` — the raw string — although
+   `resolve_entity`'s description says *"Call this BEFORE querying by name"*.
+   **Prompt instruction does not hold.** `query_loans` must structurally reject a
+   group that is not a known slug. Otherwise the filter matches nothing and the
+   agent reports "no loans found" with complete confidence (§5.2).
+
+2. **Units — a 100× financial error.** Asked for "12%", both emitted `rate=0.12`,
+   the ML convention. `InterestCalculator` divides by 1200 (12×100), so rate must
+   be `12`. On a ₹150,000 loan over 3 months that turns **₹4,500 into ₹45**, and
+   the model narrates the wrong figure confidently. Every numeric tool field now
+   carries its unit in the description *and* a validating range.
+
+3. **Semantic substitution.** Llama answered "what is due this quarter" with
+   `status='overdue'` — a different question. Only visible because the probe
+   prints arguments; the tool *name* alone looked correct.
+
+The probe's own first version scored finding 1 as a PASS by accepting either
+`resolve_entity` or `query_loans`. A test that accepts the failure it exists to
+catch is worse than no test. Tightened to require `resolve_entity` and to print
+arguments, which is what surfaced findings 2 and 3.
 
 **Cost accounting on a free tier measures QUOTA, not money.** Reporting `$0.0000`
 as if spend were being controlled is the failure mode; the observability plane

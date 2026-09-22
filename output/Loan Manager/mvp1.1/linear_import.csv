@@ -135,10 +135,16 @@ IF NOTHING PASSES: do not force it. Escalate — the fallback is D-17 (model emi
 
 On a free tier the cost column measures QUOTA, not money. Do not report $0.0000 as if spend were being controlled.
 
-Acceptance: one model is named in settings.json with evidence it passes all three stage-2 cases, or D-4a is escalated with the failing output attached.",1,2,"product:finhive,mvp1.1,llm,spike",Backlog
+RESULT 2026-09-22: mistral-small-24b returned 404 'No endpoints found that support tool use' — D-4a's premise confirmed. llama-3.3-70b and qwen-2.5-72b both emit tool calls and neither invoked a PROPOSE tool unprompted. Qwen chosen: it called get_current_context on a date-relative query where llama substituted status='overdue'. Total spend $0.0044.
+
+Acceptance: settings.json names the model, and the two measured failure modes (unresolved slug; rate unit) are encoded as structural guards in the tool-model and READ-tool issues — not left as prompt wording.",1,2,"product:finhive,mvp1.1,llm,spike",Backlog
 FinHive M1.1 · Ask FinHive,agent,Define tool argument models and the READ/PROPOSE registry,"One Pydantic model per tool, generating the JSON Schema sent to the model and validating what comes back. Registry is a dict[str, Callable] with a mode field; PROPOSE tools have no write path to loans at all (ARB D-2, D-6).
 
 Every model sets ConfigDict(extra='forbid').
+
+MEASURED 2026-09-22 (D-4a spike, ops/probe_openrouter.py): given ""at 12%"", BOTH llama-3.3-70b and qwen-2.5-72b emitted rate=0.12 — the ML convention, not FinHive's. InterestCalculator divides by 1200 (12x100), so rate MUST be 12. Passing 0.12 understates interest 100x: INR 4,500 becomes INR 45, silently, and the model narrates the wrong figure with confidence.
+
+So EVERY numeric field carries its unit in the description AND a validating range: rate is a percentage 0-100 (ge=0, le=100), not a fraction; amount is whole INR rupees; months and days are integers. A field whose unit is only implied WILL be guessed wrong.
 
 TRAP, reproduced on this repo: Pydantic defaults to extra='ignore'. A tool model given giving_date SILENTLY DROPS it and the call succeeds. CLAUDE.md says giving_date is never used in interest or time calculations — with the default config that rule is unenforceable at the tool boundary.
 
@@ -169,6 +175,8 @@ total_amount decrypts and sums in the app layer — amount_ct cannot be SUM()ed.
 TRAP 1: null due_date means Overdue (status_engine.py:22-23, REQUIREMENTS.md:162, CLAUDE.md authoritative). Do NOT change the rule. Undated loans return days_overdue=None, count in the overdue COUNT, never sum into a days total, and carry a 'no due date agreed' flag.
 
 TRAP 2: derive status via StatusEngine at read; the column is stale after a batch approve.
+
+TRAP 3, MEASURED 2026-09-22 (D-4a spike): both candidate models called query_loans(borrower_group='sharma group') DIRECTLY — the raw, unresolved string — despite resolve_entity's description saying 'Call this BEFORE querying by name'. Prompt instruction does NOT hold. query_loans must REJECT a borrower_group or depositor_group that is not a known slug and return an error telling the model to resolve first. Structural, not prompted — otherwise the filter matches nothing and the agent reports 'no loans found' with complete confidence (§5.2).
 
 Acceptance: an undated fixture loan never contributes to a day-weighted overdue total, and query_loans returns no borrower names.",2,3,"product:finhive,mvp1.1,tools",Backlog
 FinHive M1.1 · Ask FinHive,security,Tokenise names and amounts on both ingress and egress,"ARB Decision 12 requires amounts tokenised to the LLM: Rs 45,000 -> AMOUNT_1, rehydrated on the way out, exactly as names work. OQ-01 (as amended) records that data at rest is now local, so Groq INFERENCE is the remaining cross-border path — which makes tokenisation the control, not a nicety.
