@@ -521,7 +521,12 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
   2026-09-22: SQLite now, Postgres deferred to M1a. org_id retrofit accepted.**
 - **D-4a** — provider is OpenRouter; the winning MODEL is still unknown until
   `ops/probe_openrouter.py` runs. That probe is the gate.
-- **D-17** — spike before any commitment; see the comparison above.
+- **D-17** — **sequenced 2026-09-22: spike AFTER the tool path works**, against
+  the same fixture questions, so there is a measured baseline to compare rather
+  than two unproven designs. The D-4a result sharpens the question: both
+  finalists guessed `rate=0.12` inside a *typed* schema. Free-form SQL has no
+  schema to validate against at all, and encrypted columns cannot be filtered in
+  SQL under any circumstances. D-17 must clear a higher bar than it looked.
 - ~~D-8 — operator sign-off on the queue reorder.~~ **Approved 2026-09-22.**
   > **D-8's original second clause is superseded by D-15.** It read: "binding
   > Decision 12 to a desktop app that has no encryption at rest — the tokeniser

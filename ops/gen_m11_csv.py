@@ -40,6 +40,17 @@ OUT = Path(__file__).resolve().parents[1] / "output/Loan Manager/mvp1.1/linear_i
 
 ABSORBED = ["KCH-99", "KCH-100", "KCH-105", "KCH-114"]
 
+# D-16 DEFERRED 2026-09-22: SQLite carries the PoC. These four are Postgres-only
+# and move to M1a. Already created as KCH-223/224/225/228 — RE-MILESTONE them in
+# Linear, do not close. The Postgres work is postponed, never cancelled, and
+# migrations 0001-0005 remain the target schema for that milestone.
+DEFERRED_TO_M1A = [
+    "Stand up Postgres in Docker with the pgvector image",
+    "Port the SQLAlchemy models to the Postgres 0002 schema",
+    "Apply migrations 0001-0005 with the existing runner and drop Alembic",
+    "Seed one org and owner without Supabase",
+]
+
 # (workstream, title, description, priority, estimate, labels)
 ROWS = [
     # ---------------- Phase 0 · Postgres data layer ----------------
@@ -66,68 +77,6 @@ ROWS = [
      "no governing doc still claims MVP1.1 stores plaintext.",
      "2", "2", "governance,mvp1.1"),
 
-    ("ops", "Stand up Postgres in Docker with the pgvector image",
-     "Replace the Supabase CLI assumption with a local container.\n\n"
-     "docker-compose.yml: pgvector/pgvector:pg16, named volume, healthcheck, port "
-     "mapped. The extension is AVAILABLE but NOT enabled — CREATE EXTENSION vector "
-     "becomes a one-line migration if retrieval ever needs it. Choosing the image "
-     "now makes that free; choosing stock postgres makes it a dump/restore.\n\n"
-     "DATABASE_URL in ops/.env.local, gitignored.\n\n"
-     "TRAP: run_local_mac.sh:146-159 and run_local_windows.bat currently expect the "
-     "Supabase CLI on port 54322 and will silently start or target the WRONG "
-     "database. Update both, and make the failure mode loud if the container is not "
-     "running.\n\n"
-     "R8 PROMISES A ONE-COMMAND LAUNCH (\"a simple .bat ... prepares the virtual env, "
-     "installs requirements and starts up the app\"). Docker plus a mandatory "
-     "FINHIVE_MASTER_KEY breaks that promise unless the launcher owns it. Both "
-     "scripts must bring the container up, wait for the healthcheck, source the "
-     "key, apply migrations, and fail loudly with the fix when Docker is not "
-     "running or the key is absent.\n\n"
-     "Acceptance: `docker compose up -d` gives a reachable Postgres 16 with the "
-     "vector extension available; run_local_mac.sh and run_local_windows.bat each "
-     "start the app from a cold machine in ONE command with no Supabase CLI "
-     "installed; and each prints an actionable error if Docker is down.",
-     "2", "2", "mvp1.1,infra"),
-
-    ("data", "Port the SQLAlchemy models to the Postgres 0002 schema",
-     "migrations/0002_port_mvp1_tables.sql already defines the Postgres shape and it "
-     "matches loan_manager/infrastructure/database/models.py column for column, with "
-     "two differences that must be absorbed:\n"
-     "- id is BIGINT GENERATED ALWAYS AS IDENTITY, not sqlite INTEGER autoincrement\n"
-     "- org_id UUID NOT NULL REFERENCES orgs(id), and UNIQUE is (org_id, "
-     "reference_id) rather than reference_id alone\n\n"
-     "Every repository query becomes org-scoped. This is not optional scaffolding "
-     "for a single user — it is what makes the MVP2 port and RLS possible later, and "
-     "retrofitting org_id after data exists is far worse.\n\n"
-     "Keep the Loan domain entity unchanged; map at the repository boundary "
-     "(CLAUDE.md: repository methods return domain entities, never ORM models).\n\n"
-     "TRAP: TIMESTAMPTZ vs SQLite's naive DATETIME. Use timezone-aware datetimes "
-     "throughout and never datetime.utcnow() (deprecated, and it returns naive).\n\n"
-     "Acceptance: the model layer round-trips a Loan against a real Postgres with "
-     "org_id populated, and the domain entity is byte-identical to the SQLite path.",
-     "2", "3", "mvp1.1,migration"),
-
-    ("data", "Apply migrations 0001-0005 with the existing runner and drop Alembic",
-     "finhive/db/migrations.py is a forward-only runner that already applies the "
-     "numbered SQL files and records what ran. It takes a duck-typed connection "
-     "rather than importing asyncpg. It is ASYNC: the Protocol declares `async def "
-     "execute` / `async def fetch`, `apply_pending` is `async def`, and the inserts "
-     "use asyncpg `$1,$2,$3` placeholders a sync psycopg connection will not bind. "
-     "So this issue MUST bridge it from the sync desktop startup path — a short "
-     "asyncio.run() around apply_pending with an asyncpg connection used for "
-     "migrations only. The app itself stays sync SQLAlchemy (D-1a).\n\n"
-     "Alembic is declared in requirements.txt but was never wired (no alembic.ini, "
-     "no env.py, no versions/). Do not wire it now. Two migration mechanisms in one "
-     "repo is two ways to get schema state wrong — Ponytail rung 2, reuse what "
-     "exists and delete the unused dependency.\n\n"
-     "Scope: drive 0001-0005 from the desktop app's startup path (or a make target), "
-     "verify the recorded state table, and remove alembic from requirements.txt.\n\n"
-     "Depends on: Docker Postgres, model port.\n"
-     "BLOCKS: anything that adds a column.\n\n"
-     "Acceptance: a fresh container reaches schema 0005 in one command, re-running "
-     "is a no-op, and grep shows no alembic import anywhere.",
-     "2", "2", "mvp1.1,migration"),
-
     ("security", "Load the master key from the environment behind keys.py",
      "finhive/db/keys.py already derives per-field data keys from a master key via "
      "HKDF and supports rotation by key_version. It needs a source for the master "
@@ -147,99 +96,99 @@ ROWS = [
      "2", "2", "mvp1.1,encryption"),
 
     ("security", "Encrypt and decrypt NPI at the repository boundary",
-     "Migration 0003 encrypts NINE columns as `_ct BYTEA` plus key_version, across "
-     "loans, loan_history AND report_records: borrower_name, borrower_group, "
-     "depositor_name, depositor_group, amount, and the DERIVED financial values "
-     "interest_amount, commission_amount, tds_amount, chq_amount. "
-     "finhive/db/encryption.py already provides encrypt_field/decrypt_field and "
-     "encrypt_amount/decrypt_amount (Decimal, ROUND_HALF_UP, two places) and imports "
-     "nothing Postgres-specific.\n\n"
-     "Apply it at the repository boundary ONLY. The domain entity and every use "
-     "case keep working in plaintext; ciphertext exists between the repository and "
-     "the database and nowhere else. THREE repositories touch encrypted tables and "
-     "all three must be done together: sqlalchemy_loan_repo, sqlalchemy_history_repo "
-     "(borrower_name, amount) and sqlalchemy_report_repo (borrower_name, amount, "
-     "interest_amount, commission_amount, tds_amount, chq_amount). 0003 makes those "
-     "columns NOT NULL, so doing only the loan repo breaks every report and archive "
-     "write — or silently stores NPI in clear.\n\n"
-     "TRAP 1: encrypt_amount canonicalises to two decimal places before encrypting, "
-     "so equal amounts always produce the same plaintext. MVP1 amounts are whole "
-     "rupees as int — convert deliberately, and do not reintroduce float anywhere on "
-     "this path.\n\n"
-     "TRAP 2: a random IV per call means two encryptions of the same value differ. "
-     "Never compare, filter, GROUP BY or ORDER BY a `_ct` column. Exact-match "
-     "filtering is the blind index; ordering and totals are app-layer.\n\n"
+     "D-15: NPI is encrypted at rest, and under D-16's deferral that happens on "
+     "SQLite. finhive/db/encryption.py already provides encrypt_field/decrypt_field "
+     "and encrypt_amount/decrypt_amount (Decimal, ROUND_HALF_UP, two places) and "
+     "imports nothing Postgres-specific — only `cryptography`.\n\n"
+     "NO MIGRATION MACHINERY IS NEEDED. session.py:23 builds the schema with "
+     "Base.metadata.create_all and test-data-first starts from an empty database, "
+     "so adding the `_ct` columns to models.py IS the job. Alembic stays unwired; "
+     "finhive/db/migrations.py stays unused (it is asyncpg-only).\n\n"
+     "NINE columns, matching what migration 0003 will encrypt when Postgres lands, "
+     "so the two schemas converge rather than diverge: borrower_name, "
+     "borrower_group, depositor_name, depositor_group, amount on loans and "
+     "loan_history; plus the DERIVED values interest_amount, commission_amount, "
+     "tds_amount, chq_amount on report_records. Each becomes `<col>_ct` (LargeBinary) "
+     "with a key_version column.\n\n"
+     "THE DERIVED FOUR ARE NOT OPTIONAL. interest_rate and extension_period stay "
+     "plaintext (ARB Decisions 13, 14), so a plaintext interest_amount solves for "
+     "the principal: amount = interest x 1200 / (rate x months). Leaving any one in "
+     "clear reopens the path ADR-2.4 closed.\n\n"
+     "Apply at the repository boundary ONLY. THREE repositories touch encrypted "
+     "tables and must be done together: sqlalchemy_loan_repo, sqlalchemy_history_repo "
+     "(borrower_name, amount) and sqlalchemy_report_repo (borrower_name, amount and "
+     "the four derived values). The domain entity and every use case keep working in "
+     "plaintext.\n\n"
+     "TRAP: a random IV per call means two encryptions of the same value differ. "
+     "Never compare, filter, GROUP BY or ORDER BY a `_ct` column. Exact match is the "
+     "blind index; ordering and totals are app-layer after decrypt.\n\n"
      "Acceptance: a loan round-trips through the repository unchanged, and a direct "
-     "SQL SELECT over loans, loan_history and report_records shows no borrower or "
+     "sqlite3 SELECT over loans, loan_history and report_records shows no borrower or "
      "depositor name, no group, and no amount — principal OR derived — in clear.",
      "1", "5", "mvp1.1,encryption"),
-
-    ("backend", "Seed one org and owner without Supabase",
-     "finhive/db/seed_service_account.py (KCH-94, merged) creates the org and an "
-     "owner row, but reads SUPABASE_SERVICE_ROLE_KEY and takes users.id from a "
-     "Supabase Auth UID. M1.1 runs plain Postgres in Docker — there is no Supabase "
-     "Auth.\n\n"
-     "Rework it to generate the owner UUID locally and drop every Supabase "
-     "dependency. Keep what matters: a real org row, role='owner', and per-org "
-     "scoping. The seeder's own docstring warns against a single-tenant shortcut "
-     "that bypasses org scoping — that warning still stands.\n\n"
-     "The desktop app reads its org_id from config. No login screen: a credential "
-     "check inside a process the user fully controls protects nobody, and M1a's JWT "
-     "path will do this properly for the web app.\n\n"
-     "Keep the actor column real ('user' | 'agent') — it is what makes provenance "
-     "true today and what the MVP2 port populates with history.\n\n"
-     "Acceptance: a fresh database gets exactly one org and one owner, re-running is "
-     "idempotent, and grep finds no SUPABASE_ reference on this path.",
-     "2", "2", "mvp1.1,auth"),
-
     ("security", "Wire the HMAC blind index into exact-match filters",
-     "Migration 0004 adds blind-index columns for the encrypted IDENTITY columns. "
-     "finhive/db/blind_index.py computes them. Without wiring, every borrower lookup "
-     "decrypts the whole table.\n\n"
-     "Wire it into the repository's filter path so equality on borrower_name, "
-     "borrower_group, depositor_name and depositor_group uses the index. The existing "
-     "filters use ilike('%x%') (sqlalchemy_loan_repo.py:78-90) — substring matching "
-     "is impossible over ciphertext, so exact match via the index is the replacement, "
-     "and fuzzy matching moves to EntityResolver in the application layer.\n\n"
-     "TRAP, carried from ADR-2.4 and now enforced by KCH-99: a blind index must NEVER "
-     "be added to an amount. Loan amounts cluster on round numbers, so a "
-     "deterministic index over them is reversible by frequency analysis without the "
-     "key. Identity columns only.\n\n"
+     "Ciphertext cannot be pattern-matched, so exact-match filtering needs a "
+     "deterministic index. finhive/db/blind_index.py already computes it; this wires "
+     "it in.\n\n"
+     "Under D-16's deferral this is `<col>_bidx` columns on models.py rather than "
+     "migration 0004 — same algorithm, same column names, so the schema converges "
+     "with Postgres when it lands. Identity columns only: borrower_name, "
+     "borrower_group, depositor_name, depositor_group.\n\n"
+     "Shipped in M1.1 rather than deferred (operator, 2026-09-22): blind_index.py "
+     "exists, create_all builds the columns for free, and retrofitting them later "
+     "means recomputing an HMAC over every existing row — the same class of pain as "
+     "the org_id retrofit.\n\n"
+     "Replaces the existing ilike('%x%') filters at sqlalchemy_loan_repo.py:78-90, "
+     "which cannot work over ciphertext. Substring and fuzzy matching move up to "
+     "EntityResolver in the application layer.\n\n"
+     "TRAP, from ADR-2.4 and enforced by KCH-99: a blind index must NEVER be added "
+     "to an amount. Loan amounts cluster on round numbers, so a deterministic index "
+     "over them is reversible by frequency analysis without the key. Identity "
+     "columns only.\n\n"
      "Acceptance: filtering by an exact borrower_group returns the right rows without "
      "decrypting non-matching ones, and no blind index exists on any amount column.",
      "2", "3", "mvp1.1,encryption"),
-
-    ("testing", "Split the suite into SQLite unit and Postgres integration",
-     "161 tests currently run against sqlite:///:memory:. Encryption, the blind "
-     "index, migrations and org scoping can only be proven against real Postgres.\n\n"
-     "- Domain and application tests keep in-memory SQLite and millisecond runtime.\n"
-     "- Repository, migration and encryption tests hit Postgres, skipped when "
-     "TEST_DATABASE_URL is unset. This mirrors the existing tests/integration/ "
-     "pattern, which already skips cleanly.\n"
-     "- conftest provides both fixtures; a marker selects the lane.\n\n"
-     "TRAP: the mvp1-regression check runs the whole tests/ directory as a required "
-     "check. Postgres tests MUST skip, not fail, on a machine with no container "
-     "running, or every contributor and every CI run goes red.\n\n"
-     "Acceptance: the full suite is green with no Docker running (integration "
-     "skipped) and green again with Postgres up (integration executed).",
-     "2", "3", "mvp1.1,testing"),
-
-    ("data", "Seed a development fixture into Postgres",
-     "The tab ships on test data before the real loans.db migration, so the seeded "
-     "fixture is the development database for several weeks — it has to be "
-     "realistic, not three rows.\n\n"
-     "Seed through the ENCRYPTING repository path, never with raw SQL INSERTs. "
-     "Seeding around the encryption layer would produce a database the app cannot "
-     "read and hide exactly the bugs this fixture exists to surface.\n\n"
+    ("testing", "Prove the encryption round-trip and the no-plaintext guarantee",
+     "Was 'split the suite into SQLite unit and Postgres integration'. With D-16 "
+     "deferred there is no second backend to split against, so this becomes what "
+     "M1.1 actually needs: proof that D-15 holds. Re-scoped by the operator "
+     "2026-09-22.\n\n"
+     "Three assertions, all against the real SQLite file rather than a mock — a mock "
+     "cannot prove the bytes on disk are ciphertext, which is the entire claim:\n"
+     "- ROUND TRIP: a loan written through the repository and read back is byte-equal "
+     "on every field, including the four derived amounts and a null due_date.\n"
+     "- NO PLAINTEXT: a direct sqlite3 connection (bypassing the ORM) over loans, "
+     "loan_history and report_records finds no fixture borrower or depositor name, no "
+     "group, and no amount in clear. Check the WAL and journal too, not just the main "
+     "database file.\n"
+     "- TAMPER: a flipped bit in a `_ct` value raises DecryptionError rather than "
+     "returning corrupted plaintext. That is the property AES-GCM buys over an "
+     "unauthenticated cipher and it must be asserted, not assumed.\n\n"
+     "Plus blind-index determinism: the same input yields the same index value, and "
+     "no index exists on any amount column.\n\n"
+     "The two-lane conftest for a Postgres integration lane is NOT built here — it "
+     "is re-filed against M1a with the rest of the Postgres work. Building a skip "
+     "path for a backend that is not there yet is speculative.\n\n"
+     "Acceptance: all three assertions pass, and the full MVP1 suite is still green.",
+     "1", "3", "mvp1.1,testing,encryption"),
+    ("data", "Seed a development fixture into the encrypted database",
+     "The tab ships on test data before the real loans.db migration, so this seeded "
+     "fixture IS the development database for several weeks. It has to be realistic, "
+     "not three rows.\n\n"
+     "Seed through the ENCRYPTING repository path, never with raw INSERTs. Seeding "
+     "around the encryption layer produces a database the app cannot read and hides "
+     "exactly the bugs this fixture exists to surface.\n\n"
      "Content: the 15 existing sample rows plus an undated loan whose giving_date is "
-     "in the past, a future-dated loan, 'iyer chem' alongside depositor 'Meera Iyer', "
-     "and bg10 next to bg1 so substring over-match is catchable. One org, the seeded "
-     "owner.\n\n"
-     "This same fixture is the base the eval harness extends later.\n\n"
-     "Acceptance: one command gives a populated encrypted database the desktop app "
-     "opens and reads correctly, and a direct SELECT shows no plaintext NPI.",
-     "2", "2", "mvp1.1,testing"),
-
+     "in the past (the G-07 case), a future-dated loan, 'iyer chem' alongside "
+     "depositor 'Meera Iyer' (the G-23 ambiguity), and bg10 next to bg1 so substring "
+     "over-match is catchable. No org table under D-16's deferral — org_id is "
+     "retrofitted when Postgres lands.\n\n"
+     "This same fixture is the base the eval harness extends later, so its row "
+     "identities must be stable.\n\n"
+     "Acceptance: one command gives a populated encrypted SQLite database the desktop "
+     "app opens and reads correctly, and a direct sqlite3 SELECT shows no plaintext "
+     "NPI.",
+     "1", "2", "mvp1.1,testing"),
     ("ops", "Rebuild the queue with M1.1 first and nothing dropped",
      "ops/seed_linear.py:204 sorts by KCH number, so M1.1 issues (KCH-222+) would "
      "land behind M5. Sort by (project_rank, number) with rank [M0, M1.1, M1a, M1b, "
