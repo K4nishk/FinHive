@@ -21,13 +21,40 @@ from loan_manager.infrastructure.security.key_provider import (
     load_keys,
 )
 
-# Applied per-test, NOT at module scope: the Container laziness test needs no
-# cryptography at all, and a module-scope importorskip would hide it in exactly
-# the environment where it is cheapest to run. A test that always skips looks
-# like coverage without being any.
+def _missing() -> str | None:
+    """Which dependency of the encryption path is absent, if any.
+
+    BOTH are required and they install separately: `cryptography` comes from
+    requirements.txt, `finhive` from `pip install -e <repo root>` (which the
+    launchers do — it is deliberately NOT a relative path in requirements.txt,
+    because pip resolves those against its own working directory).
+
+    Checking only cryptography was a real defect: with it installed and finhive
+    absent, these stopped skipping and started FAILING with ModuleNotFoundError,
+    which breaks mvp1-regression on every machine that ran `pip install -r
+    requirements.txt` without the editable install.
+    """
+    from importlib.util import find_spec
+
+    for mod in ("cryptography", "finhive"):
+        try:
+            if find_spec(mod) is None:
+                return mod
+        except (ImportError, ValueError):
+            return mod
+    return None
+
+
+_MISSING = _missing()
+
+# Applied per-test, NOT at module scope: the Container laziness test needs
+# neither dependency, and a module-scope skip would hide it in exactly the
+# environment where it is cheapest to run. A test that always skips looks like
+# coverage without being any.
 needs_crypto = pytest.mark.skipif(
-    __import__("importlib.util", fromlist=["util"]).find_spec("cryptography") is None,
-    reason="encryption at rest needs `cryptography`; see requirements.txt",
+    _MISSING is not None,
+    reason=f"encryption at rest needs `{_MISSING}` — "
+    "pip install -r requirements.txt && pip install -e <repo root>",
 )
 
 _VALID = base64.b64encode(b"\x01" * 32).decode()
