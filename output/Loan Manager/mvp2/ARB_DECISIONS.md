@@ -207,7 +207,7 @@ A rate column leaks the *distribution of terms* across the book — that some lo
 | D-8 | M1.1 binds D-2, D-12, OQ-01; batch proposals; null due_date stays Overdue; M1.1 ahead of M1a/M1b/M2/M3 | ✅ **APPROVED** |
 | D-12 | Amounts must not cross an LLM endpoint in cleartext | ✅ **CONFIRMED** |
 | D-4a | OpenAI-compatible client — **amended**, see below | ✅ **APPROVED, MODIFIED** |
-| D-16 | Local Docker Postgres — **conditional**, see below | ✅ **APPROVED, DEFERRABLE** |
+| D-16 | Local Docker Postgres — **approved, DEFERRED to M1a**; SQLite carries the PoC | ✅ **APPROVED, DEFERRED** |
 | OQ-01 | Cross-border narrowed to inference — **plus a new proposal**, see D-17 | ✅ **AMENDED** |
 | D-17 | LLM emits parameterised SQL instead of calling tools | ⏳ **SPIKE FIRST** |
 
@@ -221,12 +221,32 @@ MVP1.1 demo both run at zero cost. Groq is no longer the default.
 
 This costs nothing in design: the client is a `base_url` change by construction.
 
+**Provider selected 2026-09-22: OpenRouter**, key in `ops/.env.local` as
+`OPENROUTER_API_KEY`, $100 budget. Candidate models are open-weights first
+(DeepSeek V3, Llama 3.3 70B, Qwen 2.5 72B, Mistral Small) — **not** `openai/gpt-4o`,
+which is neither free-tier nor open-source and would contradict this decision.
+
 **It raises the spike's priority to blocking.** Groq documents tool use with
-parallel calling. OpenRouter free tiers and NVIDIA Build endpoints do **not**
-uniformly support OpenAI-style `tools`, and where they do the fidelity varies by
-model. Seven tool schemas built against an unverified endpoint is a week lost.
-The spike moves from build-order row 31 to **immediately after the LLM client**,
-and D-4a stays conditional until suite E2 passes on the chosen provider.
+parallel calling. OpenRouter's cheap and free tiers do **not** uniformly support
+OpenAI-style `tools`, and where they do the fidelity varies by model. Seven tool
+schemas built against an unverified endpoint is a week lost. The spike has moved
+to **build-order row 14, immediately after the LLM client and before the tool
+schemas it validates**, and D-4a stays conditional until it passes.
+
+Tooling: `ops/probe_openrouter.py`, budget-capped (`--max-usd`, default 0.05).
+Two stages — can the model emit a `tool_call` at all, then does it pick the right
+tool with parseable arguments and chain `resolve_entity` before a name query.
+
+**A model that calls a PROPOSE tool unprompted is disqualified**, whatever else it
+scores: one that volunteers `extend_loan` in answer to a read-only question cannot
+sit behind D-2. The probe flags this as UNSAFE.
+
+If nothing passes, do not force it — the fallback is D-17, which needs its own
+spike.
+
+**Cost accounting on a free tier measures QUOTA, not money.** Reporting `$0.0000`
+as if spend were being controlled is the failure mode; the observability plane
+must show quota consumption, latency and throughput instead.
 
 Consequence for `prices.json`: a free tier's price is zero, so the cost column
 measures *quota consumption*, not money. Say so in the telemetry rather than
@@ -254,8 +274,30 @@ The `org_id` row is the one that bites: retrofitting a NOT NULL tenant key onto 
 populated table is materially worse than carrying it from the start, and it is
 what makes the eventual MVP2 port and RLS possible.
 
-**This fork is not yet chosen.** Recorded here so the decision is explicit rather
-than drifting.
+**FORK RESOLVED 2026-09-22 — SQLite carries the PoC; Postgres defers to M1a.**
+
+Operator: *"I am comfortable to have org_id be retrofitted because currently we
+only have 1 user and the org_id shouldn't be too problematic to introduce when
+postgresql migration happens."*
+
+D-15 is unaffected: `encryption.py` imports only `cryptography`, so NPI is
+encrypted at rest on SQLite exactly as it would be on Postgres.
+
+Two consequences found while applying this, both in the deferral's favour:
+
+1. **No migration machinery is needed for the PoC.** `session.py:23` builds the
+   schema with `Base.metadata.create_all`, and test-data-first starts from an
+   empty database — so adding `_ct` and blind-index columns to `models.py` is the
+   whole job. Alembic stays unwired and `finhive/db/migrations.py` stays unused
+   (it is asyncpg-only and could not have driven SQLite anyway).
+2. **The real-data migration becomes two hops, not one.** Today's plaintext
+   `loans.db` → encrypted SQLite (M1.1) → encrypted Postgres (M1a). The second
+   hop is where `org_id` is retrofitted. Accepted.
+
+Deferred to M1a: Docker Postgres, the 0002 schema port, migrations 0001–0005, and
+the org/owner seed. Those Linear issues are re-milestoned, not closed — the
+Postgres work is postponed, never cancelled, and migrations 0001–0005 remain the
+target schema.
 
 ### D-17 — LLM emits parameterised SQL instead of calling tools ⏳
 
@@ -439,7 +481,10 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
 - **D-4a** — approved, but conditional on evidence: suite E2 must pass on the
   chosen free-tier provider. Tool-calling is not guaranteed there. Until then the
   transport is decided and the *provider* is not.
-- **D-16** — approved, but the Postgres-now vs SQLite-now fork is unchosen.
+- ~~D-16 — the Postgres-now vs SQLite-now fork is unchosen.~~ **Resolved
+  2026-09-22: SQLite now, Postgres deferred to M1a. org_id retrofit accepted.**
+- **D-4a** — provider is OpenRouter; the winning MODEL is still unknown until
+  `ops/probe_openrouter.py` runs. That probe is the gate.
 - **D-17** — spike before any commitment; see the comparison above.
 - ~~D-8 — operator sign-off on the queue reorder.~~ **Approved 2026-09-22.**
   > **D-8's original second clause is superseded by D-15.** It read: "binding

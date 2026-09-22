@@ -11,8 +11,12 @@ Decisions this encodes (operator interview, 2026-09-22):
   - Master key from an env var behind keys.py — explicitly interim.
   - pgvector/pgvector:pg16 from day one; extension not enabled.
   - Test split: SQLite in-memory unit, real Postgres integration.
-  - TEST DATA FIRST: the tab ships on a seeded database (row 20); the real
-    loans.db migration lands after it (row 26).
+  - TEST DATA FIRST: the tab ships on a seeded database; the real loans.db
+    migration lands after it.
+  - D-16 DEFERRED (operator, 2026-09-22): SQLite carries the PoC. Encryption is
+    backend-independent so D-15 still binds. org_id retrofit cost accepted —
+    one user today. Postgres rows stay in the CSV, re-milestoned to M1a.
+  - D-4a spike is BLOCKING and runs before the tool schemas it validates.
   - No login screen. One org, one owner, locally generated UUID.
   - Priority is NOT a restatement of build order. Row order already encodes
     "this blocks the next thing". Urgent is reserved for defects that are urgent
@@ -291,6 +295,33 @@ ROWS = [
      "through the same function, and no module outside infrastructure/llm/ imports "
      "the client library.",
      "2", "3", "mvp1.1,llm"),
+
+    ("agent", "Spike: prove tool calling works on the chosen OpenRouter model",
+     "D-4a GATE — BLOCKING. The transport decision is settled; the PROVIDER is not. "
+     "D-4a targets a free-tier open-source endpoint via OpenRouter so development "
+     "and the demo both run at zero marginal cost, but tool calling is NOT "
+     "uniformly supported there and fidelity varies by model.\n\n"
+     "This runs BEFORE the tool schemas are written. Building seven schemas against "
+     "an endpoint that cannot call them is the expensive mistake; the schemas are "
+     "the half that is costly to undo.\n\n"
+     "Use ops/probe_openrouter.py. It is already written and budget-capped "
+     "(--max-usd, default 0.05). Two stages: can the model emit a tool_call at all, "
+     "then does it pick the right tool with parseable arguments and chain "
+     "resolve_entity before a name query.\n\n"
+     "Record in data/settings.json[\'llm\'][\'model\']: the winning model, its "
+     "measured per-call cost, and any quirk found (some models ignore "
+     "additionalProperties:false and invent arguments — that is the exact failure "
+     "extra=\'forbid\' exists to catch).\n\n"
+     "TRAP: a model that calls a PROPOSE tool (extend_loan, create_loan) when asked "
+     "a read-only question cannot be put behind D-2 safely. The probe flags this as "
+     "UNSAFE and it disqualifies the model regardless of other scores.\n\n"
+     "IF NOTHING PASSES: do not force it. Escalate — the fallback is D-17 (model "
+     "emits parameterised SQL instead of calling tools), which needs its own spike.\n\n"
+     "On a free tier the cost column measures QUOTA, not money. Do not report "
+     "$0.0000 as if spend were being controlled.\n\n"
+     "Acceptance: one model is named in settings.json with evidence it passes all "
+     "three stage-2 cases, or D-4a is escalated with the failing output attached.",
+     "1", "2", "mvp1.1,llm,spike"),
 
     ("agent", "Define tool argument models and the READ/PROPOSE registry",
      "One Pydantic model per tool, generating the JSON Schema sent to the model and "
@@ -633,23 +664,6 @@ ROWS = [
      "Acceptance: the PR lane passes with no API key, and the nightly job writes a "
      "trend row.",
      "3", "2", "mvp1.1,evals"),
-
-    ("agent", "Spike: prove tool calls round-trip on a non-Groq endpoint",
-     "ARB D-4a claims provider portability is a base_url change. That is "
-     "designed-for, not proven, and D-4a stays PROPOSED until this passes.\n\n"
-     "Groq documents tool use with parallel calling on llama-3.3-70b-versatile. The "
-     "HuggingFace router's OpenAI-compatible endpoint is documented as "
-     "chat-completions only, and its tool-calling support through that endpoint is "
-     "NOT explicitly stated.\n\n"
-     "Run eval suite E2 unchanged against: (a) Groq, and (b) one non-Groq "
-     "OpenAI-compatible target — HF router, or a local vLLM/Ollama, which also "
-     "exercises the self-hosted exit OQ-01 depends on.\n\n"
-     "Transport portability is config; tool-call FIDELITY is per-server. vLLM needs "
-     "--enable-auto-tool-choice --tool-call-parser <family>; Ollama's /v1 supports "
-     "tools only on tool-capable tags.\n\n"
-     "Acceptance: E2 passes on both targets, or the failure is documented and D-4a is "
-     "amended before any migration claim is made.",
-     "3", "2", "mvp1.1,llm,spike"),
 
     ("agent", "Close the feedback loop into the golden set",
      "Thumbs up/down per turn, stored against turn_id and joined to the FULL trace: "

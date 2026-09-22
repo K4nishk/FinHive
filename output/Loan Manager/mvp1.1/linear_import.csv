@@ -121,6 +121,21 @@ Ship a recorded fake beside it so the PR eval lane runs with zero network and no
 TRAP: tomllib is 3.11+; the project floor is 3.10. JSON, not TOML.
 
 Acceptance: a live Groq call and a recorded-fake call both return a Completion through the same function, and no module outside infrastructure/llm/ imports the client library.",2,3,"product:finhive,mvp1.1,llm",Backlog
+FinHive M1.1 · Ask FinHive,agent,Spike: prove tool calling works on the chosen OpenRouter model,"D-4a GATE — BLOCKING. The transport decision is settled; the PROVIDER is not. D-4a targets a free-tier open-source endpoint via OpenRouter so development and the demo both run at zero marginal cost, but tool calling is NOT uniformly supported there and fidelity varies by model.
+
+This runs BEFORE the tool schemas are written. Building seven schemas against an endpoint that cannot call them is the expensive mistake; the schemas are the half that is costly to undo.
+
+Use ops/probe_openrouter.py. It is already written and budget-capped (--max-usd, default 0.05). Two stages: can the model emit a tool_call at all, then does it pick the right tool with parseable arguments and chain resolve_entity before a name query.
+
+Record in data/settings.json['llm']['model']: the winning model, its measured per-call cost, and any quirk found (some models ignore additionalProperties:false and invent arguments — that is the exact failure extra='forbid' exists to catch).
+
+TRAP: a model that calls a PROPOSE tool (extend_loan, create_loan) when asked a read-only question cannot be put behind D-2 safely. The probe flags this as UNSAFE and it disqualifies the model regardless of other scores.
+
+IF NOTHING PASSES: do not force it. Escalate — the fallback is D-17 (model emits parameterised SQL instead of calling tools), which needs its own spike.
+
+On a free tier the cost column measures QUOTA, not money. Do not report $0.0000 as if spend were being controlled.
+
+Acceptance: one model is named in settings.json with evidence it passes all three stage-2 cases, or D-4a is escalated with the failing output attached.",1,2,"product:finhive,mvp1.1,llm,spike",Backlog
 FinHive M1.1 · Ask FinHive,agent,Define tool argument models and the READ/PROPOSE registry,"One Pydantic model per tool, generating the JSON Schema sent to the model and validating what comes back. Registry is a dict[str, Callable] with a mode field; PROPOSE tools have no write path to loans at all (ARB D-2, D-6).
 
 Every model sets ConfigDict(extra='forbid').
@@ -312,15 +327,6 @@ WRITTEN TRIGGER to enable: over any 50 production turns, 3 or more thumbs-down t
 Postgres integration tests need a container in CI — add the service, and keep them skipping cleanly when it is absent.
 
 Acceptance: the PR lane passes with no API key, and the nightly job writes a trend row.",3,2,"product:finhive,mvp1.1,evals",Backlog
-FinHive M1.1 · Ask FinHive,agent,Spike: prove tool calls round-trip on a non-Groq endpoint,"ARB D-4a claims provider portability is a base_url change. That is designed-for, not proven, and D-4a stays PROPOSED until this passes.
-
-Groq documents tool use with parallel calling on llama-3.3-70b-versatile. The HuggingFace router's OpenAI-compatible endpoint is documented as chat-completions only, and its tool-calling support through that endpoint is NOT explicitly stated.
-
-Run eval suite E2 unchanged against: (a) Groq, and (b) one non-Groq OpenAI-compatible target — HF router, or a local vLLM/Ollama, which also exercises the self-hosted exit OQ-01 depends on.
-
-Transport portability is config; tool-call FIDELITY is per-server. vLLM needs --enable-auto-tool-choice --tool-call-parser <family>; Ollama's /v1 supports tools only on tool-capable tags.
-
-Acceptance: E2 passes on both targets, or the failure is documented and D-4a is amended before any migration claim is made.",3,2,"product:finhive,mvp1.1,llm,spike",Backlog
 FinHive M1.1 · Ask FinHive,agent,Close the feedback loop into the golden set,"Thumbs up/down per turn, stored against turn_id and joined to the FULL trace: messages, tool calls and arguments, model id, prompt version, token counts. Feedback without the trace is unusable — 'this was wrong' with no record of what the agent did tells you nothing.
 
 Two implicit signals are stronger than a thumb: a proposal REJECTED (the user saw the exact diff and said no) and a proposal EDITED before approval (the agent was close but wrong in a specific, recorded way).
