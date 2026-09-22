@@ -1,5 +1,22 @@
 # Loan Manager
 
+> ### ⚠ Storage mechanism in this document is SUPERSEDED
+>
+> This file is the authoritative **business** spec. Its **storage** language is not.
+>
+> | This document says | Actual, since | Authority |
+> |---|---|---|
+> | `.csv` files (`loans.csv`, `history.csv`, `pending_reports.csv`) | SQLite + SQLAlchemy — run_8 | WIKI §16 CHG-001 |
+> | "Database is not needed" (R8) | Local Docker Postgres, **encrypted at rest** — MVP1.1 | ARB D-15, D-16 |
+>
+> Every **business rule** below still holds exactly as written — overwrite-on-extend,
+> paidoff moves to history, backup before destructive operations, two-file normalised
+> reports, ISO 8601 dates. Read `.csv` as "the store"; CSV itself is import/export only.
+>
+> **Specify against `src/`, never against this file's storage claims.** The MVP1.1
+> plan was authored from R8 and lost ~14.5 days rebuilding a data layer that already
+> existed. See `docs/MVP1_1_ASK_FINHIVE.md` §2.
+
 ## Overview
 - Plan, Design, Build and Implement a Loan Management Application.
 - The app should focus on loan entries, record modification, Report generation and extract import/exports.
@@ -167,7 +184,13 @@ recordN
 - **Requirement8**:
   - User wants a prototype. `PySide6` is good for GUI framework choice.
   - The prototype should be executable by just a simple `.bat` file for windows user which prepares the virtual env, installs requirements and starts up the app and a similar simple executable for Mac.
-  - Database is not needed in the prototype. Since there is only a single user, `.csv` for history maintenance is good enough.
+  - ~~Database is not needed in the prototype. Since there is only a single user, `.csv` for history maintenance is good enough.~~
+    > **SUPERSEDED.** run_8 replaced CSV storage with SQLite + SQLAlchemy (WIKI §16,
+    > CHG-001). MVP1.1 moves again, to local Docker Postgres with encryption at rest
+    > (ARB D-15, D-16). CSV is retained for import/export only.
+    > **Specify against `src/`, never against this line.** The MVP1.1 plan was
+    > authored from this sentence and lost ~14.5 days to rebuilding a data layer
+    > that already existed.
   - Prototype to be a good representation of all the features which are implemented.
   - Store dates as ISO 8601
   - No need for CSV file locking for concurrent sessions

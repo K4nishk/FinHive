@@ -40,15 +40,19 @@ flowchart TB
 
     M0 --> G0{{"Gate 0<br/>agents executable · CodeRabbit reviewing<br/>MVP1 suite green on every PR"}}
 
-    G0 --> M1A["<b>M1a · Local Setup, Login &amp; Encryption</b><br/>23 issues · 110 pt<br/><br/>① setup — mac + windows, one command<br/>② login — service account, role=owner<br/>③ <b>encryption at rest + app-layer decrypt</b><br/>local schema · placeholders · Help"]
+    G0 --> M11["<b>M1.1 · Ask FinHive</b> — rev 4 · KCH-222..253<br/>32 new · 85 pt  +  4 absorbed · 19 pt  =  36 · 104 pt · ~48 d<br/><br/>① <b>encrypted Postgres on the MVP1 desktop app</b><br/>Docker pgvector · migrations 0001-0005 · AES-256-GCM<br/>blind index · org-scoped · SQLAlchemy sync (D-1a)<br/>② agent — READ/PROPOSE tools · 6-step loop · resolver<br/><b>names + amounts tokenised before egress</b><br/>③ <b>Ask FinHive tab on SEEDED data</b> (row 20)<br/>④ real loans.db migration (row 26) · evals<br/><i>M1a paused after KCH-109</i>"]
 
-    M1A --> G1A{{"Gate 1a<br/>user logs in on their own machine<br/><b>no plaintext PII in the database file</b>"}}
+    M11 --> G11{{"Gate 1.1<br/><b>no plaintext NPI in the database</b> · egress test: zero names or amounts leave<br/>E1 recall@1 ≥ 0.95 · E4 = 100% · unsafe-call = 0<br/>G-07/G-07b pass · cp.query_loans = 1.0 · faithfulness = 1.0 on E3<br/>real data migrated with a verified field-by-field round-trip"}}
+
+    G11 --> M1A["<b>M1a · Web Shell</b> — rev 4: REDUCED<br/>KCH-101-104, 106-113<br/><br/>asyncpg pool · FastAPI · JWT · GET /api/me<br/>React SPA · login route · Chakra tokens · MDX help<br/><i>encryption + local schema DELIVERED by M1.1</i><br/><i>KCH-107 Supabase Auth: do not build as written</i>"]
+
+    M1A --> G1A{{"Gate 1a<br/>user logs in through the web app<br/>on the same encrypted store M1.1 built"}}
 
     G1A --> M1B["<b>M1b · MVP1 Parity — Read then Write</b><br/>26 issues · 162 pt<br/><br/>④ read — Loans table, filters, totals<br/>⑤ write — entry, edit, Reports, Approvals<br/>multi-month ByMonth · parity sweep"]
 
     M1B --> G1B{{"Gate 1b<br/><b>Persona A · PARITY HELD</b><br/>MVP1 user validates business on the web app"}}
 
-    G1B --> M2["<b>M2 · Agent Read-Only</b><br/>27 issues · 140 pt<br/><br/>LiteLLM · Groq · 7 read tools<br/>ReAct loop · SSE · trace UI<br/>mask before egress · pgvector RAG<br/>cost metering · evals"]
+    G1B --> M2["<b>M2 · Agent Read-Only</b> — rev 3: PORT<br/>~40% of 140 pt<br/><br/>port application/agent → finhive/agent<br/>async · asyncpg · RLS · decrypt<br/>SSE encoder over TraceEvent · React trace UI<br/>pgvector only if E1 &lt; 0.95 (D-4a)"]
 
     M2 --> G2{{"Gate 2<br/>grounded answers · evals ≥ 90/85/85<br/>unsafe-call rate = 0"}}
 
@@ -64,10 +68,12 @@ flowchart TB
 
     M5 --> DONE(["MVP2 complete"])
 
-    BC -.->|guards| M0 & M1A & M1B & M2 & M3 & M4
+    BC -.->|guards| M0 & M11 & M1A & M1B & M2 & M3 & M4
 
     style BC fill:#0f2e1f,stroke:#3ecf8e,color:#fff
     style M0 fill:#1f1f2e,stroke:#8b7ec8,color:#fff
+    style M11 fill:#1a3a52,stroke:#4a9eff,color:#fff
+    style G11 fill:#1a3a52,stroke:#4a9eff,color:#fff
     style M1A fill:#3d2914,stroke:#e0a336,color:#fff
     style M1B fill:#3d2914,stroke:#e0a336,color:#fff
     style M2 fill:#1a3a52,stroke:#4a9eff,color:#fff
@@ -79,6 +85,34 @@ flowchart TB
 ```
 
 ---
+
+## What changed in revision 4 (2026-09-22)
+
+The Postgres + encryption pivot. M1.1 is no longer a slice on MVP1's SQLite layer —
+it builds the encrypted data layer MVP2 keeps, behind the existing desktop UI.
+
+| Change | Effect |
+|---|---|
+| **Encryption at rest moves M1a → M1.1** (ARB D-15) | Operator requirement: no plaintext at rest. Migrations 0003 + 0004 taken as built. M1.1 is not shippable without it |
+| **Local Docker Postgres replaces Supabase** (ARB D-16) | `pgvector/pgvector:pg16`, extension available not enabled. No hosting bill at one user; `CREATE EXTENSION vector` stays one line |
+| **SQLAlchemy over Postgres, sync** (ARB D-1a) | D-1's raw-SQL choice was scoped to the MVP2 web backend. Adopting asyncpg here would make every use case async and invalidate 161 tests for no user-visible gain |
+| **OQ-01 amended** | Data at rest is now local, so only Groq *inference* crosses a border. Tokenisation survives as the sole control on the one remaining path |
+| **M1a reduced to the web shell** | Encryption, local schema and setup are delivered by M1.1. KCH-99, 100, 105, 114 re-milestoned into it |
+| **M1.1 issues created** | KCH-222..253, 32 new + 4 absorbed = 36 issues, 85 pt, ~48 d |
+| **Test data first** | The tab ships on a seeded encrypted database (row 20); the real `loans.db` migration lands at row 26, after the encryption path has been exercised for weeks |
+| **No login screen in M1.1** | One org, one owner, locally generated UUID. A credential check inside a process the user controls protects nobody; M1a's JWT path does it properly for the web |
+
+## What changed in revision 3 (2026-09-21)
+
+| Change | Effect |
+|---|---|
+| **M1.1 inserted between G0 and M1a** | The MVP2 agent (§11–§14 of ARD v2.0.0) is built as a vertical slice on the MVP1 desktop app first — 23 issues, 31 d — to prove the tool contracts, tokenisation, proposal batch and eval harness on real ledger data before the platform moves. Full model: `docs/MVP1_1_ASK_FINHIVE.md` |
+| **M1a paused after KCH-109** | Outstanding M1a (KCH-81, 99, 100–108, 110–114) resumes after G1.1 |
+| **M2 re-cut as a port** | `application/agent` → `finhive/agent`: async, asyncpg, RLS, decrypt, SSE encoder, React trace UI. ~40% of the original 140 pt. pgvector (KCH-161) only if E1 recall@1 < 0.95 |
+| **LiteLLM → OpenAI-compatible client** (ARB D-4a, proposed) | KCH-153 re-scoped; KCH-169 cost from a price table |
+| **Decision 12 binds M1.1** | Names *and* amounts tokenised before any LLM call from day one; the egress test is a G1.1 criterion |
+| **KCH-188 / KCH-191 logic lands in M1.1** | Eval gates and feedback loop cross from M3; recorded in ARB D-8 |
+| **Two live MVP1 bugs filed** | `ApproveReport` never recomputes `status`; undated-loan extend silently skipped on approve |
 
 ## What changed in revision 2
 
@@ -110,7 +144,8 @@ Encryption lands *before* any real data is written. No row is ever stored in pla
 | Gate | Criteria |
 |---|---|
 | **G0** | CI green · developer agents run a queued issue end to end · CodeRabbit blocking findings prevent merge · MVP1 suite passes on every PR |
-| **G1a** | App runs locally on mac and windows from one command · MVP1 user logs in as owner · **no plaintext PII in the database file, index or WAL** · tampered ciphertext rejected |
+| **G1.1** | **No plaintext NPI in the database, index or WAL** · tampered ciphertext rejected · no blind index on any amount column · **egress test: recorded outbound bodies contain zero fixture names or amounts** · E1 recall@1 ≥ 0.95 · E2 per reconciled threshold · E4 = 100% · unsafe-call = 0 · G-07 and G-07b pass · `cp.query_loans` = 1.0 on every case · faithfulness = 1.00 on E3 · real `loans.db` migrated with a verified field-by-field round-trip · MVP1 suite green, Postgres tests skipping cleanly without a container · agent package imports neither PySide6, SQLAlchemy nor sqlite3 |
+| **G1a** | Web app runs locally from one command · MVP1 user logs in through it · reads and writes the **same encrypted store M1.1 built** — no second data layer, no re-encryption |
 | **G1b** | **Persona A: PARITY HELD** · Loans, Reports, Approvals fully functional · multi-month ByMonth matches MVP1 · no ❌ in A5 (calculations) or A8 (infrastructure) |
 | **G2** | Three canonical queries answered with grounded output · tool-selection ≥ 90%, argument ≥ 85%, completion ≥ 85% · p95 ≤ 4s · **unsafe-call = 0** |
 | **G3** | Every mutating tool proposes, never writes · batch apply transactional · agent-class invariant enforced · **RLS isolation passes on hosted** |

@@ -3,14 +3,20 @@
 ## Project
 
 - **What**: One-Stop shop for custom finance solutions
-- **Active product**: Loan Manager MVP1 — single-user desktop loan management app.
+- **Active product**: Loan Manager **MVP1.1 — `Ask FinHive`**: a conversational agent
+  tab added to the existing single-user PySide6 desktop app, as an extension of MVP1.
+  Governed by `/docs/MVP1_1_ASK_FINHIVE.md` and the M1.1 Orchestrator Contract below.
+  MVP2 (web/Postgres) is **paused after KCH-109**.
+- **Data layer note**: MVP1 is **SQLite + SQLAlchemy 2.0**, not CSV. `input/REQUIREMENTS.md`
+  still says otherwise in places; run_8 superseded it (WIKI §16, CHG-001). Specify
+  against `src/`, never against `input/`.
 - **Branch**: `development`
 - **Input**: `/input/REQUIREMENTS.md` (authoritative business spec), `/input/prompt*.md` (build/fix prompts)
 - **Output**: `/output/YYYY/MM/DD/stdout_HHMMSS.md` (design artifacts, ARD, WIKI, FINAL_REVIEW)
 - **Source**: `/src/Loan Manager/loan_manager/` (Python package)
 - **WIKI**: `/output/Loan Manager/run_8/WIKI.md` — full repository knowledge base with file index, data flows, and business rules. Read it before making architectural decisions.
 - **ARD**: `/output/Loan Manager/run_8/ARD.md` — architecture reference for onboarding context.
-- **Agent contract**: `/docs/AGENT_CONTRACT.md` — the rules any agent (orchestrator-driven or interactive) follows when implementing a `KCH-*` issue: branch, implement, CodeRabbit gate, bounded fix cycles, escalation.
+- **Agent contract**: `/docs/AGENT_CONTRACT.md` — the rules any agent (orchestrator-driven or interactive) follows when implementing a `KCH-*` issue: branch, implement, review gate, bounded fix cycles, escalation. For M1.1 the gate is the `reviewer` subagent, not CodeRabbit (free tier ended) — see the M1.1 Orchestrator Contract below.
 
 ---
 
@@ -29,11 +35,159 @@ Interactive sessions default to Opus for reasoning-heavy work and Sonnet for cod
 
 ---
 
+## M1.1 Orchestrator Contract — `Ask FinHive`
+
+**Active while the `FinHive M1.1 · Ask FinHive` project has open issues.** The
+interactive session is the orchestrator; it delegates and does not implement.
+Scope: `docs/MVP1_1_ASK_FINHIVE.md`. Issues:
+`output/Loan Manager/mvp1.1/linear_import.csv`, row order = build order.
+
+**CodeRabbit is gone.** The free tier ended; `coderabbit usage` exits non-zero.
+Every gate below that used to be CodeRabbit is now a `reviewer` subagent plus the
+human. Do not call `coderabbit`, and do not treat its absence as a passing gate.
+
+### Roles and models
+
+| Role | Model | Does | Never |
+|---|---|---|---|
+| **Orchestrator** | `claude-opus-5` | Picks the issue, decomposes, spawns, adjudicates, gates, writes the Linear comment | Writes product code |
+| **planner** | `claude-opus-4-6` | Reads the issue + real files, produces the change list with `file:line` | Edits anything |
+| **reviewer** | `claude-opus-4-6` | Adversarial review; validates against the rules below | Fixes what it finds |
+| **implementer** | `claude-sonnet-4-6` | Writes code and tests to the planner's list | Re-plans, or widens scope |
+| **tester** | `claude-sonnet-4-6` | Runs suites, writes regressions, reports real output | Marks a failing suite green |
+| **scribe** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries | Decides anything |
+
+One planner and one reviewer per issue. Implementers may run in parallel **only**
+across files that do not import each other. Spawn a reasoning model for a
+mechanical edit and you have burned the budget for nothing; spawn Sonnet to adjudicate
+a rule conflict and you get a confident wrong answer.
+
+### Doctrines
+
+**Ponytail — stop at the first rung that holds.** YAGNI → reuse → stdlib → native
+→ existing deps → minimal → necessary. Every planner output names the rung. MVP1
+already has the data layer, `ReferenceIdService`, `StatusEngine`,
+`InterestCalculator` and the `reports`/`report_records` proposal batch — rung 2
+(reuse) is the default answer, not rung 7.
+
+**Caveman — why use many token when few token do trick.** Dense prompts, dense
+reports. Preserve code, commands, paths, identifiers and error strings exactly;
+compress the prose around them. Report honest measurements including ones that cut
+against the thesis.
+
+**RTK — compress before it reaches the context.** `rtk` is installed
+(`/opt/homebrew/bin/rtk`). **Wrap every command whose output reaches a context**:
+
+```
+rtk test <cmd>   rtk err <cmd>   rtk git diff   rtk git status
+rtk read <file>  rtk find …      rtk psql …     rtk docker …
+```
+
+**The saving is entirely working-tree dependent — do not quote a fixed number.**
+Measured on this repo across two runs minutes apart: `git status` −39% to −44%
+(consistent), `git diff` −2% to −14%, **overall −3% to −15%**, varying only with
+how large the diff was. On a clean tree the framing can even exceed the output.
+Far below RTK's advertised 60–90%, because a code diff is mostly lines it cannot
+compress. Never cite the advertised range as if it were observed here, and never
+carry a past run's percentage forward — `ops/rtk_gain.py --measure-gates`
+re-measures per issue, and that per-run number is the only one to report.
+
+RTK is not a substitute for judgement. Never pipe raw output into a subagent
+prompt even wrapped: pass the failing lines, not the whole log; the diff, not the
+file; `file:line` plus the function, not the module. The M0 ledger measured a
+**122:1 context re-read ratio** — roughly half the bill was agents re-reading
+`CLAUDE.md`, the WIKI and the tree from zero. A subagent prompt that restates the
+repo is that bill, and `rtk` will not save you from it.
+
+### Per-issue loop
+
+1. **Select** the lowest unbuilt row whose hard blockers are resolved (below).
+2. **Plan** — `planner`. Reads the issue, the cited files and
+   `docs/MVP1_1_ASK_FINHIVE.md`. Output: ordered change list with `file:line`, the
+   Ponytail rung, what is reused, and the acceptance test. If the issue's premise
+   is wrong, it says so and stops — it does not improvise.
+3. **Implement** — `implementer`, on `feature/kch-NNN` branched from the stack tip.
+4. **Test** — `tester`. Full MVP1 suite plus the issue's own tests. Real output
+   pasted, never a summary of intent.
+5. **Review** — `reviewer`, adversarially, against the review gate below. Findings
+   go back to the implementer for at most **two** cycles. A third means the issue
+   is under-specified: stop, comment on Linear, escalate to the human.
+6. **Commit and stack** — scribe writes the message; open the PR against the branch
+   below it, never `development` directly.
+7. **Comment** — scribe posts to Linear, verbatim:
+   `Development and testing completed, awaiting PR review and merge.`
+   plus the PR link, the suites that ran with their real counts, and the RTK Gain
+   block.
+8. **Report** — `python3 ops/rtk_gain.py --issue KCH-NNN --measure-gates`, printed
+   in the result. Non-optional; it is how the human sees the cost of each issue.
+   Axis A is measured on this machine by running the gate commands both ways;
+   Axis B is the agent tokens actually billed, from `ops/logs/usage.jsonl`.
+
+### Review gate (replaces CodeRabbit)
+
+A PR may open only when all of these hold, each proven by pasted output:
+
+- Full MVP1 suite green — `cd "src/Loan Manager" && rtk test python -m pytest tests/`
+  Postgres integration tests must **skip** cleanly with no container running, never fail
+- `rtk err ruff check <changed files>` clean
+- The issue's own acceptance test exists and fails without the change
+- No layer violation: `domain/` imports no `infrastructure`/`presentation`/PySide6/
+  sqlalchemy; `application/agent/` imports no PySide6, sqlalchemy, sqlite3 or
+  mutating use case
+- No raw SQL outside `migrations/` (ARB D-1a keeps D-1's parameterised-only rule)
+- No `float` for money; no `datetime.utcnow()`; no hardcoded hex in
+  `presentation/`; no `QTableWidget` for new data tables
+- **No plaintext NPI** — a direct `SELECT` over changed tables shows no borrower or
+  depositor name, group, or amount in clear (ARB D-15)
+- **No blind index on any amount column** — deterministic indexing over round-number
+  amounts is reversible by frequency analysis without the key (ADR-2.4, KCH-99)
+- No secret, key or token added to a tracked file
+
+### Stacking and blocking
+
+PRs stack; **an unreviewed PR never blocks the next issue.** Branch the next issue
+from the previous branch's tip, PR against it, and let the human merge bottom-up.
+
+A **hard blocker** — the only thing that stops the queue — is when the next issue
+cannot begin until the previous is fully resolved:
+
+| Blocked | Blocker | Why |
+|---|---|---|
+| everything | Docker Postgres · model port · migrations 0001-0005 | There is no database to build against |
+| encryption at the boundary | master key source | Encrypting with a key that vanishes on next launch is data loss |
+| blind index · dev fixture · anything reading NPI | encryption at the boundary | The `_ct` columns must be readable first |
+| EntityResolver | encryption at the boundary | The index is built from decrypted names |
+| READ tools · loop | tool arg models | The registry is their call contract |
+| loop | LLM client | Nothing to call |
+| Ask FinHive tab | loop · dev fixture | Nothing to stream, and nothing to stream it about |
+| PROPOSE tools · approvals tab | report-batch schema | The columns must exist |
+| real-data migration | the tab working on seeded data | Deliberate: exercise the encryption path for weeks before real data touches it |
+| eval suites | fixture + harness | No ground truth without it |
+
+Everything else proceeds on the stack. When a hard blocker is unresolved, work the
+next unblocked row — do not idle, and do not start the blocked issue "partially".
+
+### Technical debt
+
+Debt is not deferred silently. When work outside the issue's scope is found:
+
+1. Fix it in-issue **only** if it is a one-line correctness fix and the issue
+   already touches that file.
+2. Otherwise file a Linear issue immediately, in the same session, with
+   `product:finhive` and the file:line — and link it from the PR body.
+3. Never leave a `TODO` in the code as the record. The tracker is the record.
+
+An issue is not complete while its own acceptance test is skipped, xfailed, or
+asserting something weaker than the acceptance line.
+
+---
+
 ## Language & Framework Constraints
 
 - Python >= 3.10. Target compatibility: 3.10–3.13.
 - PySide6 >= 6.8.0 for GUI.
-- SQLAlchemy >= 2.0 ORM with SQLite backend. No raw SQL outside migrations.
+- SQLAlchemy >= 2.0 ORM, **sync**. SQLite through MVP1; **Postgres from MVP1.1**
+  (ARB D-1a, D-16). No raw SQL outside migrations.
 - Alembic for schema migrations.
 - Pydantic >= 2.5 for all DTOs. Use `BaseModel`, field validators, model validators.
 - `python-dateutil` for date arithmetic (`relativedelta`). No manual month math.
@@ -115,6 +269,34 @@ These override any conflicting implementation. If code disagrees with these, the
 - ByMonth filter excludes records without `due_date`. All other filters include them if matching.
 - `report_records` stores snapshots of loan data at report time, not live references.
 
+### Data protection (MVP1.1 onward — ARB D-15, D-16)
+
+- **NPI is encrypted at rest.** Migration 0003 encrypts **nine** columns as
+  AES-256-GCM `_ct BYTEA` with `key_version`, across `loans`, `loan_history` and
+  `report_records`:
+  `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`, `amount`,
+  **and the derived financial values** `interest_amount`, `commission_amount`,
+  `tds_amount`, `chq_amount`.
+  Encryption happens at the **repository boundary only** — the domain entity and
+  every use case work in plaintext. Three repositories touch encrypted tables:
+  loan, history and report.
+- **The derived amounts are not optional.** `interest_rate` and `extension_period`
+  stay plaintext (Decisions 13, 14), so a plaintext `interest_amount` solves for the
+  principal: `amount = interest × 1200 / (rate × months)`. Leaving any one of the
+  four in clear re-opens the path ADR-2.4 closed. Re-run that derivation check
+  before adding **any** plaintext column carrying a derived financial value.
+- **Never compare, filter, `GROUP BY` or `ORDER BY` a `_ct` column.** A random IV per
+  call means two encryptions of the same value differ. Exact match uses the HMAC
+  blind index; ordering and totals are app-layer after decrypt.
+- **Never blind-index an amount.** Loan amounts cluster on round numbers, so a
+  deterministic index over them is reversible by frequency analysis without the key
+  (ADR-2.4). Identity columns only.
+- **Names and amounts are tokenised before any LLM call** — ingress (the user's typed
+  prompt) as well as egress. Data at rest is local, so inference is the only path
+  that leaves the machine (OQ-01 as amended).
+- Every repository query is **org-scoped**. `loans.org_id` is NOT NULL and UNIQUE is
+  `(org_id, reference_id)`.
+
 ---
 
 ## Testing Requirements
@@ -122,7 +304,10 @@ These override any conflicting implementation. If code disagrees with these, the
 - **Coverage target**: 85% minimum. Current: 89%.
 - Run tests: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
 - Domain services must have 100% unit test coverage.
-- Test against in-memory SQLite (`sqlite:///:memory:`) for integration tests.
+- **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
+  (repository, migration, encryption) run against real Postgres and must SKIP — never
+  fail — when `TEST_DATABASE_URL` is unset, because `mvp1-regression` runs the whole
+  `tests/` directory as a required check.
 - Validate filter logic with sample data checkpoints: `bg3` → 2 records (b3, b4); `dg3` → 4 records (b6, b7, b8, b9).
 - Every new use case must have a corresponding test file.
 - Every bug fix must include a regression test that would have caught the bug.
@@ -139,7 +324,10 @@ Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
 - **Product label**: `product:finhive` on every issue, always first
 - **Projects**: `FinHive <milestone> · <name>` — e.g. `FinHive M1a · Local Setup, Login & Encryption`
 - **Workstream label**: `ops`, `ci-cd`, `data`, `security`, `backend`, `business-logic`, `frontend`, `agent`, `auth`, `testing`, `observability`, `docs`
-- **Source of truth**: `output/Loan Manager/mvp2/linear_import.csv` — row order is build order, never re-sort it
+- **Source of truth**, split by milestone — row order is build order in both, never re-sort either:
+  - `output/Loan Manager/mvp1.1/linear_import.csv` — **M1.1** (KCH-222…253), generated by `ops/gen_m11_csv.py`
+  - `output/Loan Manager/mvp2/linear_import.csv` — M0 and M1a…M5
+  - The four absorbed issues (KCH-99, 100, 105, 114) still live in the mvp2 CSV under the old M1a project name; they are re-milestoned in Linear, not moved between files
 - **Import**: `python3 ops/seed_linear.py` (dry run) → `--apply`. Idempotent by title.
 
 ## Explicit Prohibitions
@@ -160,6 +348,15 @@ Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
 - **Do not** make assumptions without evidence. Mark uncertain decisions as `[REVIEW REQUIRED]`.
 - **Do not** skip the stage-gate approval process. Every stage must STOP and await `PROCEED` or `PROCEED WITH MODIFICATIONS`.
 - **Do not** commit `.DS_Store`, `__pycache__/`, `.coverage`, `*.pyc`, or `data/loans.db` to git.
+- **Do not** send a raw amount or a raw entity name to an LLM. Tokenise first.
+- **Do not** read `loans.status` in agent tools — derive via `StatusEngine` at read;
+  the persisted column is stale after a batch approve.
+- **Do not** add a blind index to any amount column.
+- **Do not** write a `_ct` column from anywhere but the repository layer.
+- **Do not** seed or fixture data with raw SQL `INSERT`s — go through the encrypting
+  repository, or you produce a database the app cannot read.
+- **Do not** specify work against `input/REQUIREMENTS.md` storage claims. They are
+  superseded; `src/` is the truth.
 
 ---
 
@@ -224,10 +421,15 @@ See `.claude/skills/*/SKILL.md` for full list. Key categories:
 
 When work is implemented by an agent against a `KCH-*` Linear issue, follow
 `/docs/AGENT_CONTRACT.md`: branch from `development` as `feature/kch-N`, implement with
-tests, run the CodeRabbit CLI gate, fix blocking findings for at most two cycles, then
+tests, pass the review gate, fix blocking findings for at most two cycles, then
 escalate to a new Linear issue carrying the finding, each attempted fix, why it failed,
 and a suggested direction. An agent never merges — it opens a PR (or, on escalation,
 a draft PR) for a human to review.
+
+**For M1.1 the review gate is NOT CodeRabbit** — the free tier has ended and
+`coderabbit usage` exits non-zero. Use the `reviewer` subagent and the explicit
+checklist in the M1.1 Orchestrator Contract above. An unauthenticated CodeRabbit is
+a gate that did not run, which is a failure, never a pass.
 
 ## Development Workflow
 
