@@ -614,6 +614,51 @@ After the 6-stage build, 4 additional prompt iterations addressed QA findings:
 
 Each iteration preserved existing business logic and made targeted corrections.
 
+### MVP1.1 · Ask FinHive — a vertical slice of MVP2's agent on MVP1's data layer
+
+Full model, metrics and corrected plan: `[FILE: docs/MVP1_1_ASK_FINHIVE.md]`.
+
+MVP1.1 pulls the **Ask FinHive** tab and the agent-proposal path forward from
+MVP2 (ARD v2.0.0 §11–§14) and runs them on *this* codebase — SQLAlchemy over
+SQLite, PySide6, `Container` DI — to prove the agent contract on real ledger data
+before the platform moves to Postgres/FastAPI/React. It is `domain/` +
+`application/` code with the LLM client injected; one new tab, one extended tab.
+
+```
+presentation/tabs/ask_finhive_tab.py ──Signal(TraceEvent)──┐   throwaway (~7d)
+presentation/tabs/pending_approval_tab.py  (AGENT/FORM)    │
+──────────────────────────────────────────────────────────┼─── port seam ───
+application/use_cases/agent/run_agent_turn.py  (loop, 6 steps)  │
+application/agent/tools/*          (Pydantic, extra='forbid')   │  ports to
+application/agent/tokeniser.py     (names AND amounts)          │  finhive/agent
+application/agent/grounding.py     (faithfulness)               │  unchanged
+domain/services/entity_resolver.py (difflib, 4 fields)          │
+──────────────────────────────────────────────────────────┼─────────────────
+infrastructure/llm/openai_compat_client.py   (only importer of openai)
+infrastructure/repositories/*                (existing — no new store)
+```
+
+**Reuses, does not rebuild:** `models.py`, `sqlalchemy_loan_repo.py`,
+`reference_id_service.py`, `status_engine.py`, `interest_calculator.py`,
+`reports`/`report_records` as the proposal batch, `PendingApprovalTab`.
+
+**One-way doors:** OpenAI-compatible client replaces LiteLLM (ARB D-4a) · names and
+amounts tokenised before any LLM call (ARB Decision 12 binds MVP1.1) · proposals are
+batches, and this shape is migration 0006's spec · null `due_date` stays Overdue.
+
+**Not in MVP1.1:** a second data layer, a loopback HTTP API, a web UI, RBAC, RAG
+over documents, any change to a §3 business rule.
+
+**Port-forward contract:** everything under `application/agent/` and
+`domain/services/entity_resolver.py` imports neither PySide6, SQLAlchemy nor
+sqlite3 — enforced by an ast guard test. M2 becomes "port `application/agent` to
+`finhive/agent`", ~40% of its current estimate.
+
+**Eval metrics** (`context_precision`, `faithfulness`, `answer_relevancy`) are
+computed deterministically on the tool-call trace against the fixture; the stored
+values are proxies whose definitions differ from RAGAS and are documented beside
+the column. A nightly LLM judge exists for `answer_relevancy` only, default off.
+
 ---
 
 ## 15. Quick Reference — Common Tasks
@@ -655,3 +700,5 @@ Each iteration preserved existing business logic and made targeted corrections.
 | macOS deferred render | Post-build (prompt_fix_20260708.md) | `QTimer.singleShot(0, ...)` for Qt compositor compatibility |
 | Report shows post-extension preview | Post-build (prompt_fix_20260708.md) | Pending Approval now shows projected values, not just pre-extension |
 | Python 3.13 compatibility | Post-build (prompt_fix_20260708.md) | PySide6 >= 6.8.0; `datetime.utcnow()` deprecation resolved |
+| Agent slice on the MVP1 data layer (MVP1.1) | 2026-09-21 plan review (`docs/MVP1_1_ASK_FINHIVE.md`) | New `application/agent/`, `infrastructure/llm/`, Ask FinHive tab; proposals reuse `reports`/`report_records`; no second data layer, no HTTP API; MVP2 M1a paused after KCH-109 |
+| Known: `ApproveReport` does not recompute `status` | Found 2026-09-21 | `bulk_update_dates` writes dates only; persisted status stale until next launch. Agent tools derive status via `StatusEngine` at read. Fix filed as its own KCH issue |

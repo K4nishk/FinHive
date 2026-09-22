@@ -198,7 +198,141 @@ A rate column leaks the *distribution of terms* across the book — that some lo
 
 ---
 
-## No open architectural decisions remain.
+## MVP1.1 pull-forward — PROPOSED 2026-09-21, awaiting approval
+
+Raised by the MVP1.1 plan review (`docs/MVP1_1_ASK_FINHIVE.md`). The plan pulls
+the Ask FinHive agent and the proposal path forward onto the MVP1 desktop app,
+ahead of M1a. Two approved decisions are affected and one new scope decision is
+needed. **Nothing has been built on either side of D-4** (`grep -rn litellm\|openai
+src/ finhive/` → 0), so the cost of D-4a is governance only.
+
+| # | Decision | Status |
+|---|---|---|
+| D-4a | LLM transport is an OpenAI-compatible client; LiteLLM not adopted | ⏳ PROPOSED |
+| D-8 | MVP1.1 scope binds D-2, Decision 12 and OQ-01 from day one | ⏳ PROPOSED |
+| D-1a | MVP1.1 uses SQLAlchemy over Postgres, sync — not raw SQL + asyncpg | ⏳ PROPOSED |
+| D-15 | Encryption at rest is mandatory **in MVP1.1**, not deferred to M1a | ⏳ PROPOSED |
+| D-16 | Local Docker Postgres (`pgvector/pgvector:pg16`) replaces Supabase for M1.1 | ⏳ PROPOSED |
+| D-12 (existing) | Binds MVP1.1. Supersedes the OQ-01 line "amounts cross" (`:47`) | ⏳ confirm |
+| OQ-01 | **Amended** — data at rest is now local; only inference crosses | ⏳ PROPOSED |
+
+### D-1a — amends D-1 for the MVP1.1 runtime
+
+D-1 chose raw SQL over an ORM for the **MVP2 web backend**, with four mitigations.
+MVP1.1 is the existing PySide6 desktop app, so it uses **SQLAlchemy 2.0 against
+Postgres, synchronously**.
+
+Adopting `finhive/`'s raw-SQL + asyncpg stack here would make every use case async,
+force the Qt worker to host an event loop, and invalidate 161 passing tests — for
+no user-visible gain on a single-user desktop app. D-1's reasoning was about a
+hosted multi-tenant API; it does not transfer to this runtime.
+
+**D-1's four mitigations still bind**, restated for the ORM: parameterised-only
+(SQLAlchemy Core/ORM constructs, never string-built SQL), the CI grep gate stays,
+query-shape contract tests stay, N+1 count assertions stay.
+
+Consequence accepted: `loan_manager/` (SQLAlchemy) and `finhive/` (raw SQL) coexist
+until the MVP2 port. That is two data-access styles in one repo — tolerable only
+because the boundary is a whole application, not a layer, and because MVP1.1's
+port-forward contract keeps `application/agent/` free of both.
+
+### D-15 — encryption at rest is mandatory in MVP1.1
+
+The operator's requirement: data cannot be left plaintext at rest. Encryption moves
+from M1a into M1.1, and MVP1.1 is not shippable without it.
+
+Scope is exactly what migrations 0003 and 0004 already implement — no new crypto
+design: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group` and
+`amount` become `_ct BYTEA` with `key_version`; identity columns get an HMAC blind
+index. Applied at the repository boundary only.
+
+**Master key location is INTERIM.** `FINHIVE_MASTER_KEY` from `ops/.env.local`,
+behind `keys.py`. Stated plainly: the key sits beside the ciphertext, so this
+defends a stolen backup or a synced folder and **not** an attacker with read access
+to the home directory. Written trigger to move to the OS keychain: a second user,
+any hosted deployment, or the database file leaving this machine.
+
+Consequence, already priced: `amount_ct` cannot be `SUM()`ed, so every total is
+app-layer decrypt-then-aggregate (KCH-105). Ciphertext cannot be pattern-matched,
+so fuzzy borrower matching leaves SQL and becomes `EntityResolver` over an
+in-memory decrypted index.
+
+### D-16 — local Docker Postgres replaces Supabase for MVP1.1
+
+`pgvector/pgvector:pg16` in `docker-compose.yml`, extension available but not
+enabled. Reasons: no hosting bill at single-user scale, no Supabase dependency, and
+`CREATE EXTENSION vector` stays a one-line migration if retrieval ever needs it.
+
+Follows: `seed_service_account.py` is de-Supabased (locally generated owner UUID,
+no `SUPABASE_SERVICE_ROLE_KEY`); `run_local_mac.sh:146-159` and the Windows script
+stop assuming the Supabase CLI on port 54322; **KCH-107 "Implement Supabase Auth
+flow in React" must not be built as written**. No login screen in M1.1 — a
+credential check inside a process the user fully controls protects nobody.
+
+### OQ-01 amended — the transfer is now inference-only
+
+OQ-01 recorded that Groq has no India region, so an agent turn is a cross-border
+transfer unless personal data never leaves, and pointed at Supabase `ap-south-1`
+for residency.
+
+Under D-16 the database is local, so **data at rest no longer crosses a border at
+all** and the `ap-south-1` provisioning is moot for M1.1. What remains is Groq
+**inference**. Tokenisation is therefore still mandatory — for a narrower and more
+precise reason than the ARB previously recorded: it is the only control left on the
+one path that still leaves the machine.
+
+### D-4a — amends D-4's transport clause
+
+LLM transport for MVP1.1 and, unless M2 shows a need only LiteLLM meets, for MVP2
+is an OpenAI-compatible `/v1/chat/completions` client configured by `base_url`,
+`model`, `api_key_env`. LiteLLM is not adopted.
+
+**D-4 intent preserved:** Groq primary; provider swap is config. The self-hosted
+exit that OQ-01 relies on survives as `base_url` + server launch flags + model
+family: vLLM requires `--enable-auto-tool-choice --tool-call-parser <family>`;
+Ollama's `/v1` supports `tools` only on tool-capable tags. Transport portability
+is config; **tool-call fidelity is per-server and is verified, not assumed** — the
+spike (M1.1 issue 18) must pass suite E2 against Groq and one non-Groq target
+before D-4 is marked superseded.
+
+**Cost accepted:** provider quirks (plan §3.3) and the price table (JSON,
+hash-versioned as `finhive.eval.price_version`) become FinHive-maintained,
+replacing `litellm.completion_cost`. Per-tool model routing (ARD Gotcha 5) is a
+`model` argument on `complete()`.
+
+**Queue effects:** re-scope KCH-153 → "OpenAI-compatible client, ported to
+`AsyncOpenAI`/httpx at M2"; KCH-169 cost source → price table; KCH-155's
+"resolve_entity is RAG-backed" → stdlib difflib in 1.1, and E1 recall@1 ≥ 0.95 on
+the seed fixture **cancels** KCH-161 (pgvector), < 0.95 reinstates it. Client
+library choice is coupled to the M2 port — `openai` SDK now → `AsyncOpenAI` free
+later; `urllib` now → rewrite to httpx at M2 — decide once, in the client issue.
+
+### D-8 — MVP1.1 scope
+
+MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
+(no personal data leaves) from day one:
+
+- Amounts **and** known entity names are tokenised before any LLM call. The
+  user's typed prompt is passed through the local resolver *before* the first
+  model call and known names are substituted — a typed "sharma" must not cross
+  to a US endpoint in clear. Egress eval: recorded outbound bodies contain zero
+  fixture names or amounts.
+- Proposals are batches. MVP1.1 reuses `reports → report_records`; this shape is
+  the spec for migration 0006 (0005 as merged cannot apply unchanged:
+  `organizations` vs `orgs`, `loan_id UUID` vs `BIGINT`, no `batch_id`).
+- Null `due_date` stays **Overdue** (`REQUIREMENTS.md:162`, `status_engine.py:22`).
+  The plan's §2.3 reversal is rejected; the hazard is handled in `query_loans`
+  (`days_overdue=None`, excluded from day sums, included in the count).
+- Deliberate queue reorder: M1.1 ahead of remaining M1a (KCH-81, 99, 100–108,
+  110–114). KCH-188 and KCH-191 are M3 today; their logic lands in M1.1 —
+  recorded here as a milestone crossing.
+
+### Open until approved
+
+- D-4a — evidence required: spike passes E2 on Groq + one non-Groq target.
+- D-8 — operator sign-off on the queue reorder and on binding Decision 12 to a
+  desktop app that has no encryption at rest (the tokeniser protects egress only;
+  `loans.db` stays plaintext until M1a).
 
 ---
 
@@ -208,3 +342,5 @@ A rate column leaks the *distribution of terms* across the book — that some lo
 |---|---|
 | 2026-09-07 | D-1 … D-7 approved. OQ-01 India / `ap-south-1`. OQ-02 7-year retention (supersedes 24-month recommendation). OQ-03 viewer read-only agent. |
 | 2026-09-08 | Decisions 02–05, 08–11 approved. OQ-04 encryption scope expanded to all NPI. Decisions 12–14: tokenise amounts to the LLM; rates and periods stay plaintext. NPI protection confirmed mandatory under FinHive policy. All architectural decisions closed. |
+| 2026-09-21 | **Reopened.** MVP1.1 pull-forward proposed D-4a (OpenAI-compatible client, no LiteLLM) and D-8 (M1.1 scope: tokenise names + amounts from day one, proposals as batches, null due_date stays Overdue, M1.1 ahead of M1a). Decision 12 confirmed binding on MVP1.1. Awaiting approval. |
+| 2026-09-22 | **Postgres pivot.** Operator interview added D-1a (SQLAlchemy over Postgres, sync — D-1's raw-SQL choice scoped to the MVP2 web backend), D-15 (encryption at rest mandatory in M1.1; master key interim in env), D-16 (local Docker `pgvector/pgvector:pg16` replaces Supabase). OQ-01 amended: data at rest is local, so only Groq inference crosses. M1a's encryption and schema scope absorbed into M1.1; KCH-99/100/105/114 re-milestoned. Awaiting approval. |
