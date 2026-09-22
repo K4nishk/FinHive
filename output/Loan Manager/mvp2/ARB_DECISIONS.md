@@ -242,9 +242,25 @@ The operator's requirement: data cannot be left plaintext at rest. Encryption mo
 from M1a into M1.1, and MVP1.1 is not shippable without it.
 
 Scope is exactly what migrations 0003 and 0004 already implement — no new crypto
-design: `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group` and
-`amount` become `_ct BYTEA` with `key_version`; identity columns get an HMAC blind
-index. Applied at the repository boundary only.
+design. That is **nine columns**, across `loans`, `loan_history` **and**
+`report_records`:
+
+| | Columns |
+|---|---|
+| Identity | `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group` |
+| Principal | `amount` |
+| **Derived financial** | `interest_amount`, `commission_amount`, `tds_amount`, `chq_amount` |
+
+All become `_ct BYTEA` with `key_version`; identity columns additionally get an HMAC
+blind index. Applied at the repository boundary only — three repositories touch
+encrypted tables (loan, history, report) and must be done together, since 0003 makes
+those columns `NOT NULL`.
+
+**The derived four are not optional.** `interest_rate` and `extension_period` stay
+plaintext by Decisions 13 and 14, so a plaintext `interest_amount` solves for the
+principal: `amount = interest × 1200 / (rate × months)`. Leaving any one of them in
+clear re-opens the path ADR-2.4 closed, and is exactly the case the derivation check
+at the end of this document exists to catch.
 
 **Master key location is INTERIM.** `FINHIVE_MASTER_KEY` from `ops/.env.local`,
 behind `keys.py`. Stated plainly: the key sits beside the ciphertext, so this
@@ -330,9 +346,14 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
 ### Open until approved
 
 - D-4a — evidence required: spike passes E2 on Groq + one non-Groq target.
-- D-8 — operator sign-off on the queue reorder and on binding Decision 12 to a
-  desktop app that has no encryption at rest (the tokeniser protects egress only;
-  `loans.db` stays plaintext until M1a).
+- D-8 — operator sign-off on the queue reorder.
+  > **D-8's original second clause is superseded by D-15.** It read: "binding
+  > Decision 12 to a desktop app that has no encryption at rest — the tokeniser
+  > protects egress only; `loans.db` stays plaintext until M1a." That is no longer
+  > true and must not be approved as written. Under D-15 MVP1.1 encrypts at rest,
+  > and the tokeniser is the **egress** control rather than the only control.
+- D-8's M1a list is likewise pre-pivot. "Remaining M1a" is now KCH-81, 101–104,
+  106–113. KCH-99, 100, 105 and 114 are re-milestoned into M1.1.
 
 ---
 

@@ -40,7 +40,7 @@ flowchart TB
 
     M0 --> G0{{"Gate 0<br/>agents executable · CodeRabbit reviewing<br/>MVP1 suite green on every PR"}}
 
-    G0 --> M11["<b>M1.1 · Ask FinHive</b> — rev 4 · KCH-222..253<br/>36 issues · 85 pt · ~48 d<br/><br/>① <b>encrypted Postgres on the MVP1 desktop app</b><br/>Docker pgvector · migrations 0001-0005 · AES-256-GCM<br/>blind index · org-scoped · SQLAlchemy sync (D-1a)<br/>② agent — READ/PROPOSE tools · 6-step loop · resolver<br/><b>names + amounts tokenised before egress</b><br/>③ <b>Ask FinHive tab on SEEDED data</b> (row 20)<br/>④ real loans.db migration (row 26) · evals<br/><i>M1a paused after KCH-109</i>"]
+    G0 --> M11["<b>M1.1 · Ask FinHive</b> — rev 4 · KCH-222..253<br/>32 new · 85 pt  +  4 absorbed · 19 pt  =  36 · 104 pt · ~48 d<br/><br/>① <b>encrypted Postgres on the MVP1 desktop app</b><br/>Docker pgvector · migrations 0001-0005 · AES-256-GCM<br/>blind index · org-scoped · SQLAlchemy sync (D-1a)<br/>② agent — READ/PROPOSE tools · 6-step loop · resolver<br/><b>names + amounts tokenised before egress</b><br/>③ <b>Ask FinHive tab on SEEDED data</b> (row 20)<br/>④ real loans.db migration (row 26) · evals<br/><i>M1a paused after KCH-109</i>"]
 
     M11 --> G11{{"Gate 1.1<br/><b>no plaintext NPI in the database</b> · egress test: zero names or amounts leave<br/>E1 recall@1 ≥ 0.95 · E4 = 100% · unsafe-call = 0<br/>G-07/G-07b pass · cp.query_loans = 1.0 · faithfulness = 1.0 on E3<br/>real data migrated with a verified field-by-field round-trip"}}
 

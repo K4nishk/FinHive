@@ -146,7 +146,7 @@ Genuinely absent and needed: audit/actor/provenance columns, per-batch undo
 | FastAPI + SSE + token + Origin | — | — | **cut** |
 | Orchestration loop | `application/use_cases/agent/run_agent_turn.py` | `Container`; `emit: Callable[[TraceEvent], None]` | keep; `TraceEvent` = KCH-157 vocabulary |
 | Tokeniser | `application/agent/tokeniser.py` | resolver's dict | keep; names + amounts |
-| Proposals | `models.py` via Alembic | `reports`/`report_records` + `actor`, `user_request`, `turn_id` | **reuse the existing batch**; `report_records` needs `borrower_group`, `due_period`, nullable `reference_id/giving_date` for CREATE |
+| Proposals | `models.py` + a numbered SQL migration (0006) — **not Alembic**, which is dropped | `reports`/`report_records` + `actor`, `user_request`, `turn_id` | **reuse the existing batch**; `report_records` needs `borrower_group`, `due_period`, nullable `reference_id/giving_date` for CREATE |
 | Approvals tab | `presentation/tabs/pending_approval_tab.py` | existing | extend; AGENT/FORM badge |
 | Ask FinHive tab | `presentation/tabs/ask_finhive_tab.py`, `workers/agent_worker.py`, `widgets/trace_model.py` | `LoanTableModel.load()`, `ThemeManager` | keep — throwaway by design |
 | Telemetry | `AgentConversationModel`/`AgentTurnModel` | 0005 `agent_turns` names | keep + `prompt_version, step_count, finish_reason, eval_scores` |
@@ -305,9 +305,10 @@ workstream. Import with the `write-linear-issue` skill via `ops/seed_linear.py`.
 | **4 · Evals** | 27–32 | 16 | Fixture + harness, suites E1–E5, metric trio, CI lanes, spike, feedback loop |
 | | **32 new** | **85** | |
 
-Plus **4 absorbed, re-milestoned not recreated**: KCH-99 (amount-index CI rule),
-KCH-100 (lift the domain layer), KCH-105 (decrypt-and-sort), KCH-114 (prove
-encryption at rest). **M1.1 total: 36 issues, ~48 days.**
+Plus **4 absorbed, re-milestoned not recreated** — they keep their own points from
+`mvp2/linear_import.csv`: KCH-99 (amount-index CI rule, 3), KCH-100 (lift the domain
+layer, 3), KCH-105 (decrypt-and-sort, 8), KCH-114 (prove encryption at rest, 5) =
+**19 pt**. **M1.1 total: 36 issues, 104 points, ~48 days.**
 
 **Critical path:** 2 → 3 → 4 → 6 → 10 → 16 → 18 → 20. No agent work starts before
 the encrypted data layer exists.

@@ -8,6 +8,20 @@ is stale — fix this file.
 Applies to any agent — orchestrator-driven (`ops/orchestrator.sh`) or interactive —
 implementing a `KCH-*` Linear issue in this repository.
 
+> ### ⚠ The CodeRabbit gate below is SUPERSEDED for M1.1 (2026-09-22)
+>
+> The CodeRabbit free tier has ended; `coderabbit usage` exits non-zero and
+> `coderabbit review` cannot authenticate. **An unauthenticated CodeRabbit is a gate
+> that did not run, which is a failure, never a pass.**
+>
+> For `FinHive M1.1 · Ask FinHive` (KCH-222…253) the gate is the `reviewer` subagent
+> plus the human, against the explicit checklist in **CLAUDE.md → M1.1 Orchestrator
+> Contract**. Everything else in this contract — branch, implement with tests,
+> bounded fix cycles, escalate rather than loop, never merge — still stands.
+>
+> Every `coderabbit` command and the `coderabbit/cli-gate` commit status described
+> below are inert until a paid tier is restored.
+
 ## The loop
 
 1. **Branch** — `feature/<issue-key>` (lowercase, e.g. `feature/kch-80`), cut from the

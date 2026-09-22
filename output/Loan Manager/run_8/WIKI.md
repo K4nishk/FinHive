@@ -614,15 +614,17 @@ After the 6-stage build, 4 additional prompt iterations addressed QA findings:
 
 Each iteration preserved existing business logic and made targeted corrections.
 
-### MVP1.1 · Ask FinHive — a vertical slice of MVP2's agent on MVP1's data layer
+### MVP1.1 · Ask FinHive — MVP2's encrypted data layer behind MVP1's UI
 
 Full model, metrics and corrected plan: `[FILE: docs/MVP1_1_ASK_FINHIVE.md]`.
+Issues KCH-222…253.
 
 MVP1.1 pulls the **Ask FinHive** tab and the agent-proposal path forward from
-MVP2 (ARD v2.0.0 §11–§14) and runs them on *this* codebase — SQLAlchemy over
-SQLite, PySide6, `Container` DI — to prove the agent contract on real ledger data
-before the platform moves to Postgres/FastAPI/React. It is `domain/` +
-`application/` code with the LLM client injected; one new tab, one extended tab.
+MVP2 (ARD v2.0.0 §11–§14) **and moves the store to local Docker Postgres with
+encryption at rest** (ARB D-1a, D-15, D-16). It is not a prototype on throwaway
+foundations: the data layer it builds is the one MVP2 keeps — only the PySide6
+surface is temporary. SQLAlchemy 2.0 stays, pointed at Postgres, sync; the domain
+and application layers are untouched; `Container` still wires everything.
 
 ```
 presentation/tabs/ask_finhive_tab.py ──Signal(TraceEvent)──┐   throwaway (~7d)
@@ -635,7 +637,8 @@ application/agent/grounding.py     (faithfulness)               │  unchanged
 domain/services/entity_resolver.py (difflib, 4 fields)          │
 ──────────────────────────────────────────────────────────┼─────────────────
 infrastructure/llm/openai_compat_client.py   (only importer of openai)
-infrastructure/repositories/*                (existing — no new store)
+infrastructure/repositories/*   loan · history · report — encrypt/decrypt here
+infrastructure/database/        SQLAlchemy → Postgres, org-scoped, migrations 0001-0005
 ```
 
 **Reuses, does not rebuild:** `models.py`, `sqlalchemy_loan_repo.py`,
@@ -700,5 +703,5 @@ the column. A nightly LLM judge exists for `answer_relevancy` only, default off.
 | macOS deferred render | Post-build (prompt_fix_20260708.md) | `QTimer.singleShot(0, ...)` for Qt compositor compatibility |
 | Report shows post-extension preview | Post-build (prompt_fix_20260708.md) | Pending Approval now shows projected values, not just pre-extension |
 | Python 3.13 compatibility | Post-build (prompt_fix_20260708.md) | PySide6 >= 6.8.0; `datetime.utcnow()` deprecation resolved |
-| Agent slice on the MVP1 data layer (MVP1.1) | 2026-09-21 plan review (`docs/MVP1_1_ASK_FINHIVE.md`) | New `application/agent/`, `infrastructure/llm/`, Ask FinHive tab; proposals reuse `reports`/`report_records`; no second data layer, no HTTP API; MVP2 M1a paused after KCH-109 |
+| SQLite → encrypted Postgres; agent slice (MVP1.1) | 2026-09-22 (KCH-222, ARB D-1a/D-15/D-16) | Store moves to local Docker `pgvector/pgvector:pg16`; migrations 0001–0005; **nine NPI columns AES-256-GCM at the repository boundary** across `loans`/`loan_history`/`report_records`; HMAC blind index on identity columns only; every query org-scoped. New `application/agent/`, `infrastructure/llm/`, Ask FinHive tab; proposals reuse `reports`/`report_records`. No second data layer, no HTTP API. MVP2 M1a reduced to the web shell, paused after KCH-109 |
 | Known: `ApproveReport` does not recompute `status` | Found 2026-09-21 | `bulk_update_dates` writes dates only; persisted status stale until next launch. Agent tools derive status via `StatusEngine` at read. Fix filed as its own KCH issue |

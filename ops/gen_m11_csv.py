@@ -73,9 +73,16 @@ ROWS = [
      "Supabase CLI on port 54322 and will silently start or target the WRONG "
      "database. Update both, and make the failure mode loud if the container is not "
      "running.\n\n"
+     "R8 PROMISES A ONE-COMMAND LAUNCH (\"a simple .bat ... prepares the virtual env, "
+     "installs requirements and starts up the app\"). Docker plus a mandatory "
+     "FINHIVE_MASTER_KEY breaks that promise unless the launcher owns it. Both "
+     "scripts must bring the container up, wait for the healthcheck, source the "
+     "key, apply migrations, and fail loudly with the fix when Docker is not "
+     "running or the key is absent.\n\n"
      "Acceptance: `docker compose up -d` gives a reachable Postgres 16 with the "
-     "vector extension available, and run_local_mac.sh connects to it with no "
-     "Supabase CLI installed.",
+     "vector extension available; run_local_mac.sh and run_local_windows.bat each "
+     "start the app from a cold machine in ONE command with no Supabase CLI "
+     "installed; and each prints an actionable error if Docker is down.",
      "2", "2", "mvp1.1,infra"),
 
     ("data", "Port the SQLAlchemy models to the Postgres 0002 schema",
@@ -99,7 +106,12 @@ ROWS = [
     ("data", "Apply migrations 0001-0005 with the existing runner and drop Alembic",
      "finhive/db/migrations.py is a forward-only runner that already applies the "
      "numbered SQL files and records what ran. It takes a duck-typed connection "
-     "rather than importing asyncpg, so a sync SQLAlchemy connection can drive it.\n\n"
+     "rather than importing asyncpg. It is ASYNC: the Protocol declares `async def "
+     "execute` / `async def fetch`, `apply_pending` is `async def`, and the inserts "
+     "use asyncpg `$1,$2,$3` placeholders a sync psycopg connection will not bind. "
+     "So this issue MUST bridge it from the sync desktop startup path — a short "
+     "asyncio.run() around apply_pending with an asyncpg connection used for "
+     "migrations only. The app itself stays sync SQLAlchemy (D-1a).\n\n"
      "Alembic is declared in requirements.txt but was never wired (no alembic.ini, "
      "no env.py, no versions/). Do not wire it now. Two migration mechanisms in one "
      "repo is two ways to get schema state wrong — Ponytail rung 2, reuse what "
@@ -131,14 +143,21 @@ ROWS = [
      "2", "2", "mvp1.1,encryption"),
 
     ("security", "Encrypt and decrypt NPI at the repository boundary",
-     "Migration 0003 replaces borrower_name, borrower_group, depositor_name, "
-     "depositor_group and amount with `_ct BYTEA` columns plus key_version. "
+     "Migration 0003 encrypts NINE columns as `_ct BYTEA` plus key_version, across "
+     "loans, loan_history AND report_records: borrower_name, borrower_group, "
+     "depositor_name, depositor_group, amount, and the DERIVED financial values "
+     "interest_amount, commission_amount, tds_amount, chq_amount. "
      "finhive/db/encryption.py already provides encrypt_field/decrypt_field and "
      "encrypt_amount/decrypt_amount (Decimal, ROUND_HALF_UP, two places) and imports "
      "nothing Postgres-specific.\n\n"
-     "Apply it in SQLAlchemyLoanRepository ONLY. The domain entity and every use "
+     "Apply it at the repository boundary ONLY. The domain entity and every use "
      "case keep working in plaintext; ciphertext exists between the repository and "
-     "the database and nowhere else. One file can read or write a `_ct` column.\n\n"
+     "the database and nowhere else. THREE repositories touch encrypted tables and "
+     "all three must be done together: sqlalchemy_loan_repo, sqlalchemy_history_repo "
+     "(borrower_name, amount) and sqlalchemy_report_repo (borrower_name, amount, "
+     "interest_amount, commission_amount, tds_amount, chq_amount). 0003 makes those "
+     "columns NOT NULL, so doing only the loan repo breaks every report and archive "
+     "write — or silently stores NPI in clear.\n\n"
      "TRAP 1: encrypt_amount canonicalises to two decimal places before encrypting, "
      "so equal amounts always produce the same plaintext. MVP1 amounts are whole "
      "rupees as int — convert deliberately, and do not reintroduce float anywhere on "
@@ -147,7 +166,8 @@ ROWS = [
      "Never compare, filter, GROUP BY or ORDER BY a `_ct` column. Exact-match "
      "filtering is the blind index; ordering and totals are app-layer.\n\n"
      "Acceptance: a loan round-trips through the repository unchanged, and a direct "
-     "SQL SELECT over the table shows no borrower name, group or amount in clear.",
+     "SQL SELECT over loans, loan_history and report_records shows no borrower or "
+     "depositor name, no group, and no amount — principal OR derived — in clear.",
      "1", "5", "mvp1.1,encryption"),
 
     ("backend", "Seed one org and owner without Supabase",

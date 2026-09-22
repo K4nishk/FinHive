@@ -83,10 +83,14 @@ rtk test <cmd>   rtk err <cmd>   rtk git diff   rtk git status
 rtk read <file>  rtk find …      rtk psql …     rtk docker …
 ```
 
-Measured on this repo, not quoted from the README: `git status` −44%,
-`git diff` −14%, **−15% overall**. Useful, and far below RTK's advertised 60–90%
-because a code diff is mostly lines it cannot compress. Never cite the advertised
-range as if it were observed here.
+**The saving is entirely working-tree dependent — do not quote a fixed number.**
+Measured on this repo across two runs minutes apart: `git status` −39% to −44%
+(consistent), `git diff` −2% to −14%, **overall −3% to −15%**, varying only with
+how large the diff was. On a clean tree the framing can even exceed the output.
+Far below RTK's advertised 60–90%, because a code diff is mostly lines it cannot
+compress. Never cite the advertised range as if it were observed here, and never
+carry a past run's percentage forward — `ops/rtk_gain.py --measure-gates`
+re-measures per issue, and that per-run number is the only one to report.
 
 RTK is not a substitute for judgement. Never pipe raw output into a subagent
 prompt even wrapped: pass the failing lines, not the whole log; the diff, not the
@@ -182,7 +186,8 @@ asserting something weaker than the acceptance line.
 
 - Python >= 3.10. Target compatibility: 3.10–3.13.
 - PySide6 >= 6.8.0 for GUI.
-- SQLAlchemy >= 2.0 ORM with SQLite backend. No raw SQL outside migrations.
+- SQLAlchemy >= 2.0 ORM, **sync**. SQLite through MVP1; **Postgres from MVP1.1**
+  (ARB D-1a, D-16). No raw SQL outside migrations.
 - Alembic for schema migrations.
 - Pydantic >= 2.5 for all DTOs. Use `BaseModel`, field validators, model validators.
 - `python-dateutil` for date arithmetic (`relativedelta`). No manual month math.
@@ -266,10 +271,20 @@ These override any conflicting implementation. If code disagrees with these, the
 
 ### Data protection (MVP1.1 onward — ARB D-15, D-16)
 
-- **NPI is encrypted at rest.** `borrower_name`, `borrower_group`, `depositor_name`,
-  `depositor_group` and `amount` are AES-256-GCM `_ct BYTEA` columns with
-  `key_version`. Encryption happens at the **repository boundary only** — the domain
-  entity and every use case work in plaintext.
+- **NPI is encrypted at rest.** Migration 0003 encrypts **nine** columns as
+  AES-256-GCM `_ct BYTEA` with `key_version`, across `loans`, `loan_history` and
+  `report_records`:
+  `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group`, `amount`,
+  **and the derived financial values** `interest_amount`, `commission_amount`,
+  `tds_amount`, `chq_amount`.
+  Encryption happens at the **repository boundary only** — the domain entity and
+  every use case work in plaintext. Three repositories touch encrypted tables:
+  loan, history and report.
+- **The derived amounts are not optional.** `interest_rate` and `extension_period`
+  stay plaintext (Decisions 13, 14), so a plaintext `interest_amount` solves for the
+  principal: `amount = interest × 1200 / (rate × months)`. Leaving any one of the
+  four in clear re-opens the path ADR-2.4 closed. Re-run that derivation check
+  before adding **any** plaintext column carrying a derived financial value.
 - **Never compare, filter, `GROUP BY` or `ORDER BY` a `_ct` column.** A random IV per
   call means two encryptions of the same value differ. Exact match uses the HMAC
   blind index; ordering and totals are app-layer after decrypt.
@@ -289,7 +304,10 @@ These override any conflicting implementation. If code disagrees with these, the
 - **Coverage target**: 85% minimum. Current: 89%.
 - Run tests: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
 - Domain services must have 100% unit test coverage.
-- Test against in-memory SQLite (`sqlite:///:memory:`) for integration tests.
+- **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
+  (repository, migration, encryption) run against real Postgres and must SKIP — never
+  fail — when `TEST_DATABASE_URL` is unset, because `mvp1-regression` runs the whole
+  `tests/` directory as a required check.
 - Validate filter logic with sample data checkpoints: `bg3` → 2 records (b3, b4); `dg3` → 4 records (b6, b7, b8, b9).
 - Every new use case must have a corresponding test file.
 - Every bug fix must include a regression test that would have caught the bug.
@@ -306,7 +324,10 @@ Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
 - **Product label**: `product:finhive` on every issue, always first
 - **Projects**: `FinHive <milestone> · <name>` — e.g. `FinHive M1a · Local Setup, Login & Encryption`
 - **Workstream label**: `ops`, `ci-cd`, `data`, `security`, `backend`, `business-logic`, `frontend`, `agent`, `auth`, `testing`, `observability`, `docs`
-- **Source of truth**: `output/Loan Manager/mvp2/linear_import.csv` — row order is build order, never re-sort it
+- **Source of truth**, split by milestone — row order is build order in both, never re-sort either:
+  - `output/Loan Manager/mvp1.1/linear_import.csv` — **M1.1** (KCH-222…253), generated by `ops/gen_m11_csv.py`
+  - `output/Loan Manager/mvp2/linear_import.csv` — M0 and M1a…M5
+  - The four absorbed issues (KCH-99, 100, 105, 114) still live in the mvp2 CSV under the old M1a project name; they are re-milestoned in Linear, not moved between files
 - **Import**: `python3 ops/seed_linear.py` (dry run) → `--apply`. Idempotent by title.
 
 ## Explicit Prohibitions
