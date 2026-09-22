@@ -8,9 +8,8 @@ pytest>=8.0.0
 pytest-cov>=5.0.0
 cryptography>=42.0.0        # AES-256-GCM + HKDF, via finhive.db (ARB D-15)
 
-# Encryption at rest calls finhive.db.encryption and finhive.db.keys. Installed
-# from the repository root as an editable package: without it `import finhive`
-# succeeds only when the working directory happens to BE the repo root, which is
-# how it silently "worked" before KCH-226 while `cryptography` was absent and
-# every such import actually failed.
--e ../..
+# NOTE: the `finhive` package (finhive.db.encryption / .keys) is NOT listed here.
+# A relative `-e ../..` in a requirements file resolves against pip's WORKING
+# DIRECTORY, not against this file, so it installs the wrong path — or fails —
+# depending on where the caller happens to stand. run_mac.sh and run_windows.bat
+# install it explicitly with a path derived from the script's own location.

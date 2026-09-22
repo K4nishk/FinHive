@@ -42,14 +42,22 @@ class KeyConfigurationError(RuntimeError):
 _SETUP_HELP = (
     "Encryption at rest is mandatory (ARB D-15) and the app cannot start "
     "without a master key.\n\n"
-    "Set both variables in ops/.env.local:\n"
-    "    export FINHIVE_KEY_VERSION=1\n"
-    '    export FINHIVE_MASTER_KEY_V1="<base64 of 32 random bytes>"\n\n'
-    "Generate one with:\n"
+    "Generate one:\n"
     "    python3 -c \"import os,base64; "
     'print(base64.b64encode(os.urandom(32)).decode())"\n\n'
-    "Keep it. Losing the master key makes every encrypted row unreadable; "
-    "there is no recovery path."
+    "Then set BOTH variables. run_mac.sh sources ops/.env.local, so on macOS "
+    "putting them there and relaunching through it is enough:\n"
+    "    export FINHIVE_KEY_VERSION=1\n"
+    '    export FINHIVE_MASTER_KEY_V1="<the base64 value>"\n\n'
+    "On Windows, or when starting the app directly rather than through a "
+    "launcher, export them in the shell you launch from — nothing in the app "
+    "reads a dotenv file.\n\n"
+    "Keep the key. Losing it makes every encrypted row unreadable and there is "
+    "no recovery path.\n\n"
+    "Note on what this protects: the key sits beside the database file, so it "
+    "defends a stolen backup or a synced folder, NOT someone with read access "
+    "to this machine. That is a recorded interim trade for a single-user "
+    "prototype (ARB D-15)."
 )
 
 

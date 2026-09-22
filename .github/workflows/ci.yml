@@ -30,7 +30,10 @@ jobs:
           cache: pip
 
       - name: Install Python lint/type-check deps
-        run: pip install -e ".[dev]"
+        # [server] keeps fastapi/asyncpg available for the finhive side. They moved
+        # out of the core dependency set in KCH-226 so the desktop app can install
+        # `finhive` for crypto alone, without a source-built asyncpg on Python 3.14.
+        run: pip install -e ".[dev,server]"
 
       - name: ruff
         run: ruff check finhive tests

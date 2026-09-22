@@ -27,7 +27,12 @@ fi
 echo "Using: $($PYTHON_CMD --version)"
 
 # Setup virtual environment
-VENV_DIR="$(dirname "$0")/.venv"
+# Resolved from this script's own location so every path below is independent of
+# where the user invoked it from. `cd -P` follows symlinks to a real directory.
+APP_DIR="$(cd -P "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd -P "$APP_DIR/../.." && pwd)"
+
+VENV_DIR="$APP_DIR/.venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment..."
     "$PYTHON_CMD" -m venv "$VENV_DIR"
@@ -39,9 +44,24 @@ source "$VENV_DIR/bin/activate"
 # Install/upgrade requirements
 echo "Installing requirements..."
 pip install --quiet --upgrade pip
-pip install --quiet -r "$(dirname "$0")/requirements.txt"
+pip install --quiet -r "$APP_DIR/requirements.txt"
+
+# The finhive package supplies encryption at rest (ARB D-15). Installed from a
+# path derived from THIS SCRIPT's location, never a relative path in
+# requirements.txt — pip resolves those against its own working directory, so
+# `-e ../..` installs whatever happens to sit two levels above the caller.
+pip install --quiet -e "$REPO_ROOT"
+
+# Encryption master key. Sourced here because the app reads os.environ and has no
+# dotenv dependency; without this, ops/.env.local is a file nothing loads.
+if [ -f "$REPO_ROOT/ops/.env.local" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$REPO_ROOT/ops/.env.local"
+    set +a
+fi
 
 # Run the application
 echo "Starting Loan Manager..."
-cd "$(dirname "$0")"
+cd "$APP_DIR"
 python -m loan_manager.main
