@@ -198,7 +198,98 @@ A rate column leaks the *distribution of terms* across the book — that some lo
 
 ---
 
-## MVP1.1 pull-forward — PROPOSED 2026-09-21, awaiting approval
+## MVP1.1 pull-forward — **DECIDED 2026-09-22**
+
+| # | Decision | Status |
+|---|---|---|
+| D-1a | SQLAlchemy over Postgres, sync — not raw SQL + asyncpg | ✅ **APPROVED** |
+| D-15 | Encryption at rest mandatory in MVP1.1 | ✅ **APPROVED** |
+| D-8 | M1.1 binds D-2, D-12, OQ-01; batch proposals; null due_date stays Overdue; M1.1 ahead of M1a/M1b/M2/M3 | ✅ **APPROVED** |
+| D-12 | Amounts must not cross an LLM endpoint in cleartext | ✅ **CONFIRMED** |
+| D-4a | OpenAI-compatible client — **amended**, see below | ✅ **APPROVED, MODIFIED** |
+| D-16 | Local Docker Postgres — **conditional**, see below | ✅ **APPROVED, DEFERRABLE** |
+| OQ-01 | Cross-border narrowed to inference — **plus a new proposal**, see D-17 | ✅ **AMENDED** |
+| D-17 | LLM emits parameterised SQL instead of calling tools | ⏳ **SPIKE FIRST** |
+
+### D-4a as approved — free-tier open-source endpoint, not Groq
+
+The transport decision stands (OpenAI-compatible `/v1/chat/completions`, configured
+by `base_url` / `model` / `api_key_env`; LiteLLM not adopted). **The provider
+changes**: MVP1.1 targets a free-tier open-source endpoint — NVIDIA Build
+(`build.nvidia.com`), DeepSeek, or OpenRouter — so that development *and* the
+MVP1.1 demo both run at zero cost. Groq is no longer the default.
+
+This costs nothing in design: the client is a `base_url` change by construction.
+
+**It raises the spike's priority to blocking.** Groq documents tool use with
+parallel calling. OpenRouter free tiers and NVIDIA Build endpoints do **not**
+uniformly support OpenAI-style `tools`, and where they do the fidelity varies by
+model. Seven tool schemas built against an unverified endpoint is a week lost.
+The spike moves from build-order row 31 to **immediately after the LLM client**,
+and D-4a stays conditional until suite E2 passes on the chosen provider.
+
+Consequence for `prices.json`: a free tier's price is zero, so the cost column
+measures *quota consumption*, not money. Say so in the telemetry rather than
+reporting `$0.0000` as if spend were being controlled.
+
+### D-16 as approved — Postgres accepted, deferrable for the PoC
+
+Approved, with an explicit escape: **if SQLAlchemy over SQLite is sufficient to
+prove `Ask FinHive`, Postgres may be deferred.** D-15 is unaffected either way —
+`finhive/db/encryption.py` imports only `cryptography` and encrypts equally well
+against SQLite, so "encrypted at rest" does not depend on the backend.
+
+What the deferral genuinely costs, so the choice is informed:
+
+| | Postgres now | SQLite now, Postgres later |
+|---|---|---|
+| Phase 0 | 11 issues, 27 pt | ~5 issues, ~12 pt |
+| Working tab | ~2 weeks later | ~2 weeks sooner |
+| Migration 0001-0005 | applied now | rewritten for SQLite, or skipped |
+| `org_id` scoping | real from day one | retrofitted after data exists |
+| pgvector | available, unused | needs the move first |
+| Real-data migration | one hop | two hops (SQLite→SQLite-encrypted→Postgres) |
+
+The `org_id` row is the one that bites: retrofitting a NOT NULL tenant key onto a
+populated table is materially worse than carrying it from the start, and it is
+what makes the eventual MVP2 port and RLS possible.
+
+**This fork is not yet chosen.** Recorded here so the decision is explicit rather
+than drifting.
+
+### D-17 — LLM emits parameterised SQL instead of calling tools ⏳
+
+**Proposed by the operator.** Rather than seven tool schemas, the model returns a
+structured SQL statement with named placeholders; the application layer substitutes
+real values and executes it locally against the database.
+
+The obvious objection does not apply: because the model emits
+`WHERE borrower_group = :group` and never the slug itself, **no cleartext crosses
+the endpoint** and D-12 holds. It also removes tool-schema maintenance entirely,
+and the model never gets database access — the app does.
+
+Real tradeoffs, which is why this is a spike and not a decision:
+
+- **Breaks the projection rule.** SQL returns rows. A tool returning
+  `{count, total_amount, ref_ids[]}` cannot leak a name it was never given; a
+  `SELECT *` pulls encrypted columns back to be decrypted in bulk.
+- **Encrypted columns cannot be filtered in SQL.** `borrower_name_ct` is
+  ciphertext with a random IV — `WHERE borrower_name = :name` cannot work.
+  Model-authored SQL must be restricted to the blind-index columns and the
+  plaintext ones, which is a non-obvious constraint to express in a prompt.
+- **Harder to evaluate.** "Did it call `resolve_entity` before `query_loans`?" has
+  one right answer. "Is this SQL correct?" has many, and equivalence checking is
+  its own problem.
+- **Silent wrongness.** A model-authored `WHERE` missing `is_active = true`
+  quietly includes archived loans. A typed tool argument cannot omit a field the
+  schema requires.
+
+**Measure, do not assume** — the operator's own framing. Spike: the same ten
+fixture questions through both designs, comparing `context_precision`,
+answer correctness, token cost and latency. Run it before committing to seven tool
+schemas, since that is the expensive half to undo.
+
+### Superseded proposal record
 
 Raised by the MVP1.1 plan review (`docs/MVP1_1_ASK_FINHIVE.md`). The plan pulls
 the Ask FinHive agent and the proposal path forward onto the MVP1 desktop app,
@@ -343,10 +434,14 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
   110–114). KCH-188 and KCH-191 are M3 today; their logic lands in M1.1 —
   recorded here as a milestone crossing.
 
-### Open until approved
+### Still open after the 2026-09-22 decisions
 
-- D-4a — evidence required: spike passes E2 on Groq + one non-Groq target.
-- D-8 — operator sign-off on the queue reorder.
+- **D-4a** — approved, but conditional on evidence: suite E2 must pass on the
+  chosen free-tier provider. Tool-calling is not guaranteed there. Until then the
+  transport is decided and the *provider* is not.
+- **D-16** — approved, but the Postgres-now vs SQLite-now fork is unchosen.
+- **D-17** — spike before any commitment; see the comparison above.
+- ~~D-8 — operator sign-off on the queue reorder.~~ **Approved 2026-09-22.**
   > **D-8's original second clause is superseded by D-15.** It read: "binding
   > Decision 12 to a desktop app that has no encryption at rest — the tokeniser
   > protects egress only; `loans.db` stays plaintext until M1a." That is no longer
@@ -364,4 +459,5 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
 | 2026-09-07 | D-1 … D-7 approved. OQ-01 India / `ap-south-1`. OQ-02 7-year retention (supersedes 24-month recommendation). OQ-03 viewer read-only agent. |
 | 2026-09-08 | Decisions 02–05, 08–11 approved. OQ-04 encryption scope expanded to all NPI. Decisions 12–14: tokenise amounts to the LLM; rates and periods stay plaintext. NPI protection confirmed mandatory under FinHive policy. All architectural decisions closed. |
 | 2026-09-21 | **Reopened.** MVP1.1 pull-forward proposed D-4a (OpenAI-compatible client, no LiteLLM) and D-8 (M1.1 scope: tokenise names + amounts from day one, proposals as batches, null due_date stays Overdue, M1.1 ahead of M1a). Decision 12 confirmed binding on MVP1.1. Awaiting approval. |
-| 2026-09-22 | **Postgres pivot.** Operator interview added D-1a (SQLAlchemy over Postgres, sync — D-1's raw-SQL choice scoped to the MVP2 web backend), D-15 (encryption at rest mandatory in M1.1; master key interim in env), D-16 (local Docker `pgvector/pgvector:pg16` replaces Supabase). OQ-01 amended: data at rest is local, so only Groq inference crosses. M1a's encryption and schema scope absorbed into M1.1; KCH-99/100/105/114 re-milestoned. Awaiting approval. |
+| 2026-09-22 | **DECIDED.** D-1a, D-15, D-8 approved; D-12 confirmed. D-4a approved but **modified**: provider is a free-tier open-source endpoint (NVIDIA Build / DeepSeek / OpenRouter), not Groq — dev and demo both at zero cost; the tool-calling spike becomes blocking and moves ahead of the tool work. D-16 approved but **deferrable**: SQLite may carry the PoC, since encryption is backend-independent. OQ-01 amended, plus new **D-17** (model emits parameterised SQL instead of tool calls) — spike before commitment. |
+| 2026-09-22 | **Postgres pivot proposed.** Operator interview added D-1a (SQLAlchemy over Postgres, sync — D-1's raw-SQL choice scoped to the MVP2 web backend), D-15 (encryption at rest mandatory in M1.1; master key interim in env), D-16 (local Docker `pgvector/pgvector:pg16` replaces Supabase). OQ-01 amended: data at rest is local, so only Groq inference crosses. M1a's encryption and schema scope absorbed into M1.1; KCH-99/100/105/114 re-milestoned. Awaiting approval. |
