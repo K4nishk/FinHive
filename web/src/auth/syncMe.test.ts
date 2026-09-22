@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { syncMe } from "./syncMe";
+import { MeFetchError, syncMe } from "./syncMe";
 import type { AuthClient, MeResponse, Session } from "./types";
 
 function makeSession(accessToken: string): Session {
@@ -41,7 +41,7 @@ test("syncMe: refreshes once and retries on a 401-style failure", async () => {
   const freshSession = makeSession("fresh");
   const fetchMe = async (token: string) => {
     if (token === "stale") {
-      throw new Error("401");
+      throw new MeFetchError(401);
     }
     return me;
   };
@@ -62,7 +62,7 @@ test("syncMe: fails without a second retry when the refreshed session also 401s"
   let fetchMeCalls = 0;
   const fetchMe = async () => {
     fetchMeCalls += 1;
-    throw new Error("401");
+    throw new MeFetchError(401);
   };
   const authClient: Pick<AuthClient, "refreshSession"> = {
     refreshSession: async () => ({
@@ -76,10 +76,31 @@ test("syncMe: fails without a second retry when the refreshed session also 401s"
   assert.equal(fetchMeCalls, 2);
 });
 
+test("syncMe: does not refresh the session on a non-401 failure", async () => {
+  const session = makeSession("valid");
+  let refreshCalls = 0;
+  let fetchMeCalls = 0;
+  const fetchMe = async () => {
+    fetchMeCalls += 1;
+    throw new MeFetchError(500);
+  };
+  const authClient: Pick<AuthClient, "refreshSession"> = {
+    refreshSession: async () => {
+      refreshCalls += 1;
+      return { data: { session: makeSession("fresh") }, error: null };
+    },
+  };
+
+  const result = await syncMe(authClient, fetchMe, session);
+  assert.deepEqual(result, { kind: "failed" });
+  assert.equal(refreshCalls, 0);
+  assert.equal(fetchMeCalls, 1);
+});
+
 test("syncMe: fails when the refresh itself errors", async () => {
   const staleSession = makeSession("stale");
   const fetchMe = async () => {
-    throw new Error("401");
+    throw new MeFetchError(401);
   };
   const authClient: Pick<AuthClient, "refreshSession"> = {
     refreshSession: async () => ({

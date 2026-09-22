@@ -7,19 +7,28 @@ import { AuthContext, type AuthContextValue } from "./AuthProvider";
 import { RoleGate } from "./RoleGate";
 import type { MeResponse } from "./types";
 
-function authValue(me: MeResponse | null): AuthContextValue {
+function authValue(
+  me: MeResponse | null,
+  status?: AuthContextValue["status"],
+): AuthContextValue {
   return {
     session: null,
     me,
-    status: me ? "authenticated" : "unauthenticated",
+    status: status ?? (me ? "authenticated" : "unauthenticated"),
     signOut: async () => {},
   };
 }
 
-function withAuth(me: MeResponse | null, node: ReactNode) {
+function withAuth(
+  me: MeResponse | null,
+  node: ReactNode,
+  status?: AuthContextValue["status"],
+) {
   return (
     <MemoryRouter>
-      <AuthContext.Provider value={authValue(me)}>{node}</AuthContext.Provider>
+      <AuthContext.Provider value={authValue(me, status)}>
+        {node}
+      </AuthContext.Provider>
     </MemoryRouter>
   );
 }
@@ -82,6 +91,19 @@ test("RoleGate disable: a disallowed role gets a disabled control, not a hidden 
   );
   assert.match(html, /Delete loan/);
   assert.match(html, /disabled=""/);
+});
+
+test("RoleGate redirect: does not redirect while auth is still loading", () => {
+  const html = renderToStaticMarkup(
+    withAuth(
+      null,
+      <RoleGate allow={["owner"]} variant="redirect" redirectTo="/login">
+        <button>Delete loan</button>
+      </RoleGate>,
+      "loading",
+    ),
+  );
+  assert.equal(html, "");
 });
 
 test("RoleGate: an unresolved (null) me is treated as disallowed", () => {

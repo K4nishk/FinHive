@@ -34,6 +34,20 @@ test("SESSION_CHANGED with a session keeps status until me loads", () => {
   assert.deepEqual(next, { session, me: null, status: "loading" });
 });
 
+test("SESSION_CHANGED to a different user clears the previous user's me", () => {
+  const authenticated = { session, me, status: "authenticated" as const };
+  const otherUser: Session = {
+    ...session,
+    access_token: "other-token",
+    user: { id: "user-2", email: "other@example.com" },
+  };
+  const next = authReducer(authenticated, {
+    type: "SESSION_CHANGED",
+    session: otherUser,
+  });
+  assert.deepEqual(next, { session: otherUser, me: null, status: "loading" });
+});
+
 test("SESSION_CHANGED with null signs the user out", () => {
   const authenticated = { session, me, status: "authenticated" as const };
   const next = authReducer(authenticated, {

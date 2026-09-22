@@ -32,7 +32,12 @@ export function RoleGate({
   variant = "hide",
   redirectTo = "/",
 }: RoleGateProps) {
-  const { me } = useAuth();
+  const { me, status } = useAuth();
+  // `me` is null both for "not allowed" and for "not resolved yet". Deciding on
+  // the second is how variant="redirect" bounces an authorised user mid-load.
+  if (status === "loading") {
+    return <>{fallback}</>;
+  }
   const decision = resolveRoleGateDecision(
     me?.role,
     allow,

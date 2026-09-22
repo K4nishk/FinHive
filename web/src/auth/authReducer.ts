@@ -35,6 +35,11 @@ export function authReducer(state: AuthState, event: AuthEvent): AuthState {
       if (event.session === null) {
         return signedOutState;
       }
+      // A different user means the previous user's `me` (and its "authenticated"
+      // status) must not survive the switch: re-resolve /api/me from scratch.
+      if (state.session?.user.id !== event.session.user.id) {
+        return { session: event.session, me: null, status: "loading" };
+      }
       return { ...state, session: event.session };
     case "ME_LOADED":
       return { ...state, me: event.me, status: "authenticated" };

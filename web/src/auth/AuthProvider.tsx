@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { authReducer, initialAuthState, type AuthStatus } from "./authReducer";
-import { syncMe } from "./syncMe";
+import { MeFetchError, syncMe } from "./syncMe";
 import type { AuthClient, MeResponse, Session } from "./types";
 
 export interface AuthContextValue {
@@ -27,7 +27,7 @@ async function defaultFetchMe(accessToken: string): Promise<MeResponse> {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) {
-    throw new Error(`GET /api/me failed with ${response.status}`);
+    throw new MeFetchError(response.status);
   }
   return (await response.json()) as MeResponse;
 }
