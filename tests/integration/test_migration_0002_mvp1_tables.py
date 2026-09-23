@@ -26,6 +26,15 @@ import pytest
 
 asyncpg = pytest.importorskip("asyncpg")
 
+from finhive.db.blind_index import (  # noqa: E402
+    compute_blind_index,
+    derive_key_index,
+)
+from finhive.db.encryption import (  # noqa: E402
+    KEY_LENGTH,
+    encrypt_amount,
+    encrypt_field,
+)
 from finhive.db.migrations import apply_pending  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -37,6 +46,21 @@ _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 # TEST_DATABASE_URL pointing at a real application database can't lose that
 # database's tables -- `_reset` can only ever affect this schema.
 _TEST_SCHEMA = "kch93_migration_test"
+
+# This module is about migration 0002, but `apply_pending` applies the whole
+# chain: 0003 renames the NPI columns to `_ct` and 0004 adds NOT NULL `_bidx`
+# companions. So inserts here must satisfy the FINAL schema, not 0002's.
+# Org scoping -- what these tests actually assert -- is unaffected by either.
+_MASTER = b"\x02" * KEY_LENGTH
+_KEY_INDEX = derive_key_index(_MASTER)
+
+
+def _ct(value: str) -> bytes:
+    return encrypt_field(value, _MASTER)
+
+
+def _bidx(value: str, column: str) -> bytes:
+    return compute_blind_index(value, _KEY_INDEX, column=column)
 
 
 async def _reset(conn: asyncpg.Connection) -> None:
@@ -66,19 +90,27 @@ def test_two_orgs_can_independently_reuse_the_same_reference_id() -> None:
 
             insert_loan = """
                 INSERT INTO loans (
-                    org_id, reference_id, borrower_name, borrower_group,
-                    depositor_name, amount, giving_date, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    org_id, reference_id,
+                    borrower_name_ct, borrower_name_bidx,
+                    borrower_group_ct, borrower_group_bidx,
+                    depositor_name_ct, depositor_name_bidx,
+                    amount_ct, giving_date, status
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+                )
             """
             for org_id in (org_a, org_b):
                 await conn.execute(
                     insert_loan,
                     org_id,
                     "2026_01_001",
-                    "borrower",
-                    "group",
-                    "depositor",
-                    1000,
+                    _ct("borrower"),
+                    _bidx("borrower", "borrower_name"),
+                    _ct("group"),
+                    _bidx("group", "borrower_group"),
+                    _ct("depositor"),
+                    _bidx("depositor", "depositor_name"),
+                    encrypt_amount(Decimal(1000), _MASTER),
                     date(2026, 1, 1),
                     "Active",
                 )
@@ -115,18 +147,26 @@ def test_reference_id_must_stay_unique_within_the_same_org() -> None:
 
             insert_loan = """
                 INSERT INTO loans (
-                    org_id, reference_id, borrower_name, borrower_group,
-                    depositor_name, amount, giving_date, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    org_id, reference_id,
+                    borrower_name_ct, borrower_name_bidx,
+                    borrower_group_ct, borrower_group_bidx,
+                    depositor_name_ct, depositor_name_bidx,
+                    amount_ct, giving_date, status
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+                )
             """
             await conn.execute(
                 insert_loan,
                 org_id,
                 "2026_01_001",
-                "borrower",
-                "group",
-                "depositor",
-                1000,
+                _ct("borrower"),
+                _bidx("borrower", "borrower_name"),
+                _ct("group"),
+                _bidx("group", "borrower_group"),
+                _ct("depositor"),
+                _bidx("depositor", "depositor_name"),
+                encrypt_amount(Decimal(1000), _MASTER),
                 date(2026, 1, 1),
                 "Active",
             )
@@ -136,10 +176,13 @@ def test_reference_id_must_stay_unique_within_the_same_org() -> None:
                     insert_loan,
                     org_id,
                     "2026_01_001",
-                    "another borrower",
-                    "group",
-                    "depositor",
-                    2000,
+                    _ct("another borrower"),
+                    _bidx("another borrower", "borrower_name"),
+                    _ct("group"),
+                    _bidx("group", "borrower_group"),
+                    _ct("depositor"),
+                    _bidx("depositor", "depositor_name"),
+                    encrypt_amount(Decimal(2000), _MASTER),
                     date(2026, 1, 2),
                     "Active",
                 )
@@ -188,20 +231,28 @@ def test_report_record_cannot_attach_to_another_orgs_report() -> None:
 
             insert_record = """
                 INSERT INTO report_records (
-                    org_id, report_id, reference_id, borrower_name,
-                    depositor_name, amount, giving_date, extension_period,
+                    org_id, report_id, reference_id,
+                    borrower_name_ct, borrower_name_bidx,
+                    depositor_name_ct, depositor_name_bidx,
+                    amount_ct, giving_date, extension_period,
                     extension_period_unit, interest_rate, commission_rate
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                )
             """
             try:
                 await conn.execute(
                     insert_record,
                     org_b,
                     "20260101",
+                    # reference_id is NOT encrypted -- it is a lookup key,
+                    # and report_records has no borrower_group column.
                     "2026_01_001",
-                    "borrower",
-                    "depositor",
-                    1000,
+                    _ct("borrower"),
+                    _bidx("borrower", "borrower_name"),
+                    _ct("depositor"),
+                    _bidx("depositor", "depositor_name"),
+                    encrypt_amount(Decimal(1000), _MASTER),
                     date(2026, 1, 1),
                     30,
                     "days",

@@ -23,6 +23,10 @@ import pytest
 
 asyncpg = pytest.importorskip("asyncpg")
 
+from finhive.db.blind_index import (  # noqa: E402
+    compute_blind_index,
+    derive_key_index,
+)
 from finhive.db.encryption import (  # noqa: E402
     KEY_LENGTH,
     DecryptionError,
@@ -40,6 +44,16 @@ _MIGRATIONS_DIR = (
     Path(__file__).resolve().parents[2] / "migrations"
 )
 _KEY = b"\x03" * KEY_LENGTH
+_KEY_INDEX = derive_key_index(b"\x03" * KEY_LENGTH)
+
+
+def _bidx(value: str, column: str) -> bytes:
+    """Blind index for a `_bidx` column, NOT NULL as of migration 0004.
+
+    This module is about 0003, but `apply_pending` applies the whole chain,
+    so every insert must satisfy the FINAL schema's constraints, not 0003's.
+    """
+    return compute_blind_index(value, _KEY_INDEX, column=column)
 
 _TABLES = [
     "report_records",
@@ -102,13 +116,13 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 """
                 INSERT INTO loans (
                     org_id, reference_id,
-                    borrower_name_ct,
-                    borrower_group_ct,
-                    depositor_name_ct,
+                    borrower_name_ct, borrower_name_bidx,
+                    borrower_group_ct, borrower_group_bidx,
+                    depositor_name_ct, depositor_name_bidx,
                     depositor_group_ct,
                     amount_ct, giving_date, status
                 ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
                 )
                 """,
                 org_id,
@@ -116,12 +130,15 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 encrypt_field(
                     plaintexts["borrower_name"], _KEY
                 ),
+                _bidx(plaintexts["borrower_name"], "borrower_name"),
                 encrypt_field(
                     plaintexts["borrower_group"], _KEY
                 ),
+                _bidx(plaintexts["borrower_group"], "borrower_group"),
                 encrypt_field(
                     plaintexts["depositor_name"], _KEY
                 ),
+                _bidx(plaintexts["depositor_name"], "depositor_name"),
                 encrypt_field(
                     plaintexts["depositor_group"], _KEY
                 ),
@@ -134,13 +151,13 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 """
                 INSERT INTO loan_history (
                     org_id, reference_id,
-                    borrower_name_ct,
-                    borrower_group_ct,
-                    depositor_name_ct,
+                    borrower_name_ct, borrower_name_bidx,
+                    borrower_group_ct, borrower_group_bidx,
+                    depositor_name_ct, depositor_name_bidx,
                     depositor_group_ct,
                     amount_ct, giving_date
                 ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
                 )
                 """,
                 org_id,
@@ -148,12 +165,15 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 encrypt_field(
                     plaintexts["borrower_name"], _KEY
                 ),
+                _bidx(plaintexts["borrower_name"], "borrower_name"),
                 encrypt_field(
                     plaintexts["borrower_group"], _KEY
                 ),
+                _bidx(plaintexts["borrower_group"], "borrower_group"),
                 encrypt_field(
                     plaintexts["depositor_name"], _KEY
                 ),
+                _bidx(plaintexts["depositor_name"], "depositor_name"),
                 encrypt_field(
                     plaintexts["depositor_group"], _KEY
                 ),
@@ -174,8 +194,8 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 INSERT INTO report_records (
                     org_id, report_id,
                     reference_id,
-                    borrower_name_ct,
-                    depositor_name_ct,
+                    borrower_name_ct, borrower_name_bidx,
+                    depositor_name_ct, depositor_name_bidx,
                     depositor_group_ct,
                     amount_ct, giving_date,
                     extension_period,
@@ -189,7 +209,7 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,
                     $9,$10,$11,$12,$13,$14,
-                    $15,$16
+                    $15,$16,$17,$18
                 )
                 """,
                 org_id,
@@ -198,9 +218,11 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 encrypt_field(
                     plaintexts["borrower_name"], _KEY
                 ),
+                _bidx(plaintexts["borrower_name"], "borrower_name"),
                 encrypt_field(
                     plaintexts["depositor_name"], _KEY
                 ),
+                _bidx(plaintexts["depositor_name"], "depositor_name"),
                 encrypt_field(
                     plaintexts["depositor_group"], _KEY
                 ),
@@ -402,19 +424,22 @@ def test_tampered_ct_from_postgres_fails_auth_tag() -> None:
                 """
                 INSERT INTO loans (
                     org_id, reference_id,
-                    borrower_name_ct,
-                    borrower_group_ct,
-                    depositor_name_ct,
+                    borrower_name_ct, borrower_name_bidx,
+                    borrower_group_ct, borrower_group_bidx,
+                    depositor_name_ct, depositor_name_bidx,
                     amount_ct, giving_date, status
                 ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
                 )
                 """,
                 org_id,
                 "2026_01_001",
                 encrypt_field("Sharma Traders", _KEY),
+                _bidx("Sharma Traders", "borrower_name"),
                 encrypt_field("group", _KEY),
+                _bidx("group", "borrower_group"),
                 encrypt_field("depositor", _KEY),
+                _bidx("depositor", "depositor_name"),
                 encrypt_field("150000", _KEY),
                 date(2026, 1, 1),
                 "Active",
