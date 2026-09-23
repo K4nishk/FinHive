@@ -8,6 +8,7 @@ Startup sequence:
 """
 import logging
 import sys
+from pathlib import Path
 
 from loan_manager.infrastructure.logging.logger import setup_logging, get_logger
 from loan_manager.infrastructure.database.session import DatabaseSession
@@ -75,14 +76,58 @@ def main() -> None:
 
     if needs_migration(DB_PATH):
         logger.error("Database predates encryption at rest — refusing to start")
+        app_dir = Path(__file__).resolve().parent.parent
         print(
-            f"\nCannot start Loan Manager.\n\n"
-            f"{DB_PATH} was created before encryption at rest became mandatory "
-            f"(ARB D-15), so it still holds unencrypted records.\n\n"
-            f"Encrypt it once, with the key you just configured:\n\n"
-            f"    python -m loan_manager.infrastructure.migrations.encrypt_existing_rows\n\n"
-            f"A backup is written beside the database first. This is one-way: "
-            f"after it runs, the data cannot be read without that master key.\n",
+            f"""
+Cannot start Loan Manager.
+
+{DB_PATH}
+was created before encryption at rest became mandatory (ARB D-15), so it
+still holds unencrypted records. It must be encrypted once before the app
+will open it.
+
+This is NOT done automatically. Encryption is one-way: afterwards the data
+can only be read with the master key you have configured, and that is not a
+decision this program should make silently about your only copy of the loan
+book.
+
+
+STEP 1 — Take your own backup, somewhere outside the app folder.
+
+    cp "{DB_PATH}" ~/Desktop/loans-backup-before-encryption.db
+
+  Keep it until you have confirmed the app opens and your records look
+  right. The migration also writes its own copy beside the database, as
+  loans.db.pre-encryption-backup, but a backup on the same disk in the same
+  folder is a convenience, not a backup. Yours is the one that matters.
+
+
+STEP 2 — Back up your master key, if you have not already.
+
+  It is in ops/.env.local as FINHIVE_KEY_VERSION and FINHIVE_MASTER_KEY_V1.
+  Store it somewhere separate from the database backup -- a password
+  manager, not the same folder. After Step 3 the two are useless apart:
+  losing the key loses the data, and there is no recovery path.
+
+
+STEP 3 — Run the migration.
+
+    cd "{app_dir}"
+    python -m loan_manager.infrastructure.migrations.encrypt_existing_rows
+
+  It encrypts every record in a single transaction, then decrypts each one
+  back and compares it to the original value before committing. If any row
+  does not survive that round trip, nothing is written at all. It finishes
+  by compacting the file, which is what actually removes the old plaintext
+  -- encrypting the rows alone leaves the previous values readable in the
+  file's free space.
+
+
+STEP 4 — Start Loan Manager again.
+
+  It will open normally. Check that your loans are present and correct,
+  then you can delete the backups from Step 1.
+""",
             file=sys.stderr,
         )
         sys.exit(1)

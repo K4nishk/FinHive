@@ -17,6 +17,7 @@ rather than by reading the code.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from datetime import date, datetime
 from decimal import Decimal
 from importlib.util import find_spec
@@ -337,3 +338,102 @@ class TestWholeRupeeGuardOnTheWayIn:
         assert isinstance(exc.value.orig, ValueError)
         assert "never float" in str(exc.value.orig)
         session.rollback()
+
+
+class TestBackendSchemaConvergence:
+    """The SQLite models and the Postgres migrations must name columns the same.
+
+    They diverged once already: the models mapped bare `borrower_name` while
+    migrations/0003 creates `borrower_name_ct`, so the same ORM could not have
+    read a Postgres database at all. Wiring Postgres later (ARB D-16) is only
+    "smooth" if one set of models serves both, so this pins the contract
+    rather than leaving it to be rediscovered at the pivot.
+
+    Runs without Postgres: it compares the ORM's declared column names against
+    the migration SQL as text.
+    """
+
+    # tests/unit/<file> -> unit -> tests -> "Loan Manager" -> src -> repo root
+    _PG = Path(__file__).resolve().parents[4] / "migrations"
+
+    def _postgres_columns(self) -> set[str]:
+        import re
+
+        if not self._PG.exists():
+            pytest.skip(f"Postgres migrations not present at {self._PG}")
+
+        sql = "".join(
+            (self._PG / name).read_text()
+            for name in (
+                "0003_encrypt_npi_columns.sql",
+                "0004_add_identity_blind_index.sql",
+            )
+        )
+        return set(re.findall(r"ADD COLUMN (\w+)", sql)) | set(
+            re.findall(r"TO (\w+)", sql)
+        )
+
+    @needs_crypto
+    @pytest.mark.parametrize(
+        "model_name", ["LoanModel", "LoanHistoryModel", "ReportRecordModel"]
+    )
+    def test_every_encrypted_column_exists_in_the_postgres_migrations(self, model_name):
+        from loan_manager.infrastructure.database import models as m
+
+        model = getattr(m, model_name)
+        declared = {
+            c.name
+            for c in model.__table__.columns
+            if c.name.endswith("_ct") or c.name.endswith("_bidx")
+        }
+        assert declared, f"{model_name} declares no encrypted columns"
+
+        missing = sorted(declared - self._postgres_columns())
+        assert not missing, (
+            f"{model_name} maps {missing}, which migrations/0003+0004 do not "
+            f"create. The ORM would not read a Postgres database."
+        )
+
+    @needs_crypto
+    def test_attribute_names_stay_bare_so_repositories_are_untouched(self):
+        """The `_ct` suffix belongs to the DATABASE column, not the Python
+        attribute. If these ever diverge, every repository and mapper function
+        has to change with them."""
+        from loan_manager.infrastructure.database.models import LoanModel
+
+        for attr in ("borrower_name", "borrower_group", "depositor_name", "amount"):
+            assert hasattr(LoanModel, attr)
+            assert LoanModel.__table__.columns[
+                LoanModel.__mapper__.columns[attr].name
+            ].name == f"{attr}_ct"
+
+
+@needs_crypto
+def test_no_plaintext_in_any_encrypted_table(tmp_path):
+    """The original no-plaintext proof read `SELECT * FROM loans` only.
+
+    `loan_history` and `report_records` -- including the four derived amounts
+    that ADR-2.4 calls non-optional, because a plaintext `interest_amount`
+    solves for the principal -- were never checked by it. This scans the raw
+    file, so it covers every table at once and cannot be satisfied by a table
+    it forgot to name.
+    """
+    from loan_manager.infrastructure.migrations.encrypt_existing_rows import migrate
+
+    db = tmp_path / "legacy.db"
+    _legacy_db(db)
+    migrate(db, _ring(1, v1=M1))
+
+    raw = db.read_bytes()
+    for secret in (b"ravindra", b"sunita", b"anita", b"vijay", b"bg1", b"bg13", b"dg1"):
+        assert secret not in raw, f"{secret!r} is readable without the key"
+
+
+@needs_crypto
+def test_negative_derived_amounts_are_refused(tmp_path):
+    """Operator decision 2026-09-23: negative amounts are not expected, so a
+    negative is a calculation defect and must surface rather than persist."""
+    from finhive.db.encryption import encrypt_amount
+
+    with pytest.raises(ValueError, match="non-negative"):
+        encrypt_amount(Decimal("-1.00"), M1)

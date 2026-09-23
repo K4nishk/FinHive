@@ -14,6 +14,7 @@ from loan_manager.domain.value_objects.status import (
     ExtensionPeriodUnit,
     ReportStatus,
 )
+from loan_manager.infrastructure.database.blind_index_sync import checked_update
 from loan_manager.infrastructure.database.models import ReportModel, ReportRecordModel
 
 
@@ -131,9 +132,15 @@ class SqlAlchemyReportRepository(IReportRepository):
         return report_model_to_entity(model)
 
     def mark_approved(self, report_id: str) -> None:
-        self._session.query(ReportModel).filter(
-            ReportModel.report_id == report_id
-        ).update(
+        # Through the guard like every other bulk update, though ReportModel
+        # itself carries no encrypted column: the rule is "all Query.update()
+        # passes the identity check", with no per-model exceptions to
+        # remember. It is a set intersection, and it already covers this
+        # table if it ever gains an identity column.
+        checked_update(
+            self._session.query(ReportModel).filter(
+                ReportModel.report_id == report_id
+            ),
             {"status": ReportStatus.APPROVED.value, "updated_at": datetime.now()},
             synchronize_session="fetch",
         )

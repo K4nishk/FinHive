@@ -146,6 +146,15 @@ class EncryptedDecimal(TypeDecorator):
     legitimately carry paise, so this round-trips `Decimal` values as-is
     (quantized to two places by `encrypt_amount`/`decrypt_amount`). `None`
     passes through untouched -- these columns are all nullable.
+
+    NEGATIVE VALUES ARE REJECTED, by operator decision (2026-09-23).
+    `encrypt_amount` raises on a negative, where the previous
+    `Numeric(12, 2)` column would have stored one. That is a deliberate
+    narrowing, not an oversight: negative interest, commission, TDS and CHQ
+    amounts are not expected in this business, so a negative here means a
+    calculation defect and should surface as one rather than be persisted
+    and quietly reported. If that ever stops being true, the change belongs
+    in `finhive.db.encryption`, not in a per-column workaround here.
     """
 
     impl = LargeBinary

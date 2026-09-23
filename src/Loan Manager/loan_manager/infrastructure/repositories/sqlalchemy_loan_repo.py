@@ -6,11 +6,14 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from finhive.db.blind_index import compute_blind_index
+from finhive.db.encryption import DecryptionError
 from loan_manager.domain.entities.loan import Loan
+from loan_manager.domain.errors import DataUnreadableError
 from loan_manager.domain.repositories.loan_repository import ILoanRepository
 from loan_manager.domain.value_objects.money import Money
 from loan_manager.domain.value_objects.reference_id import ReferenceId
 from loan_manager.domain.value_objects.status import LoanStatus
+from loan_manager.infrastructure.database.blind_index_sync import checked_update
 from loan_manager.infrastructure.database.models import LoanModel
 from loan_manager.infrastructure.security.key_provider import candidate_key_index
 
@@ -173,9 +176,10 @@ class SqlAlchemyLoanRepository(ILoanRepository):
     def bulk_update_status(self, updates: list[tuple[str, LoanStatus]]) -> None:
         """Efficient bulk update of statuses."""
         for ref_id, new_status in updates:
-            self._session.query(LoanModel).filter(
-                LoanModel.reference_id == ref_id
-            ).update(
+            checked_update(
+                self._session.query(LoanModel).filter(
+                    LoanModel.reference_id == ref_id
+                ),
                 {"status": new_status.value, "updated_at": datetime.now()},
                 synchronize_session="fetch",
             )
@@ -187,9 +191,10 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         updates: list of {reference_id, giving_date, due_date}
         """
         for update in updates:
-            self._session.query(LoanModel).filter(
-                LoanModel.reference_id == update["reference_id"]
-            ).update(
+            checked_update(
+                self._session.query(LoanModel).filter(
+                    LoanModel.reference_id == update["reference_id"]
+                ),
                 {
                     "giving_date": update["giving_date"],
                     "due_date": update["due_date"],
@@ -200,9 +205,10 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         self._session.flush()
 
     def set_inactive(self, reference_id: str) -> None:
-        self._session.query(LoanModel).filter(
-            LoanModel.reference_id == reference_id
-        ).update(
+        checked_update(
+            self._session.query(LoanModel).filter(
+                LoanModel.reference_id == reference_id
+            ),
             {"is_active": False, "status": LoanStatus.PAIDOFF.value, "updated_at": datetime.now()},
             synchronize_session="fetch",
         )
@@ -233,6 +239,15 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         if active_only:
             query = query.filter(LoanModel.is_active == True)  # noqa: E712
 
-        values = {getattr(model, field) for model in query.all()}
+        try:
+            values = {getattr(model, field) for model in query.all()}
+        except DecryptionError as exc:
+            # Translate at the layer that owns the storage concern. The
+            # presentation layer must not import finhive to know what
+            # happened, and it must not be handed an empty list -- an
+            # unreadable loan book and an empty one are different facts.
+            raise DataUnreadableError(
+                f"while reading distinct values of {field!r}"
+            ) from exc
         values.discard(None)
         return sorted(values)

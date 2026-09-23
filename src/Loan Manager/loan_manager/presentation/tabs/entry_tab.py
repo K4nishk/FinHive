@@ -13,6 +13,7 @@ from loan_manager.application.use_cases.loans.create_loan import CreateLoan
 from loan_manager.application.use_cases.loans.get_autocomplete import GetAutocompleteValues
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
 from loan_manager.presentation.widgets.date_edit import DateEditFixed
+from loan_manager.presentation.errors import surfacing_storage_errors
 
 
 class EntryTab(QWidget):
@@ -81,7 +82,7 @@ class EntryTab(QWidget):
         layout.addStretch()
 
     def _load_autocomplete(self) -> None:
-        try:
+        with surfacing_storage_errors(self, "loading entry autocomplete"):
             autocomplete = GetAutocompleteValues(self._container.get_uow)
 
             b_names = autocomplete.execute("borrower_name")
@@ -106,11 +107,9 @@ class EntryTab(QWidget):
 
             # Build name->group mapping for auto-fill
             self._build_name_group_maps()
-        except Exception:
-            pass
 
     def _build_name_group_maps(self) -> None:
-        try:
+        with surfacing_storage_errors(self, "building name/group auto-fill maps"):
             from loan_manager.application.use_cases.loans.get_loans import GetAllLoans
             get_loans = GetAllLoans(self._container.get_uow)
             loans = get_loans.execute()
@@ -119,8 +118,6 @@ class EntryTab(QWidget):
                     self._name_group_map[loan.borrower_name.lower()] = loan.borrower_group
                 if loan.depositor_name and loan.depositor_group:
                     self._depositor_group_map[loan.depositor_name.lower()] = loan.depositor_group
-        except Exception:
-            pass
 
     def _on_borrower_name_changed(self, text: str) -> None:
         key = text.strip().lower()

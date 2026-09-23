@@ -89,3 +89,51 @@ def _sync_blind_indexes(mapper: Any, connection: Any, target: Any) -> None:
 for _model in _BIDX_SOURCE_COLUMNS:
     event.listens_for(_model, "before_insert")(_sync_blind_indexes)
     event.listens_for(_model, "before_update")(_sync_blind_indexes)
+
+
+# --- Enforcement for the paths that bypass the events above -------------
+
+IDENTITY_COLUMNS = frozenset(
+    {"borrower_name", "borrower_group", "depositor_name", "depositor_group"}
+)
+
+
+class BlindIndexBypassError(RuntimeError):
+    """A bulk UPDATE tried to change an identity column.
+
+    `Query.update()` issues SQL directly and does NOT fire the mapper events
+    above, so a row updated that way keeps its OLD `_bidx` while its `_ct`
+    becomes new ciphertext. Nothing errors. The row simply stops matching
+    every filter, autocomplete and group auto-fill, permanently and
+    silently, and no amount of re-reading the database reveals it.
+
+    This used to be "enforced" by a docstring saying the existing bulk
+    methods happen not to touch identity columns. A docstring enforces
+    nothing -- it is a note about today that the next edit silently
+    invalidates. This raises instead.
+    """
+
+
+def assert_no_identity_columns(values: dict) -> dict:
+    """Gate every bulk UPDATE payload. Returns it unchanged if safe.
+
+    Use `checked_update` rather than calling this directly; it exists
+    separately so a caller building a payload dynamically can check it
+    before deciding what to do.
+    """
+    offending = sorted(IDENTITY_COLUMNS & set(values))
+    if offending:
+        raise BlindIndexBypassError(
+            f"bulk UPDATE would set {offending} without recomputing the "
+            f"matching blind index, leaving the row unfindable by every "
+            f"filter. Load the row through the ORM and assign the attribute "
+            f"-- the before_update event then keeps `_ct` and `_bidx` "
+            f"consistent -- or recompute `<column>_bidx` in the same "
+            f"statement."
+        )
+    return values
+
+
+def checked_update(query: Any, values: dict, **kwargs: Any) -> Any:
+    """`Query.update(values)` with the identity-column guard applied."""
+    return query.update(assert_no_identity_columns(values), **kwargs)

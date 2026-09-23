@@ -53,10 +53,10 @@ class LoanModel(Base):
     # HMAC blind index below, delivered in this same change (KCH-229 was
     # folded into KCH-227 -- there is no commit where these columns are
     # encrypted and exact-match filtering is broken).
-    borrower_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    borrower_group: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_group: Mapped[Optional[str]] = mapped_column(EncryptedString(), nullable=True)
+    borrower_name: Mapped[str] = mapped_column("borrower_name_ct", EncryptedString(), nullable=False)
+    borrower_group: Mapped[str] = mapped_column("borrower_group_ct", EncryptedString(), nullable=False)
+    depositor_name: Mapped[str] = mapped_column("depositor_name_ct", EncryptedString(), nullable=False)
+    depositor_group: Mapped[Optional[str]] = mapped_column("depositor_group_ct", EncryptedString(), nullable=True)
     # Blind-index companions -- see the module-level comment above. Plain
     # LargeBinary, not one of the encrypted TypeDecorators: an HMAC digest
     # is not further encrypted, it IS the stored value.
@@ -64,7 +64,7 @@ class LoanModel(Base):
     borrower_group_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_group_bidx: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True, index=True)
-    amount: Mapped[int] = mapped_column(EncryptedRupees(), nullable=False)
+    amount: Mapped[int] = mapped_column("amount_ct", EncryptedRupees(), nullable=False)
     giving_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_period: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -90,15 +90,15 @@ class LoanHistoryModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     reference_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    borrower_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    borrower_group: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_group: Mapped[Optional[str]] = mapped_column(EncryptedString(), nullable=True)
+    borrower_name: Mapped[str] = mapped_column("borrower_name_ct", EncryptedString(), nullable=False)
+    borrower_group: Mapped[str] = mapped_column("borrower_group_ct", EncryptedString(), nullable=False)
+    depositor_name: Mapped[str] = mapped_column("depositor_name_ct", EncryptedString(), nullable=False)
+    depositor_group: Mapped[Optional[str]] = mapped_column("depositor_group_ct", EncryptedString(), nullable=True)
     borrower_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     borrower_group_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_group_bidx: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True, index=True)
-    amount: Mapped[int] = mapped_column(EncryptedRupees(), nullable=False)
+    amount: Mapped[int] = mapped_column("amount_ct", EncryptedRupees(), nullable=False)
     giving_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     paidoff_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -128,14 +128,14 @@ class ReportRecordModel(Base):
     report_id: Mapped[str] = mapped_column(String(20), ForeignKey("reports.report_id", ondelete="CASCADE"), nullable=False, index=True)
     reference_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     # No borrower_group on this table -- report_records never had one.
-    borrower_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_name: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    depositor_group: Mapped[Optional[str]] = mapped_column(EncryptedString(), nullable=True)
+    borrower_name: Mapped[str] = mapped_column("borrower_name_ct", EncryptedString(), nullable=False)
+    depositor_name: Mapped[str] = mapped_column("depositor_name_ct", EncryptedString(), nullable=False)
+    depositor_group: Mapped[Optional[str]] = mapped_column("depositor_group_ct", EncryptedString(), nullable=True)
     # No borrower_group_bidx either -- mirrors the absent borrower_group.
     borrower_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_group_bidx: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True, index=True)
-    amount: Mapped[int] = mapped_column(EncryptedRupees(), nullable=False)
+    amount: Mapped[int] = mapped_column("amount_ct", EncryptedRupees(), nullable=False)
     giving_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     extension_period: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -145,10 +145,10 @@ class ReportRecordModel(Base):
     tds_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # interest_rate/commission_rate stay plaintext (percentages, not
     # balances) -- only the derived amounts below are NPI.
-    interest_amount: Mapped[Optional[Decimal]] = mapped_column(EncryptedDecimal(), nullable=True)
-    commission_amount: Mapped[Optional[Decimal]] = mapped_column(EncryptedDecimal(), nullable=True)
-    tds_amount: Mapped[Optional[Decimal]] = mapped_column(EncryptedDecimal(), nullable=True)
-    chq_amount: Mapped[Optional[Decimal]] = mapped_column(EncryptedDecimal(), nullable=True)
+    interest_amount: Mapped[Optional[Decimal]] = mapped_column("interest_amount_ct", EncryptedDecimal(), nullable=True)
+    commission_amount: Mapped[Optional[Decimal]] = mapped_column("commission_amount_ct", EncryptedDecimal(), nullable=True)
+    tds_amount: Mapped[Optional[Decimal]] = mapped_column("tds_amount_ct", EncryptedDecimal(), nullable=True)
+    chq_amount: Mapped[Optional[Decimal]] = mapped_column("chq_amount_ct", EncryptedDecimal(), nullable=True)
     post_extension_giving_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     post_extension_due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     paidoff_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)

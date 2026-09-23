@@ -17,14 +17,17 @@ that later goes missing is indistinguishable from data loss. The app detects
 that the migration is needed and refuses to start with instructions; the
 person runs it when they are ready, having read what it will do.
 
-WHY IN-PLACE, WITHOUT RENAMING TO `_ct`
-SQLite is dynamically typed. A column declared `VARCHAR(255)` has TEXT
-affinity, which stores a BLOB as a BLOB untouched; `INTEGER`/`NUMERIC`
-affinity does the same. So the ciphertext can go into the existing column
-and the ORM reads it back as `bytes`, with no table rebuild and no rename.
-The Postgres migrations (migrations/0003, 0004) DO rename to `_ct`, because
-Postgres is statically typed and has no such option -- that divergence is
-known and is tracked separately.
+COLUMN NAMES CONVERGE ON `_ct`
+Each encrypted column is renamed to `<name>_ct`, which is exactly what
+migrations/0003 produces on Postgres. One set of ORM models then serves both
+backends, so wiring Postgres later needs no second mapping and no rename
+migration on either side. The ORM keeps the bare ATTRIBUTE names
+(`borrower_name` maps to column `borrower_name_ct`), so repositories, the
+domain and every use case are untouched.
+
+SQLite is dynamically typed, so the ciphertext BLOB sits happily in a column
+originally declared `VARCHAR(255)`/`INTEGER`/`NUMERIC` -- the rename is for
+naming parity with Postgres, not because the type would otherwise object.
 
 SAFETY
 - Refuses to run twice (detects `key_version`).
@@ -175,6 +178,19 @@ def migrate(
             if "key_version" in existing:
                 continue  # already done (partial re-run)
 
+            # Rename each plaintext column to its `_ct` name, so SQLite ends
+            # up with exactly the column names migrations/0003 gives Postgres
+            # and one set of ORM models serves both backends. The ORM keeps
+            # the bare ATTRIBUTE names, so no repository changes.
+            encrypted = (
+                list(plan["strings"]) + list(plan["rupees"]) + list(plan["decimals"])
+            )
+            for column in encrypted:
+                if column in existing and f"{column}_ct" not in existing:
+                    conn.execute(
+                        f"ALTER TABLE {table} RENAME COLUMN {column} TO {column}_ct"
+                    )
+
             for column in plan["bidx"]:
                 if f"{column}_bidx" not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}_bidx BLOB")
@@ -184,7 +200,7 @@ def migrate(
                 list(plan["strings"]) + list(plan["rupees"]) + list(plan["decimals"])
             )
             rows = conn.execute(
-                f"SELECT id, {', '.join(payload)} FROM {table}"
+                f"SELECT id, {', '.join(f'{c}_ct' for c in payload)} FROM {table}"
             ).fetchall()
             originals[table] = rows
 
@@ -195,19 +211,19 @@ def migrate(
 
                 for column in plan["strings"]:
                     raw = cells[column]
-                    sets[column] = (
+                    sets[f"{column}_ct"] = (
                         encrypt_field(str(raw), key_data) if raw is not None else None
                     )
                 for column in plan["rupees"]:
                     raw = cells[column]
-                    sets[column] = (
+                    sets[f"{column}_ct"] = (
                         encrypt_amount(Decimal(int(raw)), key_data)
                         if raw is not None
                         else None
                     )
                 for column in plan["decimals"]:
                     raw = cells[column]
-                    sets[column] = (
+                    sets[f"{column}_ct"] = (
                         encrypt_amount(_to_decimal(raw), key_data)
                         if raw is not None
                         else None
@@ -274,7 +290,8 @@ def _verify(
         for row in rows:
             row_id, before = row[0], row[1:]
             after = conn.execute(
-                f"SELECT {', '.join(payload)} FROM {table} WHERE id = ?", (row_id,)
+                f"SELECT {', '.join(f'{c}_ct' for c in payload)} FROM {table} "
+                f"WHERE id = ?", (row_id,)
             ).fetchone()
             for column, was, now in zip(payload, before, after):
                 if was is None:
