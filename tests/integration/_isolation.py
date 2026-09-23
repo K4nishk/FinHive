@@ -65,3 +65,21 @@ async def reset_to_clean_schema(conn: Any, schema: str = TEST_SCHEMA) -> None:
     await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
     await conn.execute(f"CREATE SCHEMA {schema}")
     await conn.execute(f"SET search_path TO {schema}")
+
+
+async def drop_test_schema(conn: Any, schema: str = TEST_SCHEMA) -> None:
+    """Tear the schema down, dependents and all.
+
+    The counterpart to `reset_to_clean_schema`, and it exists for the same
+    reason: teardown by table name goes stale exactly as setup did. Dropping
+    `users` by name started failing once 0005 added `proposed_mutations` and
+    `agent_turns`, whose foreign keys depend on it::
+
+        DependentObjectsStillExistError: cannot drop table users because
+        other objects depend on it
+
+    CASCADE on the schema removes whatever the chain created, in whatever
+    order it needs, without this function knowing any table names.
+    """
+    await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+

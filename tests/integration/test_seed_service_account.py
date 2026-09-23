@@ -41,7 +41,7 @@ _REQUIRES = not (
 )
 
 
-from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
 
 
 @pytest.mark.skipif(
@@ -88,11 +88,9 @@ def test_seeding_twice_resolves_to_one_real_org_and_role_owner() -> None:
             )
             return first_org, first_user, str(row["org_id"]), row["role"]
         finally:
-            await conn.execute("DROP TABLE IF EXISTS users")
-            await conn.execute("DROP TABLE IF EXISTS orgs")
-            await conn.execute(
-                "DROP TABLE IF EXISTS schema_migrations"
-            )
+            # Schema-level teardown: dropping `users` by name fails once
+            # migration 0005's foreign keys reference it.
+            await drop_test_schema(conn)
             await conn.close()
 
     first_org, first_user, resolved_org_id, resolved_role = asyncio.run(_run())
