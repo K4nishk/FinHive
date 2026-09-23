@@ -10,9 +10,15 @@
 -- identity columns only: one `_bidx` column per field, holding
 -- HMAC-SHA256(key_index, normalize(plaintext))[:16] (finhive/db/blind_index.py),
 -- indexed for O(log n) exact-match lookup (MVP1 parity A5.8), autocomplete
--- (A1.1) and group auto-fill (A1.2). `key_index` is derived from `key_data`
--- via HKDF with an info string distinct from any other derived key, so the
--- two keys can never collide or be swapped -- see blind_index.py.
+-- (A1.1) and group auto-fill (A1.2). `key_index` is derived directly from
+-- the master key via HKDF, with an info string distinct from any other
+-- derived key -- NEVER derived from `key_data` (the AES-GCM key), and
+-- `key_data` is never derived from it either. Chaining one through the
+-- other is exactly the design ADR-2.3 "Key management" rules out: it would
+-- mean any exposure of `key_data`, which happens on every encrypt/decrypt
+-- call, also hands over the blind-index key. See blind_index.py and
+-- keys.py's `derive_key_data`/`derive_key_index`, both taking the master
+-- directly.
 --
 -- amount, interest_amount, commission_amount, tds_amount and chq_amount are
 -- NPI financial values (ADR-2.4) and get NO index of any kind here or ever:
