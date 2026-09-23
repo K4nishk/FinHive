@@ -23,8 +23,14 @@
 
 CREATE TABLE proposed_mutations (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id         UUID NOT NULL REFERENCES organizations(id),
-    loan_id        UUID NOT NULL REFERENCES loans(id),
+    org_id         UUID NOT NULL REFERENCES orgs(id),
+    -- BIGINT, not UUID: migrations/0002 defines loans.id as
+    -- `BIGINT GENERATED ALWAYS AS IDENTITY`, so a UUID column here cannot
+    -- carry the foreign key at all -- Postgres refuses it outright with
+    -- "Key columns loan_id and id are of incompatible types: uuid and bigint".
+    -- The other five FKs in this file DO target UUID keys (orgs.id,
+    -- users.id), which is how the mismatch survived review.
+    loan_id        BIGINT NOT NULL REFERENCES loans(id),
     mutation_type  TEXT NOT NULL,
     before_state_ct BYTEA NOT NULL,
     after_state_ct  BYTEA NOT NULL,
@@ -45,7 +51,7 @@ CREATE INDEX proposed_mutations_status_idx
 
 CREATE TABLE agent_turns (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id            UUID NOT NULL REFERENCES organizations(id),
+    org_id            UUID NOT NULL REFERENCES orgs(id),
     user_id           UUID NOT NULL REFERENCES users(id),
     user_message      TEXT NOT NULL,
     react_trace_ct    BYTEA NOT NULL,

@@ -32,10 +32,28 @@ def test_migration_0001_creates_orgs_before_users() -> None:
     assert sql.index("CREATE TABLE orgs") < sql.index("CREATE TABLE users")
 
 
-def test_migration_0001_users_references_auth_users() -> None:
-    sql = _migration_0001_sql()
+def test_migration_0001_does_not_depend_on_a_supabase_auth_schema() -> None:
+    """Inverted from asserting `REFERENCES auth.users` (ARB D-16, KCH-228).
 
-    assert "REFERENCES auth.users" in sql
+    Supabase is replaced by local Postgres, which has no `auth` schema, so
+    that foreign key made this migration unrunnable: applying it to a clean
+    database failed with
+    `InvalidSchemaNameError: schema "auth" does not exist`.
+
+    The old test did not merely miss that -- it ENFORCED it, so the
+    migration could not be fixed without this test failing. Asserting the
+    absence keeps the dependency from coming back by copy-paste.
+    """
+    # Judge the DDL, not the prose: the comment above the table deliberately
+    # explains what was removed and why, so a raw substring check over the
+    # whole file would fail on the explanation itself.
+    ddl = "\n".join(
+        line for line in _migration_0001_sql().splitlines()
+        if not line.lstrip().startswith("--")
+    )
+
+    assert "auth." not in ddl
+    assert "id UUID PRIMARY KEY," in ddl
 
 
 def test_migration_0001_users_references_orgs() -> None:
