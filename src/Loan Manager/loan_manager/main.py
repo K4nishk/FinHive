@@ -41,6 +41,23 @@ def main() -> None:
     container = Container()
     logger.info("Container initialized")
 
+    # Step 3a: Prove the master key is usable BEFORE anything can write.
+    # ARB D-15 makes encryption at rest mandatory. Deferring this to the first
+    # encrypting write is the failure mode key_provider exists to prevent: a
+    # half-configured key encrypts some rows with a key that is gone on the next
+    # launch, which is indistinguishable from data loss.
+    from loan_manager.infrastructure.security.key_provider import (
+        KeyConfigurationError,
+    )
+
+    try:
+        container.get_key_ring()
+    except KeyConfigurationError as exc:
+        logger.error("Encryption key unusable — refusing to start")
+        print(f"\nCannot start Loan Manager.\n\n{exc}\n", file=sys.stderr)
+        sys.exit(1)
+    logger.info("Encryption key ring loaded")
+
     # Step 4: Recompute statuses on launch
     from loan_manager.application.use_cases.loans.recompute_statuses import RecomputeAllStatuses
     recompute = RecomputeAllStatuses(container.get_uow)

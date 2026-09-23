@@ -6,3 +6,10 @@ python-dateutil>=2.8.2
 openpyxl>=3.1.2
 pytest>=8.0.0
 pytest-cov>=5.0.0
+cryptography>=42.0.0        # AES-256-GCM + HKDF, via finhive.db (ARB D-15)
+
+# NOTE: the `finhive` package (finhive.db.encryption / .keys) is NOT listed here.
+# A relative `-e ../..` in a requirements file resolves against pip's WORKING
+# DIRECTORY, not against this file, so it installs the wrong path — or fails —
+# depending on where the caller happens to stand. run_mac.sh and run_windows.bat
+# install it explicitly with a path derived from the script's own location.
