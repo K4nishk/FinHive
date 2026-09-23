@@ -5,12 +5,14 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from finhive.db.blind_index import compute_blind_index
 from loan_manager.domain.entities.loan import Loan
 from loan_manager.domain.repositories.loan_repository import ILoanRepository
 from loan_manager.domain.value_objects.money import Money
 from loan_manager.domain.value_objects.reference_id import ReferenceId
 from loan_manager.domain.value_objects.status import LoanStatus
 from loan_manager.infrastructure.database.models import LoanModel
+from loan_manager.infrastructure.security.key_provider import active_key_index
 
 
 def loan_model_to_entity(model: LoanModel) -> Loan:
@@ -70,24 +72,50 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         return loan_model_to_entity(model)
 
     def get_all_active(self, filters: Optional[dict] = None) -> list[Loan]:
+        """`borrower_group`/`borrower_name`/`depositor_name`/`depositor_group`
+        filter on the `_bidx` blind-index columns, not the `_ct` ciphertext
+        (KCH-229) -- equality only, computed with the same
+        `compute_blind_index` the write path uses, so a filter value matches
+        iff `normalize(value)` equals `normalize()` of some stored plaintext.
+
+        This is a deliberate behaviour change from the pre-encryption
+        `ilike(f"%{value}%")` substring match: `ilike('%bg1%')` also matched
+        `bg13`, an over-match bug (see
+        tests/integration/test_filter_logic.py::test_borrower_group_bg1_does_not_match_bg13).
+        Substring/fuzzy matching moves to `EntityResolver` in the
+        application layer (KCH-236), not reproduced here.
+        """
         query = self._session.query(LoanModel).filter(LoanModel.is_active == True)  # noqa: E712
 
         if filters:
+            key_index = active_key_index()
             if filters.get("borrower_group"):
                 query = query.filter(
-                    LoanModel.borrower_group.ilike(f"%{filters['borrower_group']}%")
+                    LoanModel.borrower_group_bidx
+                    == compute_blind_index(
+                        filters["borrower_group"], key_index, column="borrower_group"
+                    )
                 )
             if filters.get("borrower_name"):
                 query = query.filter(
-                    LoanModel.borrower_name.ilike(f"%{filters['borrower_name']}%")
+                    LoanModel.borrower_name_bidx
+                    == compute_blind_index(
+                        filters["borrower_name"], key_index, column="borrower_name"
+                    )
                 )
             if filters.get("depositor_name"):
                 query = query.filter(
-                    LoanModel.depositor_name.ilike(f"%{filters['depositor_name']}%")
+                    LoanModel.depositor_name_bidx
+                    == compute_blind_index(
+                        filters["depositor_name"], key_index, column="depositor_name"
+                    )
                 )
             if filters.get("depositor_group"):
                 query = query.filter(
-                    LoanModel.depositor_group.ilike(f"%{filters['depositor_group']}%")
+                    LoanModel.depositor_group_bidx
+                    == compute_blind_index(
+                        filters["depositor_group"], key_index, column="depositor_group"
+                    )
                 )
             # by_months is NOT applied at DB level — it's an
             # application-layer filter
@@ -173,13 +201,30 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         self._session.flush()
 
     def get_unique_values(self, field: str, active_only: bool = True) -> list[str]:
-        column = getattr(LoanModel, field, None)
-        if column is None:
+        """Distinct values of an identity/plaintext column.
+
+        Pre-encryption this ran `SELECT DISTINCT <column>` at the DB level.
+        That no longer works for an encrypted column (KCH-229): `_ct` is
+        random-IV ciphertext, so `DISTINCT` dedupes nothing -- every row's
+        ciphertext for the same plaintext differs, and there is no
+        `_bidx`-based shortcut for "distinct" the way there is for equality.
+        Loading the rows through the ORM (which transparently decrypts) and
+        deduping in Python is correct for any column, encrypted or not.
+
+        Operator-accepted full-table decrypt at current single-user scale
+        (~20 loans, microseconds) -- no caching or optimisation added. At a
+        larger scale the pattern is columnar storage with selective column
+        decryption; that is tracked separately and not built here.
+        """
+        # Mapped columns only. `hasattr` alone would accept `metadata`,
+        # `registry` or any method and then try to sort whatever came back.
+        if field not in LoanModel.__mapper__.columns.keys():
             return []
 
-        query = self._session.query(column).distinct()
+        query = self._session.query(LoanModel)
         if active_only:
             query = query.filter(LoanModel.is_active == True)  # noqa: E712
 
-        results = query.all()
-        return sorted([r[0] for r in results if r[0] is not None])
+        values = {getattr(model, field) for model in query.all()}
+        values.discard(None)
+        return sorted(values)

@@ -83,3 +83,70 @@ def load_keys(env: Mapping[str, str] | None = None) -> KeyRing:
         return load_key_ring(env)
     except ConfigError as exc:
         raise KeyConfigurationError(f"{exc}\n\n{_SETUP_HELP}") from exc
+
+
+# --- Process-wide active key, for the ORM<->DB encryption boundary --------
+#
+# `encrypted_types.py`'s TypeDecorators run inside SQLAlchemy's bind/result
+# machinery, far from any call site that has a `Container` in scope, so they
+# cannot take the key ring as a constructor argument the way a repository
+# could. This module-level slot is the one place they reach instead.
+#
+# `Container.get_key_ring()` calls `set_active_key_ring` immediately after
+# `load_keys()` succeeds, so the app's existing startup path (main.py step 3a
+# already calls `get_key_ring()` before anything can write) wires this up
+# with no additional call site. Deliberately just one variable and one
+# accessor -- no registry, no provider abstraction, because there is exactly
+# one key source today (see the module docstring).
+
+_active: KeyRing | None = None
+
+
+def set_active_key_ring(ring: KeyRing | None) -> None:
+    """Make `ring` the key the encrypted-column TypeDecorators use.
+
+    Called by `Container.get_key_ring()` after a successful load. `None`
+    clears it, which tests use to assert the no-active-key failure mode
+    (`active_key_data` raising `KeyConfigurationError`) in isolation.
+    """
+    global _active
+    _active = ring
+
+
+def active_key_data() -> bytes:
+    """The 32-byte AES-GCM key the encrypted-column TypeDecorators bind and
+    decrypt with.
+
+    Raises `KeyConfigurationError` rather than ever falling back to writing
+    or reading plaintext -- a decorator invoked before the key ring is wired
+    up (or after it was cleared) must fail loudly, the same contract
+    `load_keys` gives the rest of startup.
+    """
+    if _active is None:
+        raise KeyConfigurationError(
+            "No active key ring is set -- Container.get_key_ring() must run "
+            "before any encrypted column is read or written.\n\n"
+            f"{_SETUP_HELP}"
+        )
+    return _active.key_data()
+
+
+def active_key_index() -> bytes:
+    """The 32-byte HMAC key the identity-column blind-index hooks and
+    equality filters use (KCH-227/229, ADR-2.3).
+
+    Deliberately a *separate* accessor from `active_key_data`, not a
+    parameter on it: `KeyRing.key_index()` is derived independently from
+    the master via its own HKDF info string, precisely so leaking
+    `key_data` (which every encrypt/decrypt call touches) never also
+    leaks `key_index` -- see `test_key_index_derives_from_the_master_not_from_key_data`
+    in `tests/unit/test_key_provider.py`. Raises `KeyConfigurationError`
+    on the same no-active-key condition as `active_key_data`.
+    """
+    if _active is None:
+        raise KeyConfigurationError(
+            "No active key ring is set -- Container.get_key_ring() must run "
+            "before any blind index is computed or queried.\n\n"
+            f"{_SETUP_HELP}"
+        )
+    return _active.key_index()

@@ -536,6 +536,36 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
 - D-8's M1a list is likewise pre-pivot. "Remaining M1a" is now KCH-81, 101–104,
   106–113. KCH-99, 100, 105 and 114 are re-milestoned into M1.1.
 
+### Recorded for a later MVP — deferred by decision, not open
+
+These are not open questions. They are decisions already made *against* doing the
+work now, written down so the trigger is recognised rather than rediscovered.
+
+- **Columnar storage with per-column decryption.** KCH-227 encrypts NPI at the
+  repository boundary and accepts a **full-table decrypt** on the read paths that
+  a row-oriented encrypted store cannot answer any other way — `get_unique_values`
+  decrypts every row to list distinct borrower groups, and LoanTotals (KCH-119)
+  sums over decrypted rows. At the current single user's ~19 loans this is
+  microseconds and anything cleverer is unjustified spend.
+
+  When more users onboard and these paths serve analytics rather than a dropdown,
+  the pattern to evaluate is **Parquet with modular (per-column) encryption**:
+  each column chunk encrypted under its own derived key, so a query over `amount`
+  and `due_date` decrypts two column chunks instead of every row. Column metadata
+  stays readable for predicate pushdown; values stay encrypted. `pyarrow` supports
+  this directly.
+
+  Two wrong turns to avoid when it is time: encrypting the Parquet file as a
+  single blob (the row-oriented problem again, with extra steps), and deriving
+  per-column keys ad hoc instead of from the existing `KeyRing` (rotation then has
+  as many code paths as columns, and the missed one holds unreadable ciphertext).
+
+  **Trigger**: more than one user, or a read path that decrypts materially more
+  rows than it returns. Tracked on **KCH-214**, where the mart's storage format is
+  chosen; KCH-119 records the same trigger for totals.
+
+---
+
 ---
 
 ## Change history
@@ -547,3 +577,4 @@ MVP1.1 binds D-2 (human approval), Decision 12 (tokenised amounts) and OQ-01
 | 2026-09-21 | **Reopened.** MVP1.1 pull-forward proposed D-4a (OpenAI-compatible client, no LiteLLM) and D-8 (M1.1 scope: tokenise names + amounts from day one, proposals as batches, null due_date stays Overdue, M1.1 ahead of M1a). Decision 12 confirmed binding on MVP1.1. Awaiting approval. |
 | 2026-09-22 | **DECIDED.** D-1a, D-15, D-8 approved; D-12 confirmed. D-4a approved but **modified**: provider is a free-tier open-source endpoint (NVIDIA Build / DeepSeek / OpenRouter), not Groq — dev and demo both at zero cost; the tool-calling spike becomes blocking and moves ahead of the tool work. D-16 approved but **deferrable**: SQLite may carry the PoC, since encryption is backend-independent. OQ-01 amended, plus new **D-17** (model emits parameterised SQL instead of tool calls) — spike before commitment. |
 | 2026-09-22 | **Postgres pivot proposed.** Operator interview added D-1a (SQLAlchemy over Postgres, sync — D-1's raw-SQL choice scoped to the MVP2 web backend), D-15 (encryption at rest mandatory in M1.1; master key interim in env), D-16 (local Docker `pgvector/pgvector:pg16` replaces Supabase). OQ-01 amended: data at rest is local, so only Groq inference crosses. M1a's encryption and schema scope absorbed into M1.1; KCH-99/100/105/114 re-milestoned. Awaiting approval. |
+| 2026-09-22 | **KCH-229 folded into KCH-227.** Encrypting the identity columns breaks `ilike` and `distinct` the moment it lands, so the blind index is not a follow-up — the two are one unit of work. Full-table decrypt accepted for `get_unique_values` at current scale; the columnar/Parquet successor recorded above and on KCH-214. |
