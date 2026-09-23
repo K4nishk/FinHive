@@ -94,5 +94,19 @@ jobs:
       - name: Install MVP1 dependencies
         run: pip install -r requirements.txt
 
+      # The `finhive` package supplies encryption at rest (ARB D-15). It is NOT
+      # in requirements.txt on purpose -- a relative `-e ../..` there resolves
+      # against pip's working directory, not the file's -- so every caller
+      # installs it from a path it derives itself. Here that is
+      # $GITHUB_WORKSPACE, which is absolute and independent of the job's
+      # `working-directory: src/Loan Manager`.
+      #
+      # This is NOT optional. models.py imports encrypted_types, which imports
+      # finhive.db.encryption at module scope, so without this step
+      # tests/conftest.py fails to import and the suite collects ZERO tests --
+      # a green-looking job that ran nothing. KCH-227.
+      - name: Install finhive (encryption at rest)
+        run: pip install -e "$GITHUB_WORKSPACE"
+
       - name: Run MVP1 unit, integration and smoke tests
         run: python -m pytest tests/ -v --cov=loan_manager

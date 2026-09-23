@@ -26,12 +26,39 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 
 from finhive.db.encryption import (
+    DecryptionError,
     decrypt_amount,
     decrypt_field,
     encrypt_amount,
     encrypt_field,
 )
-from loan_manager.infrastructure.security.key_provider import active_key_data
+from loan_manager.infrastructure.security.key_provider import (
+    active_key_data,
+    candidate_key_data,
+)
+
+
+def _decrypt_with_any(decryptor: Any, value: bytes) -> Any:
+    """Decrypt under whichever loaded key version actually produced `value`.
+
+    Writes always use the CURRENT key (`active_key_data`), but reads must
+    tolerate rows still encrypted under an older one, or rotation is a
+    one-way trip that bricks the existing loan book -- see
+    `candidate_key_data` for why trying each master is sound and why the
+    decorator cannot simply read the row's `key_version` column.
+
+    Re-raises the LAST failure if no key works, so the error the user sees
+    is a real GCM failure rather than a swallowed one.
+    """
+    last: Exception | None = None
+    for key in candidate_key_data():
+        try:
+            return decryptor(value, key)
+        except DecryptionError as exc:
+            last = exc
+    raise last if last is not None else DecryptionError(
+        "no key versions are loaded to decrypt with"
+    )
 
 
 class EncryptedString(TypeDecorator):
@@ -53,7 +80,7 @@ class EncryptedString(TypeDecorator):
     def process_result_value(self, value: bytes | None, dialect: Any) -> str | None:
         if value is None:
             return None
-        return decrypt_field(value, active_key_data())
+        return _decrypt_with_any(decrypt_field, value)
 
 
 class EncryptedRupees(TypeDecorator):
@@ -79,12 +106,28 @@ class EncryptedRupees(TypeDecorator):
     def process_bind_param(self, value: int | None, dialect: Any) -> bytes | None:
         if value is None:
             return None
-        return encrypt_amount(Decimal(value), active_key_data())
+        # Guard on the way IN, not only on the way out. Encrypting first and
+        # validating on read makes this class CREATE the corruption it later
+        # refuses to read: the bad write commits, and from then on every load
+        # of that row -- including queries that merely touch the model --
+        # raises, with no way back without the key and a manual repair.
+        if isinstance(value, float):
+            raise ValueError(
+                f"EncryptedRupees received a float ({value!r}). Money is never "
+                "float -- pass int rupees or a Decimal."
+            )
+        amount = Decimal(value)
+        if amount != amount.to_integral_value():
+            raise ValueError(
+                f"EncryptedRupees accepts whole rupees only, got {value!r} -- "
+                "refusing to store a value that could not be read back."
+            )
+        return encrypt_amount(amount, active_key_data())
 
     def process_result_value(self, value: bytes | None, dialect: Any) -> int | None:
         if value is None:
             return None
-        decrypted = decrypt_amount(value, active_key_data())
+        decrypted = _decrypt_with_any(decrypt_amount, value)
         if decrypted != decrypted.to_integral_value():
             raise ValueError(
                 f"EncryptedRupees column holds a non-integral stored value: "
@@ -116,4 +159,4 @@ class EncryptedDecimal(TypeDecorator):
     def process_result_value(self, value: bytes | None, dialect: Any) -> Decimal | None:
         if value is None:
             return None
-        return decrypt_amount(value, active_key_data())
+        return _decrypt_with_any(decrypt_amount, value)

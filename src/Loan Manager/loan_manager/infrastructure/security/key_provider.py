@@ -150,3 +150,79 @@ def active_key_index() -> bytes:
             f"{_SETUP_HELP}"
         )
     return _active.key_index()
+
+
+def active_key_version() -> int:
+    """The key version new ciphertext is being written under.
+
+    Rows stamp this into their `key_version` column so a later rotation can
+    tell which master produced them. Before KCH-227's follow-up fix that
+    column was a hardcoded `default=1`, which recorded a version the row was
+    not necessarily encrypted under -- worse than not recording one, because
+    it looks authoritative.
+    """
+    if _active is None:
+        raise KeyConfigurationError(
+            "No active key ring is set -- Container.get_key_ring() must run "
+            "before any encrypted column is written.\n\n"
+            f"{_SETUP_HELP}"
+        )
+    return _active.current_version
+
+
+def candidate_key_data() -> list[bytes]:
+    """Every loaded master's `key_data`, current version FIRST.
+
+    This is what makes rotation actually work. `finhive/db/keys.py` promises:
+    "Rows not yet migrated keep decrypting under their existing key_version
+    for as long as that version's master stays loaded." Decrypting only with
+    `active_key_data()` breaks that promise -- bumping FINHIVE_KEY_VERSION
+    would make every pre-rotation row permanently unreadable.
+
+    A `TypeDecorator.process_result_value` receives only its own column's
+    bytes, never the sibling `key_version`, and the stored blob is bare
+    `iv || ciphertext || tag` with no version header -- so the decorator
+    cannot look the version up. Trying each loaded master instead is sound
+    because AES-GCM's authentication tag is the discriminator: a wrong key
+    fails the tag check rather than returning wrong plaintext, so there are
+    no false positives to worry about.
+
+    Ordered current-first so the common case is one attempt. With a single
+    configured key -- today's state -- this is exactly as cheap as before.
+    """
+    if _active is None:
+        raise KeyConfigurationError(
+            "No active key ring is set -- Container.get_key_ring() must run "
+            "before any encrypted column is read.\n\n"
+            f"{_SETUP_HELP}"
+        )
+    current = _active.current_version
+    versions = [current] + sorted(v for v in _active.masters if v != current)
+    return [_active.key_data(v) for v in versions]
+
+
+def candidate_key_index() -> list[bytes]:
+    """Every loaded master's `key_index`, current version FIRST.
+
+    The read-side counterpart to `candidate_key_data`, and it exists because
+    of a failure found by actually rotating a key rather than reasoning about
+    it: with only `active_key_index()`, a row whose `_bidx` was computed
+    under v1 stops matching any filter the moment the ring advances to v2.
+
+    That failure is SILENT -- the query is valid, it simply returns zero
+    rows, so the user sees "no loans matched" for a loan book that is fully
+    intact and still decryptable. A filter must therefore match a row
+    indexed under ANY loaded version, which is an `IN` over these values.
+    Unlike `candidate_key_data`, there is no authentication tag to tell a
+    right index from a wrong one, so this cannot be a try-each loop -- the
+    match itself has to span the versions.
+    """
+    if _active is None:
+        raise KeyConfigurationError(
+            "No active key ring is set -- Container.get_key_ring() must run "
+            "before any blind index is queried.\n\n"
+            f"{_SETUP_HELP}"
+        )
+    current = _active.current_version
+    versions = [current] + sorted(v for v in _active.masters if v != current)
+    return [_active.key_index(v) for v in versions]

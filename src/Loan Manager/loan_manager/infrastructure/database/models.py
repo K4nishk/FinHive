@@ -75,7 +75,7 @@ class LoanModel(Base):
     # Which key_version's master this row's ciphertext is under (KCH-227,
     # ARB D-15). Lets rotation migrate rows incrementally rather than in one
     # big-bang re-encrypt -- see finhive/db/keys.py rotate_field.
-    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
 
 class LoanMetaModel(Base):
@@ -103,7 +103,7 @@ class LoanHistoryModel(Base):
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     paidoff_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     archived_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
 
 class ReportModel(Base):
@@ -152,7 +152,7 @@ class ReportRecordModel(Base):
     post_extension_giving_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     post_extension_due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     paidoff_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
     report: Mapped[ReportModel] = relationship("ReportModel", back_populates="records")
 

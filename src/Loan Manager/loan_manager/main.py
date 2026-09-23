@@ -58,6 +58,35 @@ def main() -> None:
         sys.exit(1)
     logger.info("Encryption key ring loaded")
 
+    # Step 3b: Refuse to run against a pre-encryption database.
+    # create_all() above creates missing TABLES but never ALTERs an existing
+    # one, so a database written before KCH-227 still holds plaintext and
+    # lacks the _bidx/key_version columns. Without this check the next line
+    # (RecomputeAllStatuses) dies with
+    # "no such column: loans.borrower_name_bidx" before any UI exists -- a
+    # traceback on a black screen, with the real cause three layers down.
+    # The migration is NOT run automatically: encryption is one-way, and
+    # doing it to someone's only copy of their loan book without them asking
+    # is not a decision this code gets to make.
+    from loan_manager.config import DB_PATH
+    from loan_manager.infrastructure.migrations.encrypt_existing_rows import (
+        needs_migration,
+    )
+
+    if needs_migration(DB_PATH):
+        logger.error("Database predates encryption at rest — refusing to start")
+        print(
+            f"\nCannot start Loan Manager.\n\n"
+            f"{DB_PATH} was created before encryption at rest became mandatory "
+            f"(ARB D-15), so it still holds unencrypted records.\n\n"
+            f"Encrypt it once, with the key you just configured:\n\n"
+            f"    python -m loan_manager.infrastructure.migrations.encrypt_existing_rows\n\n"
+            f"A backup is written beside the database first. This is one-way: "
+            f"after it runs, the data cannot be read without that master key.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Step 4: Recompute statuses on launch
     from loan_manager.application.use_cases.loans.recompute_statuses import RecomputeAllStatuses
     recompute = RecomputeAllStatuses(container.get_uow)

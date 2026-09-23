@@ -39,7 +39,10 @@ from loan_manager.infrastructure.database.models import (
     LoanModel,
     ReportRecordModel,
 )
-from loan_manager.infrastructure.security.key_provider import active_key_index
+from loan_manager.infrastructure.security.key_provider import (
+    active_key_index,
+    active_key_version,
+)
 
 # column -> nothing; just the set of identity columns each model carries a
 # `_bidx` companion for. Mirrors migrations/0004_add_identity_blind_index.sql
@@ -54,7 +57,8 @@ _BIDX_SOURCE_COLUMNS: dict[type, tuple[str, ...]] = {
 
 def _sync_blind_indexes(mapper: Any, connection: Any, target: Any) -> None:
     """`before_insert`/`before_update` handler: recompute `target`'s
-    `_bidx` columns from its current identity-column plaintext values.
+    `_bidx` columns, and stamp the key version this row is being written
+    under.
 
     Runs before SQLAlchemy's own bind-parameter processing for this INSERT/
     UPDATE, so `target.borrower_name` etc. are still the plain `str`/`None`
@@ -70,6 +74,16 @@ def _sync_blind_indexes(mapper: Any, connection: Any, target: Any) -> None:
             else None
         )
         setattr(target, f"{column}_bidx", bidx)
+
+    # Stamp the version actually in use, not a literal. models.py previously
+    # carried `default=1`, which recorded "1" no matter which master had
+    # encrypted the row -- an authoritative-looking value that could be
+    # false, which is worse than recording nothing. Writes always use the
+    # CURRENT key (see EncryptedString.process_bind_param), so the current
+    # version is by construction the right stamp, on update as well as
+    # insert: an UPDATE re-encrypts every mapped column through the same
+    # decorator, so the row's ciphertext is wholly current afterwards.
+    target.key_version = active_key_version()
 
 
 for _model in _BIDX_SOURCE_COLUMNS:

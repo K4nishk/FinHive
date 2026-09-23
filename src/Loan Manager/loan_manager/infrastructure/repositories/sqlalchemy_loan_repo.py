@@ -12,7 +12,7 @@ from loan_manager.domain.value_objects.money import Money
 from loan_manager.domain.value_objects.reference_id import ReferenceId
 from loan_manager.domain.value_objects.status import LoanStatus
 from loan_manager.infrastructure.database.models import LoanModel
-from loan_manager.infrastructure.security.key_provider import active_key_index
+from loan_manager.infrastructure.security.key_provider import candidate_key_index
 
 
 def loan_model_to_entity(model: LoanModel) -> Loan:
@@ -88,33 +88,41 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         query = self._session.query(LoanModel).filter(LoanModel.is_active == True)  # noqa: E712
 
         if filters:
-            key_index = active_key_index()
+            key_indexes = candidate_key_index()
             if filters.get("borrower_group"):
                 query = query.filter(
-                    LoanModel.borrower_group_bidx
-                    == compute_blind_index(
-                        filters["borrower_group"], key_index, column="borrower_group"
+                    LoanModel.borrower_group_bidx.in_(
+                        [
+                            compute_blind_index(filters["borrower_group"], k, column="borrower_group")
+                            for k in key_indexes
+                        ]
                     )
                 )
             if filters.get("borrower_name"):
                 query = query.filter(
-                    LoanModel.borrower_name_bidx
-                    == compute_blind_index(
-                        filters["borrower_name"], key_index, column="borrower_name"
+                    LoanModel.borrower_name_bidx.in_(
+                        [
+                            compute_blind_index(filters["borrower_name"], k, column="borrower_name")
+                            for k in key_indexes
+                        ]
                     )
                 )
             if filters.get("depositor_name"):
                 query = query.filter(
-                    LoanModel.depositor_name_bidx
-                    == compute_blind_index(
-                        filters["depositor_name"], key_index, column="depositor_name"
+                    LoanModel.depositor_name_bidx.in_(
+                        [
+                            compute_blind_index(filters["depositor_name"], k, column="depositor_name")
+                            for k in key_indexes
+                        ]
                     )
                 )
             if filters.get("depositor_group"):
                 query = query.filter(
-                    LoanModel.depositor_group_bidx
-                    == compute_blind_index(
-                        filters["depositor_group"], key_index, column="depositor_group"
+                    LoanModel.depositor_group_bidx.in_(
+                        [
+                            compute_blind_index(filters["depositor_group"], k, column="depositor_group")
+                            for k in key_indexes
+                        ]
                     )
                 )
             # by_months is NOT applied at DB level — it's an
