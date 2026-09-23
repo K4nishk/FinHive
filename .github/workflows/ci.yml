@@ -44,8 +44,14 @@ jobs:
       - name: import-linter (architecture boundaries)
         run: lint-imports
 
-      - name: blind index lint (no derived index on an amount column, ADR-2.4)
-        run: pytest tests/unit/test_blind_index_lint.py -q
+      # The WHOLE unit suite, not one file. Until KCH-230 this step ran only
+      # test_blind_index_lint.py, so the other 20 modules in tests/unit -- and
+      # every module in tests/integration -- were never executed by any CI job.
+      # Three broken migrations shipped through that hole (KCH-225).
+      # No database needed here; the Postgres lane is its own job below, so
+      # this tier stays inside its two-minute budget.
+      - name: unit suite (incl. blind-index lint, ADR-2.4)
+        run: pytest tests/unit -q
 
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +75,46 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  postgres-integration:
+    name: Postgres integration
+    runs-on: ubuntu-latest
+    # Proves migrations 0001-0005 actually APPLY, rather than asserting their
+    # SQL text. The text assertions in tests/unit passed for months against
+    # migrations that could not run at all.
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: finhive
+          POSTGRES_PASSWORD: finhive
+          POSTGRES_DB: finhive_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install -e ".[dev,server]"
+
+      - name: Run the Postgres integration lane
+        env:
+          TEST_DATABASE_URL: postgresql://finhive:finhive@localhost:5432/finhive_test
+          # Turns "everything skipped" from a silent green into a hard error.
+          # Without this a typo in the URL above looks identical to a pass.
+          FINHIVE_REQUIRE_INTEGRATION: "1"
+        run: pytest tests/integration -q
 
   mvp1-regression:
     name: MVP1 regression

@@ -29,6 +29,9 @@ _DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
+from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+
+
 @pytest.mark.skipif(
     not _DATABASE_URL,
     reason="needs TEST_DATABASE_URL",
@@ -39,11 +42,10 @@ def test_user_created_and_resolved_to_org_and_role() -> None:
     async def _run() -> tuple[str, str]:
         conn = await asyncpg.connect(_DATABASE_URL)
         try:
-            # Forward-only: drop anything a prior run of this test left behind
-            # rather than editing an "applied" migration in place.
-            await conn.execute("DROP TABLE IF EXISTS users")
-            await conn.execute("DROP TABLE IF EXISTS orgs")
-            await conn.execute("DROP TABLE IF EXISTS schema_migrations")
+            # Isolated schema rather than three table names: this list
+            # predated migrations 0002-0005, so it left every later table
+            # behind -- see tests/integration/_isolation.py.
+            await reset_to_clean_schema(conn)
 
             await apply_pending(conn, _MIGRATIONS_DIR)
 

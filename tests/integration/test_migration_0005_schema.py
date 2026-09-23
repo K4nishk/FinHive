@@ -44,13 +44,15 @@ _TABLES_TO_DROP = [
 ]
 
 
+from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+
+
 async def _reset(
     conn: asyncpg.Connection,  # type: ignore[name-defined]
 ) -> None:
-    for table in _TABLES_TO_DROP:
-        await conn.execute(
-            f"DROP TABLE IF EXISTS {table} CASCADE"
-        )
+    """Isolated schema, not the hand-maintained _TABLES_TO_DROP list --
+    see tests/integration/_isolation.py."""
+    await reset_to_clean_schema(conn)
 
 
 async def _columns(

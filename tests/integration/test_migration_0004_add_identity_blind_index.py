@@ -45,9 +45,17 @@ _TABLES = [
 ]
 
 
+from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+
+
 async def _reset(conn: asyncpg.Connection) -> None:
-    for table in [*_TABLES, "users", "orgs", "schema_migrations"]:
-        await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    """Isolated schema, not a table list -- see tests/integration/_isolation.py.
+
+    The previous list predated migration 0005, so it left `proposed_mutations`
+    and `agent_turns` behind and the next module's `apply_pending` failed with
+    DuplicateTableError.
+    """
+    await reset_to_clean_schema(conn)
 
 
 async def _insert_loan(
