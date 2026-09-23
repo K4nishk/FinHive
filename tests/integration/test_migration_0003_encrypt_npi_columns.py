@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -125,7 +126,7 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                     plaintexts["depositor_group"], _KEY
                 ),
                 encrypt_amount(amounts["amount"], _KEY),
-                "2026-01-01",
+                date(2026, 1, 1),
                 "Active",
             )
 
@@ -157,7 +158,7 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                     plaintexts["depositor_group"], _KEY
                 ),
                 encrypt_amount(amounts["amount"], _KEY),
-                "2026-01-01",
+                date(2026, 1, 1),
             )
 
             await conn.execute(
@@ -204,7 +205,7 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                     plaintexts["depositor_group"], _KEY
                 ),
                 encrypt_amount(amounts["amount"], _KEY),
-                "2026-01-01",
+                date(2026, 1, 1),
                 30,
                 "days",
                 Decimal("12.00"),
@@ -415,7 +416,7 @@ def test_tampered_ct_from_postgres_fails_auth_tag() -> None:
                 encrypt_field("group", _KEY),
                 encrypt_field("depositor", _KEY),
                 encrypt_field("150000", _KEY),
-                "2026-01-01",
+                date(2026, 1, 1),
                 "Active",
             )
 

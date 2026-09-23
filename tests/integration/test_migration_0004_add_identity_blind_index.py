@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,7 @@ async def _insert_loan(
             column="depositor_name",
         ),
         encrypt_field("150000.00", _KEY_DATA),
-        "2026-01-01",
+        date(2026, 1, 1),
         "Active",
     )
 

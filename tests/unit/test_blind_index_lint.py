@@ -28,7 +28,18 @@ _MIGRATIONS_DIR = ROOT / "migrations"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 # The exact, standalone invocation the gate requires.
-_LINT_GATE_COMMAND = "pytest tests/unit/test_blind_index_lint.py -q"
+# Any unconditional fast-gates step whose pytest target COVERS this module
+# satisfies the gate. KCH-230 widened the step from this one file to the whole
+# `tests/unit` directory, because running a single file was how 20 other unit
+# modules -- and the entire integration lane -- went unexecuted by CI.
+# Asserting the literal one-file command would now block that widening, which
+# is the mistake test_migration_0001 made by ASSERTING the Supabase foreign key
+# it should have prevented.
+_LINT_GATE_COMMANDS = (
+    "pytest tests/unit/test_blind_index_lint.py -q",
+    "pytest tests/unit -q",
+    "pytest tests/unit",
+)
 
 # Matches `ADD COLUMN <name>_bidx` or a bare `<name>_bidx` reference (e.g.
 # inside a CREATE INDEX target list), case-insensitively, for any amount
@@ -107,7 +118,7 @@ def test_ci_runs_the_blind_index_lint_gate() -> None:
     hits = [
         step
         for step in job["steps"]
-        if step.get("run", "").strip() == _LINT_GATE_COMMAND
+        if step.get("run", "").strip() in _LINT_GATE_COMMANDS
         and step.get("if") is None
         and not step.get("continue-on-error", False)
     ]

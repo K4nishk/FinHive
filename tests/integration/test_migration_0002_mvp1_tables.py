@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def test_two_orgs_can_independently_reuse_the_same_reference_id() -> None:
                     "group",
                     "depositor",
                     1000,
-                    "2026-01-01",
+                    date(2026, 1, 1),
                     "Active",
                 )
 
@@ -126,7 +127,7 @@ def test_reference_id_must_stay_unique_within_the_same_org() -> None:
                 "group",
                 "depositor",
                 1000,
-                "2026-01-01",
+                date(2026, 1, 1),
                 "Active",
             )
 
@@ -139,7 +140,7 @@ def test_reference_id_must_stay_unique_within_the_same_org() -> None:
                     "group",
                     "depositor",
                     2000,
-                    "2026-01-02",
+                    date(2026, 1, 2),
                     "Active",
                 )
             except asyncpg.UniqueViolationError:
@@ -201,7 +202,7 @@ def test_report_record_cannot_attach_to_another_orgs_report() -> None:
                     "borrower",
                     "depositor",
                     1000,
-                    "2026-01-01",
+                    date(2026, 1, 1),
                     30,
                     "days",
                     Decimal("2.5").quantize(

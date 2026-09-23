@@ -1,13 +1,14 @@
 """Migration 0001 -- orgs and users tables (KCH-92).
 
-Requires a real Supabase Postgres reachable via
-TEST_DATABASE_URL -- skipped otherwise, per the
-``integration`` marker's contract in pyproject.toml.
-``users.id`` references Supabase ``auth.users``, so
-this needs a database with the ``auth`` schema (a
-local ``supabase start`` or a hosted branch, not a
-bare Postgres container). This test drops and
-recreates tables, so it must never fall back to
+Requires a Postgres reachable via TEST_DATABASE_URL -- skipped otherwise,
+per the ``integration`` marker's contract in pyproject.toml. A plain
+container is enough: ARB D-16 replaced Supabase with local Postgres, so
+``users.id`` is a locally issued UUID rather than a foreign key into
+Supabase's ``auth`` schema, and this test no longer needs that schema to
+exist (KCH-225, KCH-228).
+
+It works inside a schema the integration lane owns and recreates, so it
+never touches anything else in the database and must never fall back to
 DATABASE_URL.
 """
 
@@ -55,12 +56,12 @@ def test_user_created_and_resolved_to_org_and_role() -> None:
                 "Acme Lending",
             )
 
+            # Identity is issued locally, not by Supabase (ARB D-16,
+            # KCH-228). Migration 0001 used to declare
+            # `REFERENCES auth.users (id)` and this test populated that
+            # Supabase-owned table to satisfy it; neither exists on local
+            # Postgres, so both had to go.
             auth_user_id = uuid.uuid4()
-            await conn.execute(
-                "INSERT INTO auth.users (id)"
-                " VALUES ($1)",
-                auth_user_id,
-            )
             await conn.execute(
                 "INSERT INTO users (id, org_id, role) VALUES ($1, $2, $3)",
                 auth_user_id,
