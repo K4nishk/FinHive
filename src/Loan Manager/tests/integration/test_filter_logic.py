@@ -69,6 +69,53 @@ class TestFilterByBorrowerGroup:
         names = [r.borrower_name for r in results]
         assert sorted(names) == ["b1", "b9"]
 
+    def test_borrower_group_bg1_does_not_match_bg13(self, db_session):
+        """KCH-229 regression: the old `ilike(f"%{value}%")` filter matched
+        `bg13` when searching for `bg1` -- a real substring over-match bug,
+        confirmed on this repo before the blind-index equality fix. The
+        `_bidx` filter is exact match, so a `bg13` row must never appear in
+        a `bg1` search result.
+        """
+        repo = SqlAlchemyLoanRepository(db_session)
+        now = datetime.now()
+        repo.save(Loan(
+            id=None,
+            reference_id=ReferenceId("2026_09_001"),
+            borrower_name="narrow_match",
+            borrower_group="bg1",
+            depositor_name="d1",
+            depositor_group="dg1",
+            amount=Money(10000),
+            giving_date=date(2026, 1, 1),
+            due_period=None,
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.ACTIVE,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        ))
+        repo.save(Loan(
+            id=None,
+            reference_id=ReferenceId("2026_09_002"),
+            borrower_name="should_not_match",
+            borrower_group="bg13",
+            depositor_name="d2",
+            depositor_group="dg1",
+            amount=Money(10000),
+            giving_date=date(2026, 1, 1),
+            due_period=None,
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.ACTIVE,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        ))
+        db_session.commit()
+
+        results = repo.get_all_active({"borrower_group": "bg1"})
+        names = [r.borrower_name for r in results]
+        assert names == ["narrow_match"]
+
 
 class TestFilterByDepositorGroup:
     def test_depositor_group_dg3_returns_4(self, db_session):

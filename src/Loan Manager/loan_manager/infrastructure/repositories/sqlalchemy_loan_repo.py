@@ -5,12 +5,17 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from finhive.db.blind_index import compute_blind_index
+from finhive.db.encryption import DecryptionError
 from loan_manager.domain.entities.loan import Loan
+from loan_manager.domain.errors import DataUnreadableError
 from loan_manager.domain.repositories.loan_repository import ILoanRepository
 from loan_manager.domain.value_objects.money import Money
 from loan_manager.domain.value_objects.reference_id import ReferenceId
 from loan_manager.domain.value_objects.status import LoanStatus
+from loan_manager.infrastructure.database.blind_index_sync import checked_update
 from loan_manager.infrastructure.database.models import LoanModel
+from loan_manager.infrastructure.security.key_provider import candidate_key_index
 
 
 def loan_model_to_entity(model: LoanModel) -> Loan:
@@ -70,24 +75,58 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         return loan_model_to_entity(model)
 
     def get_all_active(self, filters: Optional[dict] = None) -> list[Loan]:
+        """`borrower_group`/`borrower_name`/`depositor_name`/`depositor_group`
+        filter on the `_bidx` blind-index columns, not the `_ct` ciphertext
+        (KCH-229) -- equality only, computed with the same
+        `compute_blind_index` the write path uses, so a filter value matches
+        iff `normalize(value)` equals `normalize()` of some stored plaintext.
+
+        This is a deliberate behaviour change from the pre-encryption
+        `ilike(f"%{value}%")` substring match: `ilike('%bg1%')` also matched
+        `bg13`, an over-match bug (see
+        tests/integration/test_filter_logic.py::test_borrower_group_bg1_does_not_match_bg13).
+        Substring/fuzzy matching moves to `EntityResolver` in the
+        application layer (KCH-236), not reproduced here.
+        """
         query = self._session.query(LoanModel).filter(LoanModel.is_active == True)  # noqa: E712
 
         if filters:
+            key_indexes = candidate_key_index()
             if filters.get("borrower_group"):
                 query = query.filter(
-                    LoanModel.borrower_group.ilike(f"%{filters['borrower_group']}%")
+                    LoanModel.borrower_group_bidx.in_(
+                        [
+                            compute_blind_index(filters["borrower_group"], k, column="borrower_group")
+                            for k in key_indexes
+                        ]
+                    )
                 )
             if filters.get("borrower_name"):
                 query = query.filter(
-                    LoanModel.borrower_name.ilike(f"%{filters['borrower_name']}%")
+                    LoanModel.borrower_name_bidx.in_(
+                        [
+                            compute_blind_index(filters["borrower_name"], k, column="borrower_name")
+                            for k in key_indexes
+                        ]
+                    )
                 )
             if filters.get("depositor_name"):
                 query = query.filter(
-                    LoanModel.depositor_name.ilike(f"%{filters['depositor_name']}%")
+                    LoanModel.depositor_name_bidx.in_(
+                        [
+                            compute_blind_index(filters["depositor_name"], k, column="depositor_name")
+                            for k in key_indexes
+                        ]
+                    )
                 )
             if filters.get("depositor_group"):
                 query = query.filter(
-                    LoanModel.depositor_group.ilike(f"%{filters['depositor_group']}%")
+                    LoanModel.depositor_group_bidx.in_(
+                        [
+                            compute_blind_index(filters["depositor_group"], k, column="depositor_group")
+                            for k in key_indexes
+                        ]
+                    )
                 )
             # by_months is NOT applied at DB level — it's an
             # application-layer filter
@@ -137,9 +176,10 @@ class SqlAlchemyLoanRepository(ILoanRepository):
     def bulk_update_status(self, updates: list[tuple[str, LoanStatus]]) -> None:
         """Efficient bulk update of statuses."""
         for ref_id, new_status in updates:
-            self._session.query(LoanModel).filter(
-                LoanModel.reference_id == ref_id
-            ).update(
+            checked_update(
+                self._session.query(LoanModel).filter(
+                    LoanModel.reference_id == ref_id
+                ),
                 {"status": new_status.value, "updated_at": datetime.now()},
                 synchronize_session="fetch",
             )
@@ -151,9 +191,10 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         updates: list of {reference_id, giving_date, due_date}
         """
         for update in updates:
-            self._session.query(LoanModel).filter(
-                LoanModel.reference_id == update["reference_id"]
-            ).update(
+            checked_update(
+                self._session.query(LoanModel).filter(
+                    LoanModel.reference_id == update["reference_id"]
+                ),
                 {
                     "giving_date": update["giving_date"],
                     "due_date": update["due_date"],
@@ -164,22 +205,49 @@ class SqlAlchemyLoanRepository(ILoanRepository):
         self._session.flush()
 
     def set_inactive(self, reference_id: str) -> None:
-        self._session.query(LoanModel).filter(
-            LoanModel.reference_id == reference_id
-        ).update(
+        checked_update(
+            self._session.query(LoanModel).filter(
+                LoanModel.reference_id == reference_id
+            ),
             {"is_active": False, "status": LoanStatus.PAIDOFF.value, "updated_at": datetime.now()},
             synchronize_session="fetch",
         )
         self._session.flush()
 
     def get_unique_values(self, field: str, active_only: bool = True) -> list[str]:
-        column = getattr(LoanModel, field, None)
-        if column is None:
+        """Distinct values of an identity/plaintext column.
+
+        Pre-encryption this ran `SELECT DISTINCT <column>` at the DB level.
+        That no longer works for an encrypted column (KCH-229): `_ct` is
+        random-IV ciphertext, so `DISTINCT` dedupes nothing -- every row's
+        ciphertext for the same plaintext differs, and there is no
+        `_bidx`-based shortcut for "distinct" the way there is for equality.
+        Loading the rows through the ORM (which transparently decrypts) and
+        deduping in Python is correct for any column, encrypted or not.
+
+        Operator-accepted full-table decrypt at current single-user scale
+        (~20 loans, microseconds) -- no caching or optimisation added. At a
+        larger scale the pattern is columnar storage with selective column
+        decryption; that is tracked separately and not built here.
+        """
+        # Mapped columns only. `hasattr` alone would accept `metadata`,
+        # `registry` or any method and then try to sort whatever came back.
+        if field not in LoanModel.__mapper__.columns.keys():
             return []
 
-        query = self._session.query(column).distinct()
+        query = self._session.query(LoanModel)
         if active_only:
             query = query.filter(LoanModel.is_active == True)  # noqa: E712
 
-        results = query.all()
-        return sorted([r[0] for r in results if r[0] is not None])
+        try:
+            values = {getattr(model, field) for model in query.all()}
+        except DecryptionError as exc:
+            # Translate at the layer that owns the storage concern. The
+            # presentation layer must not import finhive to know what
+            # happened, and it must not be handed an empty list -- an
+            # unreadable loan book and an empty one are different facts.
+            raise DataUnreadableError(
+                f"while reading distinct values of {field!r}"
+            ) from exc
+        values.discard(None)
+        return sorted(values)

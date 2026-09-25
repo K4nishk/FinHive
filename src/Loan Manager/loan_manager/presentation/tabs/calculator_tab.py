@@ -14,6 +14,7 @@ from loan_manager.application.use_cases.reports.calculate_interest import Calcul
 from loan_manager.application.use_cases.reports.generate_report import GenerateReport
 from loan_manager.domain.value_objects.status import CalculationMode, ExtensionPeriodUnit
 from loan_manager.presentation.dialogs.calculation_dialog import CalculationDialog
+from loan_manager.presentation.errors import surfacing_storage_errors
 
 
 class CalculatorTab(QWidget):
@@ -119,7 +120,7 @@ class CalculatorTab(QWidget):
         layout.addStretch()
 
     def _load_filter_options(self) -> None:
-        try:
+        with surfacing_storage_errors(self, "loading calculator filter options"):
             autocomplete = GetAutocompleteValues(self._container.get_uow)
 
             for values, combo in [
@@ -130,8 +131,6 @@ class CalculatorTab(QWidget):
             ]:
                 for v in values:
                     combo.addItem(v)
-        except Exception:
-            pass
 
     def _on_calculate(self) -> None:
         mode_text = self._mode_combo.currentText()

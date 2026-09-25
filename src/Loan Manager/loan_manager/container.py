@@ -9,7 +9,10 @@ from loan_manager.infrastructure.database.session import DatabaseSession
 from loan_manager.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from loan_manager.infrastructure.recovery.recovery_service import RecoveryService
 from loan_manager.infrastructure.recovery.backup_service import BackupService
-from loan_manager.infrastructure.security.key_provider import load_keys
+from loan_manager.infrastructure.security.key_provider import (
+    load_keys,
+    set_active_key_ring,
+)
 from loan_manager.application.event_bus import EventBus
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -37,4 +40,8 @@ class Container:
         """
         if self._key_ring is None:
             self._key_ring = load_keys()
+            # Wires up the encrypted-column TypeDecorators (KCH-227) -- they
+            # cannot reach this Container, so this is the one call site that
+            # makes the just-loaded ring the active key they read.
+            set_active_key_ring(self._key_ring)
         return self._key_ring
