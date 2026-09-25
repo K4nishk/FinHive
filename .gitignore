@@ -261,3 +261,9 @@ dbt/logs/
 *.db-wal
 *.db-shm
 *.pre-encryption-backup
+
+# Everything else the app writes under data/ is plaintext NPI or derived from it:
+# Settings -> Export CSV/XLSX, legacy CSV imports and their .bak copies, backups,
+# logs and the approval recovery file. settings.json is the only file tracked there.
+/src/Loan Manager/data/*
+!/src/Loan Manager/data/settings.json

@@ -17,9 +17,9 @@ in `docs/ORCHESTRATOR_RECOVERY.md`.
 |---|---|
 | `seed_linear.py` | parses a `linear_import.csv` and creates Linear issues; idempotent by title. `--write-queue` writes `ops/queue.tsv` in build order |
 | `gen_m11_csv.py` | emits `output/Loan Manager/mvp1.1/linear_import.csv`, the M1.1 build order. Edit this, not the CSV |
-| `rtk_gain.py` | the per-issue RTK gain report (build-issue step 9). Axis A is currently degenerate — KCH-254 |
+| `rtk_gain.py` | the per-issue RTK gain report (build-issue step 9). Both axes are currently degenerate: Axis A measures the working tree (KCH-254), and Axis B reads a ledger nothing has written since the orchestrator was deleted |
 | `probe_openrouter.py` | tool-calling probe against OpenRouter models (ARB D-4a) |
-| `usage.py` | the metered-call ledger (`ops/logs/usage.jsonl`) that `rtk_gain.py` reads for Axis B |
+| `usage.py` | reads and writes the metered-call ledger (`ops/logs/usage.jsonl`). Its only caller was the orchestrator, so the ledger stops at 2026-09-14 |
 
 ## Credentials
 

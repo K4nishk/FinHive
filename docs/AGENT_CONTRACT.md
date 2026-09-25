@@ -123,8 +123,7 @@ retargeted mid-review.
 
 `main` must stay always-deployable, so nothing lands on it except a release PR that
 has cleared every gate and one human approval — no direct pushes, no admin bypass.
-This is a one-time repo-admin action (same category as `gh auth login` in
-`ops/README.md`), applied once via `gh api` and not re-run per PR:
+This is a one-time repo-admin action, applied once via `gh api` and not re-run per PR:
 
 ```bash
 # Resolve the GitHub Actions app's id instead of hardcoding it -- pinning a
@@ -191,9 +190,9 @@ required approval would block the maintainer's own PRs.
   threshold. Step 4's CLI gate is narrower: it only blocks on
   `CR_BLOCKING` (`critical|major|blocker|high`). A finding the CLI gate would treat
   as advisory can still block the SaaS review.
-- `ops/README.md` — operational rules for running the toolchain (locking, worktree
-  safety, review surfaces). This contract describes *what* the loop must do; that file
-  describes *how to operate it safely*.
+- `ops/README.md` — the standalone ops tools that remain. The loop's operating rules
+  (locking, worktree safety, review surfaces) were deleted with it; recover them with
+  `git show d9b6a44:ops/README.md`.
 
 Nothing in this loop merges a PR without a human. The agent's authority ends at
 "ready for review" or "escalated."
