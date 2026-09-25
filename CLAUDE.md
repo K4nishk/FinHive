@@ -24,8 +24,8 @@
 - **Branch**: `development`. A PR is required; direct pushes are rejected.
 - **Agent contract**: `/docs/AGENT_CONTRACT.md`. CodeRabbit was removed (2026-09-25),
   so the review gate is the `reviewer` subagent plus the human — see the `build-issue`
-  skill. The unattended orchestrator (`ops/orchestrator.sh`) used CodeRabbit as its
-  gate and is dormant. A gate that did not run is a failure, never a pass.
+  skill. The unattended loop that used it as a gate (`ops/orchestrator.sh`) was deleted
+  the same day. A gate that did not run is a failure, never a pass.
 
 ## Doctrines
 
@@ -58,8 +58,6 @@ Sonnet adjudicating a rule conflict returns a confident wrong answer.
 | **Reasoning** | `claude-opus-4-6` | Planning, review, root-cause analysis, rule adjudication, mediation |
 | **Implementation** | `claude-sonnet-4-6` | Writing code, fixing bugs, test authoring, refactoring |
 | **Generation** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries |
-
-`ops/` scripts: `IMPL_MODEL` → Sonnet, `MEDIATOR_MODEL` → Opus.
 
 ## Architecture
 

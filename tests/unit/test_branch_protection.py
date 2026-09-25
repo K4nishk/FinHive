@@ -104,7 +104,7 @@ def test_mvp1_regression_job_runs_on_every_pr_path() -> None:
 
 
 def test_documented_ruleset_does_not_require_the_retired_cli_gate() -> None:
-    """CodeRabbit was removed on 2026-09-25. Only ops/pr_gate.sh running the
+    """CodeRabbit was removed on 2026-09-25. Only ops/pr_gate.sh (deleted 2026-09-25) running the
     CodeRabbit CLI ever published `coderabbit/cli-gate`, so nothing reports that
     context any more, and a ruleset requiring it blocks every merge indefinitely.
 

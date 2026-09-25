@@ -5,7 +5,7 @@ This document restates that section as an operating contract and points to where
 enforced in code. If the two ever disagree, the ARD is the design record and this file
 is stale — fix this file.
 
-Applies to any agent — orchestrator-driven (`ops/orchestrator.sh`) or interactive —
+Applies to any agent — interactive (the unattended `ops/orchestrator.sh` loop was deleted on 2026-09-25) —
 implementing a `KCH-*` Linear issue in this repository.
 
 > ### ⚠ CodeRabbit has been REMOVED from this repository (2026-09-25)
@@ -20,9 +20,9 @@ implementing a `KCH-*` Linear issue in this repository.
 > cycles, escalate rather than loop, never merge — still stands.
 >
 > The unattended orchestrator (`ops/orchestrator.sh`) and its CLI gate
-> (`ops/pr_gate.sh`), described below, used CodeRabbit as the gate and are
-> **dormant**: the orchestrator's preflight refuses to start unless
-> `coderabbit usage` authenticates, so it cannot run without a gate.
+> (`ops/pr_gate.sh`), whose loop is described below, used CodeRabbit as the gate. Both
+> were **deleted on 2026-09-25**; the loop below is kept as the record of how agents
+> were driven. See `ops/README.md` for how to recover them from git history.
 
 ## The loop
 
@@ -163,7 +163,7 @@ must change with it; `tests/unit/test_branch_protection.py` pins all three names
 rename doesn't silently desync the documented command from what CI reports.
 
 `"coderabbit/cli-gate"` was removed from this list on 2026-09-25. Only
-`ops/pr_gate.sh` running the CodeRabbit CLI ever published it, so nothing reports it
+`ops/pr_gate.sh` (since deleted) running the CodeRabbit CLI ever published it, so nothing reports it
 now, and a ruleset requiring it would block every merge indefinitely.
 
 `checks[].app_id` (not the legacy `contexts` list) is what actually binds a required
@@ -179,10 +179,10 @@ required approval would block the maintainer's own PRs.
 
 ## Where this is enforced
 
-- `ops/orchestrator.sh` — **dormant** (see the banner). The build loop: branch →
+- `ops/orchestrator.sh` — **deleted 2026-09-25** (see the banner). Was the build loop: branch →
   implement → CLI gate → fix cycles (`CR_MAX_ROUNDS`, default 2) → escalate-or-PR.
   Never merges.
-- `ops/pr_gate.sh` — **dormant**. Published the CLI gate's round-by-round trail as a PR
+- `ops/pr_gate.sh` — **deleted 2026-09-25**. Published the CLI gate's round-by-round trail as a PR
   comment and set the `coderabbit/cli-gate` commit status.
 - `.coderabbit.yaml` — **deleted 2026-09-25.** It was the repo-root config the CodeRabbit GitHub App and CLI both read:
   path filters, per-layer review instructions restating CLAUDE.md, and

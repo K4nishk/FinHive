@@ -34,7 +34,7 @@ from pathlib import Path
 
 # The ledger belongs to the REPOSITORY, not to this file's location.
 #
-# ops/orchestrator.sh copies this script into $TMPDIR and runs the copy (rule 1:
+# ops/orchestrator.sh (deleted 2026-09-25) copied this script into $TMPDIR and ran the copy (rule 1:
 # a script that rewrites its own worktree must re-exec from outside it). Resolved
 # from __file__, the ledger then lands in $TMPDIR/finhive-ops.$$/logs/ — so
 # `report` in the repo showed nothing while a real session was recording, and the
