@@ -35,6 +35,9 @@ def main() -> None:
         )
 
     # Step 2: Initialize database
+    from loan_manager.config import DB_PATH
+
+    logger.info(f"Using database at {DB_PATH}")
     DatabaseSession.initialize()
     logger.info("Database initialized")
 
