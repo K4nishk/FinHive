@@ -251,8 +251,16 @@ class TestCalculationFlow:
 
 class TestRecoveryService:
     def test_write_and_clear(self, tmp_path, monkeypatch):
-        import loan_manager.config as cfg
-        monkeypatch.setattr(cfg, "RECOVERY_FILE", tmp_path / "recovery.tmp")
+        # Patching `loan_manager.config.RECOVERY_FILE` here is a no-op:
+        # `recovery_service.py` imports `RECOVERY_FILE` BY VALUE at its own
+        # module load, so it never sees a later change to `config`'s
+        # attribute -- this test was, until KCH-231 review 1 (item 2), really
+        # writing/deleting the real `data/approval_recovery.tmp`. The
+        # conftest autouse fixture now redirects that real path for every
+        # test regardless; this patch targets the module that actually reads
+        # `RECOVERY_FILE`, as defense in depth for this test specifically.
+        import loan_manager.infrastructure.recovery.recovery_service as recovery_service_module
+        monkeypatch.setattr(recovery_service_module, "RECOVERY_FILE", tmp_path / "recovery.tmp")
 
         from loan_manager.infrastructure.recovery.recovery_service import RecoveryService
         svc = RecoveryService()
