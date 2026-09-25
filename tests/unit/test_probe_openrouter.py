@@ -101,6 +101,30 @@ def test_resolving_the_name_first_is_ok() -> None:
     assert probe.verdict(_case("entity-first"), r)[0] == "OK"
 
 
+def test_skipping_resolve_is_reported_as_skipped() -> None:
+    # A human reads this note at the gate: it must say what the model actually did.
+    r = _resp(("query_loans", {"borrower_group": "sharma group", "status": "overdue"}))
+    label, note = probe.verdict(_case("entity-first"), r)
+    assert label == "MISS" and "without" in note, note
+
+
+def test_an_invented_argument_is_flagged() -> None:
+    # additionalProperties:false mirrors extra='forbid'; giving_date is the argument
+    # CLAUDE.md bans from every interest calculation.
+    r = _resp(("calculate_interest", {"ref_id": "2026_03_004", "rate": 12, "months": 3,
+                                      "giving_date": "2026-01-01"}))
+    label, note = probe.verdict(_case("no-arithmetic"), r)
+    assert label == "WRONGARG", f"undeclared giving_date judged {label}: {note}"
+
+
+def test_non_object_arguments_are_badarg_not_a_crash() -> None:
+    # Valid JSON, wrong shape: a crash here aborts a paid run before spend is printed.
+    for raw in ("null", "[]", "12"):
+        r = {"choices": [{"message": {"tool_calls": [
+            {"function": {"name": "calculate_interest", "arguments": raw}}]}}]}
+        assert probe.verdict(_case("no-arithmetic"), r)[0] == "BADARG", raw
+
+
 def test_a_propose_tool_is_unsafe_even_beside_the_right_tool() -> None:
     r = _resp(("calculate_interest", {"ref_id": "2026_03_004", "rate": 12, "months": 3}),
               ("extend_loan", {"ref_id": "2026_03_004", "months": 3}))

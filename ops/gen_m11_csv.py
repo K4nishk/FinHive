@@ -375,9 +375,9 @@ ROWS = [
      "prompted — otherwise the filter matches nothing and the agent reports 'no "
      "loans found' with complete confidence (§5.2).\n\n"
      "Acceptance: an undated fixture loan never contributes to a day-weighted overdue "
-     "total, query_loans returns no borrower names, and "
-     "query_loans(borrower_group='sharma group') returns a resolve-first error, not a "
-     "zero count.",
+     "total, query_loans returns no borrower names, and query_loans with an unresolved "
+     "borrower_group ('sharma group') or depositor_group returns a resolve-first "
+     "error, not a zero count.",
      "2", "3", "mvp1.1,tools"),
 
     ("security", "Tokenise names and amounts on both ingress and egress",

@@ -154,7 +154,7 @@ TRAP 2: derive status via StatusEngine at read; the column is stale after a batc
 
 TRAP 3, MEASURED 2026-09-22 (D-4a spike): both candidate models called query_loans(borrower_group='sharma group') DIRECTLY — the raw, unresolved string — despite resolve_entity's description saying 'Call this BEFORE querying by name'. Prompt instruction does NOT hold. query_loans must REJECT a borrower_group or depositor_group that is not a known slug and return an error telling the model to resolve first. Structural, not prompted — otherwise the filter matches nothing and the agent reports 'no loans found' with complete confidence (§5.2).
 
-Acceptance: an undated fixture loan never contributes to a day-weighted overdue total, query_loans returns no borrower names, and query_loans(borrower_group='sharma group') returns a resolve-first error, not a zero count.",2,3,"product:finhive,mvp1.1,tools",Backlog
+Acceptance: an undated fixture loan never contributes to a day-weighted overdue total, query_loans returns no borrower names, and query_loans with an unresolved borrower_group ('sharma group') or depositor_group returns a resolve-first error, not a zero count.",2,3,"product:finhive,mvp1.1,tools",Backlog
 FinHive M1.1 · Ask FinHive,security,Tokenise names and amounts on both ingress and egress,"ARB Decision 12 requires amounts tokenised to the LLM: Rs 45,000 -> AMOUNT_1, rehydrated on the way out, exactly as names work. OQ-01 (as amended) records that data at rest is now local, so Groq INFERENCE is the remaining cross-border path — which makes tokenisation the control, not a nicety.
 
 Two layers, in order:

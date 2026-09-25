@@ -96,6 +96,11 @@ FULL_TOOLS = [
      ["borrower_name", "amount"]),
 ]
 
+# Arguments each tool declares. Anything else is invented: the schema says
+# additionalProperties:false, and the model ignored it.
+DECLARED = {name: set(props) for name, _desc, props, _req in FULL_TOOLS}
+
+
 class Case(NamedTuple):
     label: str
     prompt: str
@@ -169,12 +174,14 @@ def tool_names(resp: dict) -> list[str]:
 
 
 def bad_args(resp: dict) -> list[str]:
-    """Arguments that are not parseable JSON — a real and common failure."""
+    """Arguments that are not a JSON object — unparseable, or valid JSON of the
+    wrong shape ("null", "[]"), which would crash every later .get()."""
     out = []
     try:
         for c in resp["choices"][0]["message"].get("tool_calls") or []:
             try:
-                json.loads(c["function"]["arguments"] or "{}")
+                if not isinstance(json.loads(c["function"]["arguments"] or "{}"), dict):
+                    out.append(c["function"]["name"])
             except json.JSONDecodeError:
                 out.append(c["function"]["name"])
     except (KeyError, IndexError):
@@ -210,12 +217,16 @@ def verdict(case: Case, resp: dict) -> tuple[str, str]:
     if broken:
         return "BADARG", f"unparseable arguments: {', '.join(broken)}"
     if early:
-        return "MISS", (f"{', '.join(sorted(early))} called before {sorted(expect)} "
-                        f"returned: {_args_summary(resp)}")
+        when = "in the same turn as" if hit else "without calling"
+        return "MISS", (f"{', '.join(sorted(early))} {when} {sorted(expect)}, before its "
+                        f"result exists: {_args_summary(resp)}")
     msg = ((resp.get("choices") or [{}])[0]).get("message") or {}
     for c in msg.get("tool_calls") or []:
         name = c["function"]["name"]
         args = json.loads(c["function"]["arguments"] or "{}")
+        invented = sorted(set(args) - DECLARED.get(name, set(args)))
+        if invented:
+            return "WRONGARG", f"{name}: undeclared argument(s) {', '.join(invented)}"
         wrong = [f"{k}={args.get(k)!r}, want {v!r}"
                  for k, v in want.get(name, {}).items() if args.get(k) != v]
         if wrong:
