@@ -180,7 +180,8 @@ A PR may open only when all of these hold, each proven by pasted output:
   `main`, so a red check blocks the merge. That is a backstop, not the gate: run
   the suites here first
 - Run the lane the way CI does: `pytest tests/unit` needs `lint-imports` on `PATH`
-  (`PATH=.venv_pg/bin:$PATH`), or `test_import_boundaries` silently skips. A test
+  (`PATH="$PWD/.venv_pg/bin:$PATH"` — absolute; the tests `chdir`, so a relative entry
+  fails 9 of them), or `test_import_boundaries` silently skips. A test
   that only ever skips locally has never been checked by anyone
 - `TEST_DATABASE_URL` points at a disposable database, never the dev one
 - `rtk err ruff check <changed files>` clean

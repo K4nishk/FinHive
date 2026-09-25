@@ -125,8 +125,9 @@ These override any conflicting implementation. If code disagrees with these, the
   that passed for the wrong reason or had never run anywhere, and three migrations
   shipped unrunnable behind them.
 - **A skip is not a pass.** Say what ran. Run tests the way CI does — `pytest tests/unit`
-  with `lint-imports` on `PATH` (`PATH=.venv_pg/bin:$PATH`) — or the tests that skip
-  locally are exactly the ones that fail in CI.
+  with `lint-imports` on `PATH` (`PATH="$PWD/.venv_pg/bin:$PATH"`, absolute: the tests
+  `chdir`, so a relative entry fails 9 of them) — or the tests that skip locally are
+  exactly the ones that fail in CI.
 - **Coverage target**: 85% minimum. Domain services: 100%.
 - Run: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
 - **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
