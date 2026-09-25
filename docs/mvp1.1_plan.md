@@ -1,6 +1,6 @@
 # MVP1.1 "Ask FinHive" — completion plan (orchestrated)
 
-> **Status: AWAITING REVIEW** (2026-09-25). Answer §8 (open questions), then reply
+> **Status: AWAITING `PROCEED`** (2026-09-25). Q1, Q3, Q12, Q18 answered; every other §8 row takes its default. Reply
 > `PROCEED` / `PROCEED WITH MODIFICATIONS`. Implementation (W0–W7) does not start
 > before that (CLAUDE.md stage gate).
 
@@ -68,7 +68,7 @@ KCH ids 239–251, 253 are **inferred** from row order (Q3).
 | 18 / **242** | `reports` + `actor`, `user_request_ct`, `turn_id`; `report_records` + `borrower_group_ct`, `due_period`, nullable `reference_id`/`giving_date` (CREATE); in-place SQLite rebuild script (`create_all` can't ALTER); CREATE-mode approve path | `models.py` Report classes, `domain/entities/report.py`, report repo, `approve_report.py` | 2 | 233 |
 | 20 / **244** | `UndoApprovedReport` for EXTEND (restore prior dates) + CREATE (`set_inactive`); not an agent tool | new `use_cases/reports/undo_approved_report.py` | 2 | 242 |
 | 19 / **243** | PROPOSE tools + batch-extend skill; undated extend **rejected** unless explicit `new_due_date` (G-07b) | `application/agent/tools/propose_*.py` | 2 | 237, 242 |
-| 21 / **245** | approvals tab: AGENT/FORM badge, user request, Undo button; new sections on `QAbstractTableModel`; existing `QTableWidget` filed as debt (Q12) | `presentation/tabs/pending_approval_tab.py` | 2 | 242, 243, 244 |
+| 21 / **245** | approvals tab: AGENT/FORM badge, user request, Undo button; new sections on `QAbstractTableModel`; existing `QTableWidget` converted to `QAbstractTableModel` (Q12) | `presentation/tabs/pending_approval_tab.py` | 2 | 242, 243, 244 |
 | 22 / **246** | length cap, out-of-domain refusal, injection test via a name/group field (no notes column — Q11) | `run_agent_turn.py`, prompt | 6 | 240 |
 | 24 / **248** | `tests/evals/`: `fixture.py`, `gen_expected.py`, cases JSONL schema, recorded cassettes, markers `eval/llm/judge`; auto-skip without `OPENROUTER_API_KEY` | `tests/evals/`, `pytest.ini` | 5 | 231, 233, 239 |
 | 26 / **250** | `application/agent/grounding.py`: `extract_facts`, `faithfulness`, `raw_money_leak`; 100% unit-tested (lakh/crore, 3 date formats, ref_id boundary) | application | 4 | 240 |
@@ -118,7 +118,7 @@ Wave 0 is orchestrator-only (no product code). Cap: **4 issues in flight** (Q17)
 1. Base = `origin/development` (local `feature/kch-252-sro3rl` is merged and behind).
 2. Per issue: `git worktree add ../wt/kch-NNN -b feature/kch-NNN <lane-tip>`; implementer works only there (Agent `isolation: "worktree"`).
 3. After review passes: rebase onto current lane tip, re-run full suite on the combined tree, push `feature/kch-NNN`, open **draft** PR against the previous branch in the lane (lowest PR in a lane → `development`), subscribe to PR activity.
-4. Multi-dependency issues (237, 239, 241, 243, 248, 249) wait for checkpoints C1–C4 where you merge bottom-up — or on `integration/m11-cN` merge-only branches if you allow them (Q1).
+4. Multi-dependency issues (237, 239, 241, 243, 248, 249) branch from merge-only `integration/m11-cN` branches (lane tips merged, no new code) at checkpoints C1–C4 — no waiting on your merges (Q1).
 5. Stage named paths only; `git diff --cached --name-only` + secret scan before every commit; never `.DS_Store`, `*.db`, `.env*`.
 
 ## 6. Per-issue agent recipe (build-issue loop)
@@ -131,7 +131,7 @@ Wave 0 is orchestrator-only (no product code). Cap: **4 issues in flight** (Q17)
 | 3 test | **tester · sonnet** | CI-parity commands below | real counts pasted; every skip named |
 | 4 review | **reviewer · opus** | `git diff base...HEAD`, acceptance line, "verify the central claim independently", attacks (`rate=0.12`, extra args, raw slug, undated loan, injection via name, plaintext NPI) | pass/fail per review-gate item |
 | 5 fix | sonnet ↔ opus | findings only | **max 2 cycles**; 3rd → stop, comment on PR, escalate to you |
-| 6 scribe | **scribe · haiku** | diff stat, suite counts | commit msg, PR body (debt list), Linear comment text **for you to paste** |
+| 6 scribe | **scribe · haiku** | diff stat, suite counts | commit msg, PR body (debt list), Linear comment via `LINEAR_API_KEY`, else `ops/linear/YYYYMMDD/kch-NNN.md` (Q3) |
 
 CI-parity commands (tester):
 ```
@@ -159,21 +159,21 @@ Model note: the Agent tool exposes `opus`/`sonnet`/`haiku` only — pinned versi
 
 | # | Question | Default if unanswered |
 |---|---|---|
-| Q1 | May I also push merge-only `integration/m11-cN` branches so checkpoints don't wait on your merges? How often will you merge? | No — waves wait at C1–C4 |
+| Q1 | May I also push merge-only `integration/m11-cN` branches so checkpoints don't wait on your merges? How often will you merge? | **ANSWERED: yes** — push merge-only `integration/m11-cN`; don't wait for merges |
 | Q2 | D-17 has no KCH id. You file it in Linear, or I name the branch `feature/d17-spike`? | `feature/d17-spike` |
-| Q3 | Linear is unreachable from here (no MCP, no `LINEAR_API_KEY`). You post the scribe's comments, file debt, re-milestone KCH-100 + row 7's Linear half? Also confirm KCH 239–251/253 = rows 15–28 and KCH-114 closes with 230 | You do Linear; mapping as inferred |
+| Q3 | Linear is unreachable from here (no MCP, no `LINEAR_API_KEY`). You post the scribe's comments, file debt, re-milestone KCH-100 + row 7's Linear half? Also confirm KCH 239–251/253 = rows 15–28 and KCH-114 closes with 230 | **ANSWERED:** key lives in `ops/.local.env` (your machine; absent from the cloud checkout). Unreachable → scribe writes `ops/linear/YYYYMMDD/kch-NNN.md` per issue. Queue built from `ops/gen_m11_csv.py` |
 | Q4 | Recorded fakes only: cassettes are **hand-authored** from the D-4a probe's observed shapes — they prove the harness, not the model. OK, or will you record real cassettes locally with `--record`? | Hand-authored + a `--record` mode you run |
 | Q5 | `[REVIEW REQUIRED]` Reject `0 < rate < 1` — is any real annual rate below 1%? | Reject |
 | Q6 | Row 23 "done" = tool verified on synthetic DB; you run it on real data? Retitle row from "Postgres" to encrypted SQLite? | Yes / yes |
 | Q10 | Write Postgres `migrations/0006` now (CI Postgres lane tests it) or defer to M1a? | Defer |
 | Q11 | Row 22 injection vector: borrower name/group (no notes column exists) or add a notes column? | Name/group |
-| Q12 | Existing `QTableWidget` in approvals tab: convert in 245 or file as debt? | Debt |
+| Q12 | Existing `QTableWidget` in approvals tab: convert in 245 or file as debt? | **ANSWERED: convert in 245** |
 | Q13 | UI sign-off for 241/245: offscreen smoke + screenshots in PR, then your manual demo | As stated |
 | Q14 | Nightly: which OpenRouter model, monthly USD cap; judge off | qwen-2.5-72b, $2/month |
 | Q15 | Eval thresholds: KCH-188's 90/85/85 or the doc's (§6: cp=1.0, E3 faithfulness 1.00, ratchet)? | Doc's |
 | Q16 | Doc drift: spec + `ARB:449` say `FINHIVE_MASTER_KEY`; code uses `FINHIVE_KEY_VERSION` + `FINHIVE_MASTER_KEY_V<n>`. Fix docs in 230? | Yes |
 | Q17 | Issues in flight at once | 4 |
-| Q18 | D-17 needs model-authored SQL executed via SQLAlchemy `text()` — violates "no raw SQL outside `migrations/`". Grant a waiver scoped to `ops/spike_d17/` (never imported by the app)? | Waiver needed — spike blocked without it |
+| Q18 | D-17 needs model-authored SQL executed via SQLAlchemy `text()` — violates "no raw SQL outside `migrations/`". Grant a waiver scoped to `ops/spike_d17/` (never imported by the app)? | **ANSWERED: waiver granted, scoped to `ops/spike_d17/`** |
 
 ## 9. Verification (per wave)
 
