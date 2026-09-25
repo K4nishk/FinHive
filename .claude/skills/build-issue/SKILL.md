@@ -144,7 +144,7 @@ implemented.
 ### 7. Commit and stack
 
 Scribe writes the message. **Stage explicitly — never `git add -A`**, which sweeps
-up `data/loans.db` and `.DS_Store`. Scan the staged diff for secrets before
+up the tracked `.DS_Store`. Scan the staged diff for secrets before
 committing. Open the PR against the branch below it, never `development` directly
 (it is protected; direct pushes are rejected).
 
@@ -163,7 +163,9 @@ python3 ops/rtk_gain.py --issue KCH-NNN --measure-gates
 ```
 
 Non-optional. Axis A is measured on this machine by running the gate commands both
-ways; Axis B is agent tokens billed, from `ops/logs/usage.jsonl`. **If the number is
+ways; Axis B is agent tokens billed, from `ops/logs/usage.jsonl`. Nothing has written
+that ledger since the orchestrator was deleted (2026-09-25), so Axis B is empty for
+an in-session build. **If the number is
 degenerate — a clean tree, or no metered calls because the work was done in-session —
 say so rather than dressing it up.**
 
@@ -180,7 +182,8 @@ A PR may open only when all of these hold, each proven by pasted output:
   `main`, so a red check blocks the merge. That is a backstop, not the gate: run
   the suites here first
 - Run the lane the way CI does: `pytest tests/unit` needs `lint-imports` on `PATH`
-  (`PATH=.venv_pg/bin:$PATH`), or `test_import_boundaries` silently skips. A test
+  (`PATH="$PWD/.venv_pg/bin:$PATH"` — absolute; the tests run it from a temp dir, so a
+  relative entry fails 8 of them), or `test_import_boundaries` silently skips. A test
   that only ever skips locally has never been checked by anyone
 - `TEST_DATABASE_URL` points at a disposable database, never the dev one
 - `rtk err ruff check <changed files>` clean

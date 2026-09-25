@@ -3,7 +3,7 @@ and the required protection ruleset are documented precisely enough to
 apply verbatim, and that the two status-check names in that documentation
 can't silently drift from what CI actually
 publish. Actually flipping the GitHub setting is a one-time repo-admin
-action (same category as `gh auth login` in ops/README.md) outside this
+action outside this
 suite's reach -- these tests pin the paper trail, not live GitHub state.
 """
 
