@@ -53,8 +53,10 @@ presentation/        Layer 4: main_window, tabs/, dialogs/, widgets/, view_model
 - Python >= 3.10; target 3.10–3.13. (Local venvs may be 3.14; `asyncpg` has no
   guaranteed cp314 wheel, so Postgres tooling uses a 3.13 venv.)
 - PySide6 >= 6.8.0 for the GUI.
-- SQLAlchemy >= 2.0 ORM, **sync**. SQLite through MVP1; Postgres from MVP1.1
-  (ARB D-1a, D-16). No raw SQL outside `migrations/`.
+- SQLAlchemy >= 2.0 ORM, **sync**. The desktop app runs on **SQLite through MVP1.1**:
+  ARB D-16 approved local Postgres but **deferred it to M1a** — SQLite carries the PoC
+  and the demo. The Postgres migrations and integration lane exist and pass, ready for
+  that move. No raw SQL outside `migrations/`.
 - Alembic for schema migrations.
 - Pydantic >= 2.5 for all DTOs: `BaseModel`, field validators, model validators.
 - `python-dateutil` (`relativedelta`) for date arithmetic. No manual month maths.
