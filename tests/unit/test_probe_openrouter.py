@@ -1,10 +1,12 @@
 """D-4a provider spike (KCH-252) -- the probe's verdicts, checked offline.
 
 The 2026-09-22 gate picked qwen/qwen-2.5-72b-instruct by a human reading the
-argument summaries, because the probe judged on tool NAMES alone. Re-run on
-2026-09-25, it printed OK for two wrong answers: calculate_interest(rate=0.12)
-for "12%" -- 100x too little interest under (amount * rate * months) / 1200 --
-and, for llama, query_loans(status='overdue') for "due this quarter".
+argument summaries, because the probe judged on tool NAMES alone. The 2026-09-25
+re-run (qwen only) printed OK for calculate_interest(rate=0.12) on "12%": 100x too
+little interest under (amount * rate * months) / 1200. The same name-only logic
+also scores llama's 2026-09-22 answer, query_loans(status='overdue') for "due this
+quarter", as OK. It judged a response as a SET of names, so a raw-name query sent
+in the same turn as resolve_entity passed as well. Review of KCH-252 found that.
 
 Canned responses shaped like the real ones: no network, no spend.
 """
@@ -71,6 +73,32 @@ def test_querying_a_raw_name_before_resolving_it_is_a_miss() -> None:
     # this matches nothing and the model reports "no loans" with confidence.
     r = _resp(("query_loans", {"borrower_group": "sharma group", "status": "overdue"}))
     assert probe.verdict(_case("entity-first"), r)[0] == "MISS"
+
+
+def test_raw_name_queried_beside_resolve_entity_is_a_miss() -> None:
+    # One turn: the query runs before resolve_entity's answer exists.
+    r = _resp(("resolve_entity", {"text": "sharma group"}),
+              ("query_loans", {"borrower_group": "sharma group", "status": "overdue"}))
+    label, note = probe.verdict(_case("entity-first"), r)
+    assert label == "MISS", f"parallel raw-name query judged {label}: {note}"
+
+
+def test_raw_name_queried_before_resolve_entity_is_a_miss() -> None:
+    r = _resp(("query_loans", {"borrower_group": "sharma group", "status": "overdue"}),
+              ("resolve_entity", {"text": "sharma group"}))
+    label, note = probe.verdict(_case("entity-first"), r)
+    assert label == "MISS", f"raw-name query before resolve judged {label}: {note}"
+
+
+def test_status_substituted_beside_get_current_context_is_a_miss() -> None:
+    r = _resp(("get_current_context", {}), ("query_loans", {"status": "overdue"}))
+    label, note = probe.verdict(_case("date-relative"), r)
+    assert label == "MISS", f"parallel status substitution judged {label}: {note}"
+
+
+def test_resolving_the_name_first_is_ok() -> None:
+    r = _resp(("resolve_entity", {"text": "sharma group"}))
+    assert probe.verdict(_case("entity-first"), r)[0] == "OK"
 
 
 def test_a_propose_tool_is_unsafe_even_beside_the_right_tool() -> None:

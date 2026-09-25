@@ -3,12 +3,12 @@
   "custom_colours": {},
   "llm": {
     "model": "qwen/qwen-2.5-72b-instruct",
-    "measured_usd_per_call": "0.00032",
+    "measured_usd_per_call": "0.00037",
     "measured_on": "2026-09-25",
-    "measured_with": "ops/probe_openrouter.py: 7 tool schemas, one user turn. Paid tier, not :free, so this is money, not quota. A real turn with a system prompt costs more.",
+    "measured_with": "ops/probe_openrouter.py stage 2: 7 tool schemas, one user turn, 3 calls. Paid tier, not :free, so this is money, not quota. A real turn with a system prompt and history costs more.",
     "quirks": [
-      "Queries a raw name without resolve_entity: query_loans(borrower_group='sharma group') matches nothing. Guarded structurally in KCH-237.",
-      "Sends rate as a fraction: calculate_interest(rate=0.12) for 12% gives 100x too little interest. Guarded structurally in KCH-235."
+      "Queries a raw name without resolving it: query_loans(borrower_group='sharma group') matches nothing. KCH-237 specifies the structural guard (reject an unknown slug).",
+      "Sends rate as a fraction: calculate_interest(rate=0.12) for 12% gives 100x too little interest. KCH-235 specifies the structural guard (reject 0 < rate < 1); a 0-100 range alone admits 0.12."
     ]
   }
 }
