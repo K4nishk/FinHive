@@ -1,7 +1,7 @@
 """main branch protection (KCH-86) -- acceptance is that the release flow
 and the required protection ruleset are documented precisely enough to
 apply verbatim, and that the two status-check names in that documentation
-can't silently drift from what CI and the CodeRabbit gate actually
+can't silently drift from what CI actually
 publish. Actually flipping the GitHub setting is a one-time repo-admin
 action (same category as `gh auth login` in ops/README.md) outside this
 suite's reach -- these tests pin the paper trail, not live GitHub state.
@@ -17,7 +17,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / "docs" / "AGENT_CONTRACT.md"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-PR_GATE = ROOT / "ops" / "pr_gate.sh"
 
 
 def _contract_text() -> str:
@@ -104,16 +103,20 @@ def test_mvp1_regression_job_runs_on_every_pr_path() -> None:
     )
 
 
-def test_documented_status_check_matches_gate_context() -> None:
-    match = re.search(
-        r'GATE_CONTEXT="\$\{GATE_CONTEXT:-([^}]+)\}"', PR_GATE.read_text()
-    )
-    assert match, "could not find GATE_CONTEXT default in ops/pr_gate.sh"
-    gate_context = match.group(1)
-    assert gate_context in _protection_contexts(), (
-        "docs/AGENT_CONTRACT.md's required_status_checks.checks must "
-        "name the CLI gate context as ops/pr_gate.sh actually publishes "
-        f"it: {gate_context!r}"
+def test_documented_ruleset_does_not_require_the_retired_cli_gate() -> None:
+    """CodeRabbit was removed on 2026-09-25. Only ops/pr_gate.sh running the
+    CodeRabbit CLI ever published `coderabbit/cli-gate`, so nothing reports that
+    context any more, and a ruleset requiring it blocks every merge indefinitely.
+
+    This test used to REQUIRE the context, asserting it matched pr_gate.sh's
+    GATE_CONTEXT. That enforced the one entry that would brick merging if the
+    documented command were applied verbatim, so it is inverted: the command
+    stays safe to apply as written."""
+    contexts = _protection_contexts()
+    assert "coderabbit/cli-gate" not in contexts, (
+        "docs/AGENT_CONTRACT.md's documented ruleset requires "
+        "`coderabbit/cli-gate`, which nothing publishes since CodeRabbit was "
+        f"removed -- applying it would block every merge. Contexts: {contexts}"
     )
 
 

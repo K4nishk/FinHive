@@ -12,10 +12,12 @@ Scope: `docs/MVP1_1_ASK_FINHIVE.md`. Issues:
 Decisions: `output/Loan Manager/mvp2/ARB_DECISIONS.md` — read the M1.1 block before
 starting anything; several are conditional and one (D-17) is deliberately unresolved.
 
-**CodeRabbit is gone.** The free tier ended; `coderabbit usage` exits non-zero. Every
-gate that used to be CodeRabbit is now a `reviewer` subagent plus the human. Do not
-call `coderabbit`, and never treat its absence as a passing gate — a gate that did not
-run is a failure, not a pass.
+**CodeRabbit is removed** (2026-09-25): the GitHub App is uninstalled and
+`.coderabbit.yaml` deleted. Every gate that used to be CodeRabbit is now a `reviewer`
+subagent plus the human. Do not call `coderabbit`, and never treat its absence as a
+passing gate — a gate that did not run is a failure, not a pass. CI's required checks
+(`Fast gates`, `MVP1 regression`, `Postgres integration`) are enforced by the repo
+ruleset on `development` and `main`.
 
 ---
 

@@ -8,19 +8,21 @@ is stale — fix this file.
 Applies to any agent — orchestrator-driven (`ops/orchestrator.sh`) or interactive —
 implementing a `KCH-*` Linear issue in this repository.
 
-> ### ⚠ The CodeRabbit gate below is SUPERSEDED for M1.1 (2026-09-22)
+> ### ⚠ CodeRabbit has been REMOVED from this repository (2026-09-25)
 >
-> The CodeRabbit free tier has ended; `coderabbit usage` exits non-zero and
-> `coderabbit review` cannot authenticate. **An unauthenticated CodeRabbit is a gate
-> that did not run, which is a failure, never a pass.**
+> The CodeRabbit GitHub App was uninstalled from the repo and `.coderabbit.yaml`
+> deleted. The CLI gate had already stopped working when the free tier ended.
+> **A gate that did not run is a failure, never a pass.**
 >
-> For `FinHive M1.1 · Ask FinHive` (KCH-222…253) the gate is the `reviewer` subagent
-> plus the human, against the explicit checklist in **CLAUDE.md → M1.1 Orchestrator
-> Contract**. Everything else in this contract — branch, implement with tests,
-> bounded fix cycles, escalate rather than loop, never merge — still stands.
+> The review gate is now the `reviewer` subagent plus the human, against the
+> checklist in the **`build-issue` skill** (`.claude/skills/build-issue/SKILL.md`).
+> Everything else in this contract — branch, implement with tests, bounded fix
+> cycles, escalate rather than loop, never merge — still stands.
 >
-> Every `coderabbit` command and the `coderabbit/cli-gate` commit status described
-> below are inert until a paid tier is restored.
+> The unattended orchestrator (`ops/orchestrator.sh`) and its CLI gate
+> (`ops/pr_gate.sh`), described below, used CodeRabbit as the gate and are
+> **dormant**: the orchestrator's preflight refuses to start unless
+> `coderabbit usage` authenticates, so it cannot run without a gate.
 
 ## The loop
 
@@ -137,8 +139,7 @@ gh api "repos/$OWNER/$REPO/branches/main/protection" -X PUT --input - <<JSON
     "checks": [
       { "context": "Fast gates", "app_id": $GH_ACTIONS_APP_ID },
       { "context": "MVP1 regression", "app_id": $GH_ACTIONS_APP_ID },
-      { "context": "Postgres integration", "app_id": $GH_ACTIONS_APP_ID },
-      { "context": "coderabbit/cli-gate", "app_id": null }
+      { "context": "Postgres integration", "app_id": $GH_ACTIONS_APP_ID }
     ]
   },
   "enforce_admins": true,
@@ -155,39 +156,35 @@ The three contexts must match what CI actually publishes: `"Fast gates"` is the
 the `mvp1-regression` job's display name in the same file — it runs the full MVP1
 suite (150 unit/integration tests plus 22 smoke tests) against `src/Loan Manager` on
 every PR regardless of changed paths, so a deliberate break in MVP1 domain code blocks
-an unrelated MVP2 PR (KCH-88) — and `"coderabbit/cli-gate"` is `GATE_CONTEXT` in
-`ops/pr_gate.sh` — the status the CLI gate publishes per PR (see `ops/pr_gate.sh
---require-check`, which appends that context to an existing protection rule rather
-than creating one). If any name changes, this block must change with it;
-`tests/unit/test_branch_protection.py` pins all three names so a rename doesn't
-silently desync the documented command from what CI/the gate actually report.
+an unrelated MVP2 PR (KCH-88) — and `"Postgres integration"` is the
+`postgres-integration` job's display name, which applies migrations 0001–0005 to a
+real Postgres and runs `tests/integration` (KCH-230). If any name changes, this block
+must change with it; `tests/unit/test_branch_protection.py` pins all three names so a
+rename doesn't silently desync the documented command from what CI reports.
+
+`"coderabbit/cli-gate"` was removed from this list on 2026-09-25. Only
+`ops/pr_gate.sh` running the CodeRabbit CLI ever published it, so nothing reports it
+now, and a ruleset requiring it would block every merge indefinitely.
 
 `checks[].app_id` (not the legacy `contexts` list) is what actually binds a required
 context to its publisher, so an unrelated app can't satisfy the same context name.
-`"Fast gates"` and `"MVP1 regression"` both run as GitHub Actions jobs, so both are
-bound to the GitHub Actions app's id, resolved at apply time rather than hardcoded.
-`"coderabbit/cli-gate"` is
-deliberately left unbound (`app_id: null`, meaning "any app") because `ops/pr_gate.sh`
-currently publishes it via a human- or agent-authenticated `gh auth login` session
-(`ops/orchestrator.sh` checks `gh auth status`), not a distinct GitHub App — a PAT-created
-status has no app identity to bind to. The residual mitigation is that creating a commit
-status already requires push/write access to the repo, so this isn't open to arbitrary
-third parties, but the gap stays open until `pr_gate.sh`'s status-setting step runs under
-a machine identity (e.g. a GitHub Actions job authenticated with `GITHUB_TOKEN`) that has
-its own app id to bind to.
+All three run as GitHub Actions jobs, so all three are bound to the GitHub Actions
+app's id, resolved at apply time rather than hardcoded.
 
-`development` gets the lighter-weight `--require-check` treatment (§ "Where this is
-enforced" below) rather than this full ruleset, since it is the integration branch
-agents push feature branches into directly, not the always-deployable one.
+**What is actually applied** (verified through the GitHub API, 2026-09-25): a repo
+ruleset on both `development` and `main` requires a pull request, blocks force-pushes
+and deletion, and requires `Fast gates`, `MVP1 regression` and `Postgres integration`.
+It requires **0** approvals, not the 1 documented above: on a single-maintainer repo a
+required approval would block the maintainer's own PRs.
 
 ## Where this is enforced
 
-- `ops/orchestrator.sh` — the build loop: branch → implement → CLI gate → fix cycles
-  (`CR_MAX_ROUNDS`, default 2) → escalate-or-PR. Never merges.
-- `ops/pr_gate.sh` — publishes the CLI gate's round-by-round trail as a PR comment and
-  sets the `coderabbit/cli-gate` commit status, so the gate's result is visible on
-  GitHub and can be made a required check.
-- `.coderabbit.yaml` — the repo-root config the CodeRabbit GitHub App and CLI both read:
+- `ops/orchestrator.sh` — **dormant** (see the banner). The build loop: branch →
+  implement → CLI gate → fix cycles (`CR_MAX_ROUNDS`, default 2) → escalate-or-PR.
+  Never merges.
+- `ops/pr_gate.sh` — **dormant**. Published the CLI gate's round-by-round trail as a PR
+  comment and set the `coderabbit/cli-gate` commit status.
+- `.coderabbit.yaml` — **deleted 2026-09-25.** It was the repo-root config the CodeRabbit GitHub App and CLI both read:
   path filters, per-layer review instructions restating CLAUDE.md, and
   `reviews.request_changes_workflow: true`, which turns any actionable SaaS finding
   into a blocking GitHub review rather than an advisory comment — it has no severity
