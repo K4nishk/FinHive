@@ -124,6 +124,6 @@ def test_ci_runs_the_blind_index_lint_gate() -> None:
     ]
     assert hits, (
         "no unconditional, non-swallowed step"
-        f" runs {_LINT_GATE_COMMAND!r}"
+        f" runs any of {_LINT_GATE_COMMANDS!r}"
         " in fast-gates"
     )
