@@ -146,7 +146,12 @@ def test_calc_importing_db_is_blocked(tmp_path: Path) -> None:
         },
     )
     result = _run_lint_imports(tmp_path, CALC_CONFIG)
+    # Exit 1 alone is not proof: an invalid config ALSO exits 1. DOMAIN_CONFIG
+    # once lacked `include_external_packages`, so lint-imports rejected the
+    # config and this assertion passed without checking the contract at all.
+    # Require the violation itself.
     assert result.returncode != 0, result.stdout
+    assert "is not allowed to import" in result.stdout, result.stdout
 
 
 @requires_import_linter
@@ -180,7 +185,12 @@ def test_calc_importing_httpx_is_blocked(tmp_path: Path) -> None:
         },
     )
     result = _run_lint_imports(tmp_path, CALC_CONFIG)
+    # Exit 1 alone is not proof: an invalid config ALSO exits 1. DOMAIN_CONFIG
+    # once lacked `include_external_packages`, so lint-imports rejected the
+    # config and this assertion passed without checking the contract at all.
+    # Require the violation itself.
     assert result.returncode != 0, result.stdout
+    assert "is not allowed to import" in result.stdout, result.stdout
 
 
 AGENT_CONFIG = """
@@ -207,7 +217,12 @@ def test_agent_importing_db_raw_is_blocked(tmp_path: Path) -> None:
         },
     )
     result = _run_lint_imports(tmp_path, AGENT_CONFIG)
+    # Exit 1 alone is not proof: an invalid config ALSO exits 1. DOMAIN_CONFIG
+    # once lacked `include_external_packages`, so lint-imports rejected the
+    # config and this assertion passed without checking the contract at all.
+    # Require the violation itself.
     assert result.returncode != 0, result.stdout
+    assert "is not allowed to import" in result.stdout, result.stdout
 
 
 @requires_import_linter
@@ -225,7 +240,12 @@ def test_agent_importing_asyncpg_is_blocked(tmp_path: Path) -> None:
         },
     )
     result = _run_lint_imports(tmp_path, AGENT_CONFIG)
+    # Exit 1 alone is not proof: an invalid config ALSO exits 1. DOMAIN_CONFIG
+    # once lacked `include_external_packages`, so lint-imports rejected the
+    # config and this assertion passed without checking the contract at all.
+    # Require the violation itself.
     assert result.returncode != 0, result.stdout
+    assert "is not allowed to import" in result.stdout, result.stdout
 
 
 @requires_import_linter
@@ -246,6 +266,7 @@ def test_agent_using_typed_db_module_passes(tmp_path: Path) -> None:
 DOMAIN_CONFIG = """
 [tool.importlinter]
 root_package = "pkg"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "domain does not depend on infrastructure or presentation"
@@ -266,7 +287,12 @@ def test_domain_importing_infrastructure_is_blocked(tmp_path: Path) -> None:
         },
     )
     result = _run_lint_imports(tmp_path, DOMAIN_CONFIG)
+    # Exit 1 alone is not proof: an invalid config ALSO exits 1. DOMAIN_CONFIG
+    # once lacked `include_external_packages`, so lint-imports rejected the
+    # config and this assertion passed without checking the contract at all.
+    # Require the violation itself.
     assert result.returncode != 0, result.stdout
+    assert "is not allowed to import" in result.stdout, result.stdout
 
 
 @requires_import_linter
