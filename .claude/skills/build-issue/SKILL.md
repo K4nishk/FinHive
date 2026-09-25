@@ -175,9 +175,10 @@ A PR may open only when all of these hold, each proven by pasted output:
 
 - Full MVP1 suite green — `cd "src/Loan Manager" && rtk test python -m pytest tests/`
   Postgres/crypto tests must **skip** cleanly when their dependency is absent, never
-  fail: CI runs whole test directories. Do NOT count on CI to block a bad merge —
-  `mvp1-regression` is only *documented* as required (`docs/AGENT_CONTRACT.md`); as
-  of 2026-09-24 GitHub requires no status checks, so a red PR can still merge
+  fail: CI runs whole test directories. Since 2026-09-25 the repo ruleset requires
+  `Fast gates`, `MVP1 regression` and `Postgres integration` on `development` and
+  `main`, so a red check blocks the merge. That is a backstop, not the gate: run
+  the suites here first
 - Run the lane the way CI does: `pytest tests/unit` needs `lint-imports` on `PATH`
   (`PATH=.venv_pg/bin:$PATH`), or `test_import_boundaries` silently skips. A test
   that only ever skips locally has never been checked by anyone
