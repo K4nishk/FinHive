@@ -46,7 +46,7 @@ _TABLES = [
 ]
 
 
-from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
 
 
 async def _reset(conn: asyncpg.Connection) -> None:
@@ -186,7 +186,7 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
                 ),
             }
         finally:
-            await _reset(conn)
+            await drop_test_schema(conn)
             await conn.close()
 
     result = asyncio.run(_run())

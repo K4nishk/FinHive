@@ -65,7 +65,7 @@ _TABLES = [
 ]
 
 
-from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
 
 
 async def _reset(conn: asyncpg.Connection) -> None:
@@ -304,7 +304,7 @@ def test_stored_rows_carry_no_plaintext_npi() -> None:
                 "rr.kv": rr["key_version"],
             }
         finally:
-            await _reset(conn)
+            await drop_test_schema(conn)
             await conn.close()
 
     stored = asyncio.run(_run())
@@ -469,7 +469,7 @@ def test_tampered_ct_from_postgres_fails_auth_tag() -> None:
                 "2026_01_001",
             )
         finally:
-            await _reset(conn)
+            await drop_test_schema(conn)
             await conn.close()
 
     tampered_amount_ct = asyncio.run(_run())

@@ -44,7 +44,7 @@ _TABLES_TO_DROP = [
 ]
 
 
-from tests.integration._isolation import reset_to_clean_schema  # noqa: E402
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
 
 
 async def _reset(
@@ -117,7 +117,7 @@ async def _setup_and_query():  # type: ignore[no-untyped-def]
             "at_idxs": at_idxs,
         }
     finally:
-        await _reset(conn)
+        await drop_test_schema(conn)
         await conn.close()
 
 
