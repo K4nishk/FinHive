@@ -32,7 +32,8 @@ screen, RAG over documents, Supabase, or a change to any MVP1 business rule.
 1. **SQLAlchemy over Postgres, sync** — ARB D-1a. Not raw SQL + asyncpg; D-1's
    choice was scoped to the MVP2 web backend, and its four mitigations still bind.
 2. **Encryption at rest is mandatory** — ARB D-15. Migrations 0003 + 0004 as built.
-   Master key from `FINHIVE_MASTER_KEY` behind `keys.py`, **explicitly interim**.
+   Master key from `FINHIVE_KEY_VERSION` + `FINHIVE_MASTER_KEY_V<n>` behind
+   `keys.py`, **explicitly interim**.
 3. **Local Docker Postgres replaces Supabase** — ARB D-16. pgvector image from day
    one so `CREATE EXTENSION vector` stays a one-line migration.
 4. OpenAI-compatible client replaces LiteLLM — ARB D-4a.
