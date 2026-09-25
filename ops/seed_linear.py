@@ -181,7 +181,7 @@ def write_queue(key: str, team_id: str, path: Path) -> int:
 
     Creation order IS build order — issues were seeded top-to-bottom from a CSV that
     was already sorted by milestone and dependency, so Linear's own ordering is the
-    queue. Column 2 is the identifier; run_builder.sh and orchestrator.sh both cut -f2.
+    queue. Column 2 is the identifier.
     """
     # These nodes carry title and project, so the body is much larger per row than the
     # id+title pager — it truncates well below first:50. Halve on failure, same as

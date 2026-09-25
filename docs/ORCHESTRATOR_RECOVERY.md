@@ -1,5 +1,11 @@
 # Orchestrator retrospective and recovery
 
+> **The orchestrator this document is about was deleted on 2026-09-25**, along with
+> `pr_gate.sh`, `run_builder.sh`, `tmux_orchestrator.sh` and `preflight.sh`. Its review
+> gate was the CodeRabbit CLI, which stopped authenticating when the free tier ended.
+> This file stays as the record of how it failed. `ops/README.md` says how to recover
+> the scripts from git history.
+
 Evidence-based. Every number here comes from `ops/logs/usage.jsonl` (502 metered
 calls) or `ops/logs/builder.log` (12k lines), not from recollection.
 

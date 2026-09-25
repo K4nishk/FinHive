@@ -3,7 +3,7 @@ and the required protection ruleset are documented precisely enough to
 apply verbatim, and that the two status-check names in that documentation
 can't silently drift from what CI actually
 publish. Actually flipping the GitHub setting is a one-time repo-admin
-action (same category as `gh auth login` in ops/README.md) outside this
+action outside this
 suite's reach -- these tests pin the paper trail, not live GitHub state.
 """
 
@@ -104,7 +104,7 @@ def test_mvp1_regression_job_runs_on_every_pr_path() -> None:
 
 
 def test_documented_ruleset_does_not_require_the_retired_cli_gate() -> None:
-    """CodeRabbit was removed on 2026-09-25. Only ops/pr_gate.sh running the
+    """CodeRabbit was removed on 2026-09-25. Only ops/pr_gate.sh (deleted 2026-09-25) running the
     CodeRabbit CLI ever published `coderabbit/cli-gate`, so nothing reports that
     context any more, and a ruleset requiring it blocks every merge indefinitely.
 

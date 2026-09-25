@@ -122,10 +122,9 @@ jobs:
     # Business-continuity gate (KCH-88): the MVP1 desktop app under active real-world
     # use must never regress while MVP2 is built alongside it, so this job runs the
     # full MVP1 suite against src/Loan Manager on every PR -- regardless of which
-    # paths changed. It is DOCUMENTED as a required check (docs/AGENT_CONTRACT.md,
-    # KCH-86) but that ruleset has never been applied: as of 2026-09-24 neither
-    # development nor main requires any status check, so a red run here does NOT
-    # block merge. Applying the ruleset is a repo-admin action.
+    # paths changed. A required check: since 2026-09-25 the repo ruleset on
+    # development and main requires it, with Fast gates and Postgres integration,
+    # so a red run here blocks the merge.
     timeout-minutes: 10
     defaults:
       run:

@@ -24,8 +24,8 @@
 - **Branch**: `development`. A PR is required; direct pushes are rejected.
 - **Agent contract**: `/docs/AGENT_CONTRACT.md`. CodeRabbit was removed (2026-09-25),
   so the review gate is the `reviewer` subagent plus the human — see the `build-issue`
-  skill. The unattended orchestrator (`ops/orchestrator.sh`) used CodeRabbit as its
-  gate and is dormant. A gate that did not run is a failure, never a pass.
+  skill. The unattended loop that used it as a gate (`ops/orchestrator.sh`) was deleted
+  the same day. A gate that did not run is a failure, never a pass.
 
 ## Doctrines
 
@@ -58,8 +58,6 @@ Sonnet adjudicating a rule conflict returns a confident wrong answer.
 | **Reasoning** | `claude-opus-4-6` | Planning, review, root-cause analysis, rule adjudication, mediation |
 | **Implementation** | `claude-sonnet-4-6` | Writing code, fixing bugs, test authoring, refactoring |
 | **Generation** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries |
-
-`ops/` scripts: `IMPL_MODEL` → Sonnet, `MEDIATOR_MODEL` → Opus.
 
 ## Architecture
 
@@ -127,8 +125,9 @@ These override any conflicting implementation. If code disagrees with these, the
   that passed for the wrong reason or had never run anywhere, and three migrations
   shipped unrunnable behind them.
 - **A skip is not a pass.** Say what ran. Run tests the way CI does — `pytest tests/unit`
-  with `lint-imports` on `PATH` (`PATH=.venv_pg/bin:$PATH`) — or the tests that skip
-  locally are exactly the ones that fail in CI.
+  with `lint-imports` on `PATH` (`PATH="$PWD/.venv_pg/bin:$PATH"`, absolute: the tests
+  run it from a temp dir, so a relative entry fails 8 of them) — or the tests that skip locally are
+  exactly the ones that fail in CI.
 - **Coverage target**: 85% minimum. Domain services: 100%.
 - Run: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
 - **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
@@ -166,9 +165,10 @@ These override any conflicting implementation. If code disagrees with these, the
 - **Do not** make assumptions without evidence. Mark uncertain decisions as `[REVIEW REQUIRED]`.
 - **Do not** skip the stage-gate approval process. Every stage must STOP and await `PROCEED` or `PROCEED WITH MODIFICATIONS`.
 - **Do not** commit `.DS_Store`, `__pycache__/`, `.coverage`, `*.pyc`, or `data/loans.db` to git.
-- **Do not** `git add -A` / `git add .`. Stage named paths. Both `data/loans.db` and
-  `.DS_Store` are already tracked, so a blanket add sweeps them in. Review
-  `git diff --cached --name-only` and scan the staged diff for secrets before committing.
+- **Do not** `git add -A` / `git add .`. Stage named paths. `.DS_Store` is tracked, so a
+  blanket add sweeps it in. (`loans.db` was untracked and `*.db` ignored on 2026-09-25 —
+  this repo is public.) Review `git diff --cached --name-only` and scan the staged diff
+  for secrets before committing.
 - **Do not** send a raw amount or a raw entity name to an LLM. Tokenise first.
 - **Do not** read `loans.status` in agent tools — derive via `StatusEngine` at read;
   the persisted column is stale after a batch approve.
