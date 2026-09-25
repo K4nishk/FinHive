@@ -1,23 +1,29 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Callable
 
 from dateutil.relativedelta import relativedelta
 
 from loan_manager.application.dtos.loan_dto import ExtendLoanDTO, LoanDTO
 from loan_manager.application.event_bus import EventBus
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 from loan_manager.domain.events.loan_events import LoanExtended
 from loan_manager.domain.services.status_engine import StatusEngine
 from loan_manager.domain.value_objects.status import ExtensionPeriodUnit
 
 
 class ExtendLoan:
-    def __init__(self, uow_factory: Callable, event_bus: EventBus) -> None:
+    def __init__(
+        self, uow_factory: Callable, event_bus: EventBus, clock: Clock | None = None
+    ) -> None:
         self._uow_factory = uow_factory
         self._event_bus = event_bus
+        self._clock = clock or SystemClock()
 
     def execute(self, reference_id: str, dto: ExtendLoanDTO) -> LoanDTO:
+        today = self._clock.today()
+
         with self._uow_factory() as uow:
             loan = uow.loans.get_by_reference_id(reference_id)
             if loan is None:
@@ -33,14 +39,14 @@ class ExtendLoan:
                     new_due_date = loan.due_date + timedelta(days=dto.extension_period)
             else:
                 # No-due-date case
-                new_giving_date = date.today()
+                new_giving_date = today
                 if dto.new_due_date is None:
                     raise ValueError("new_due_date must be provided for loans with no due_date")
                 new_due_date = dto.new_due_date
 
             loan.giving_date = new_giving_date
             loan.due_date = new_due_date
-            loan.status = StatusEngine.compute(new_giving_date, new_due_date, date.today())
+            loan.status = StatusEngine.compute(new_giving_date, new_due_date, today)
             loan.updated_at = datetime.now()
 
             saved = uow.loans.save(loan)

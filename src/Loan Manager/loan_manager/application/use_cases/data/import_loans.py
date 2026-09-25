@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Callable
 
 from loan_manager.application.dtos.import_dto import ImportPreviewDTO, ImportResultDTO
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 from loan_manager.domain.entities.loan import Loan
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
 from loan_manager.domain.services.status_engine import StatusEngine
@@ -13,10 +14,11 @@ from loan_manager.infrastructure.csv.import_service import CsvImportService
 
 
 class ImportLoans:
-    def __init__(self, uow_factory: Callable) -> None:
+    def __init__(self, uow_factory: Callable, clock: Clock | None = None) -> None:
         self._uow_factory = uow_factory
         self._csv_service = CsvImportService()
         self._ref_id_service = ReferenceIdService()
+        self._clock = clock or SystemClock()
 
     def preview(self, file_path: str) -> ImportPreviewDTO:
         """Parse file and count new vs existing ref_ids."""
@@ -50,7 +52,7 @@ class ImportLoans:
     def commit(self, file_path: str, overwrite_existing: bool = True) -> ImportResultDTO:
         """Parse, assign ref_ids, upsert records."""
         records = self._csv_service.parse(file_path)
-        today = date.today()
+        today = self._clock.today()
         now = datetime.now()
 
         inserted = 0

@@ -19,6 +19,7 @@ from loan_manager.application.dtos.report_dto import (
     ReportRecordUpdateDTO,
 )
 from loan_manager.application.event_bus import EventBus
+from loan_manager.application.interfaces.clock import FixedClock
 from loan_manager.application.use_cases.loans.create_loan import CreateLoan
 from loan_manager.application.use_cases.loans.delete_loan import DeleteLoan
 from loan_manager.application.use_cases.loans.extend_loan import ExtendLoan
@@ -89,6 +90,26 @@ class TestCreateLoan:
         result = uc.execute(dto)
         assert result.status == LoanStatus.PENDING
 
+    def test_create_loan_ref_id_prefix_uses_injected_clock_month(self, uow_factory, event_bus):
+        """KCH-233: the ref_id's year_month prefix comes from the injected
+        Clock, not the wall clock -- real today is 2026-09, so an ignored
+        clock would produce a "2026_09_" prefix instead of "2020_01_".
+        """
+        ref_service = ReferenceIdService()
+        uc = CreateLoan(uow_factory, ref_service, event_bus, clock=FixedClock(date(2020, 1, 15)))
+
+        dto = LoanCreateDTO(
+            borrower_name="Clocked",
+            borrower_group="G1",
+            depositor_name="D1",
+            amount=10000,
+            giving_date=date(2020, 1, 1),
+            due_date=date(2020, 4, 1),
+        )
+
+        result = uc.execute(dto)
+        assert result.reference_id.startswith("2020_01_")
+
 
 class TestUpdateLoan:
     def test_update_borrower_name(self, uow_factory, event_bus):
@@ -114,6 +135,27 @@ class TestUpdateLoan:
         uc = UpdateLoan(uow_factory)
         with pytest.raises(ValueError, match="not found"):
             uc.execute("9999_99_999", LoanUpdateDTO(borrower_name="x"))
+
+    def test_update_status_recompute_uses_injected_clock(self, uow_factory, event_bus):
+        """KCH-233: recompute-on-update reads the injected Clock. Real today
+        is 2026-09-25, well past due_date 2026-06-01, so an ignored clock
+        would compute OVERDUE instead of ACTIVE.
+        """
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(
+            uow_factory, ref_service, event_bus, clock=FixedClock(date(2026, 1, 1)),
+        )
+        update_uc = UpdateLoan(uow_factory, clock=FixedClock(date(2026, 5, 15)))
+
+        created = create_uc.execute(LoanCreateDTO(
+            borrower_name="Clocked", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1), due_date=date(2026, 6, 1),
+        ))
+
+        # Re-set due_date to the same value to trigger the recompute-status
+        # branch (dto.due_date is not None) without changing the schedule.
+        updated = update_uc.execute(created.reference_id, LoanUpdateDTO(due_date=date(2026, 6, 1)))
+        assert updated.status == LoanStatus.ACTIVE
 
 
 class TestDeleteLoan:
@@ -212,6 +254,27 @@ class TestExtendLoan:
         with pytest.raises(ValueError, match="not found"):
             uc.execute("9999_99_999", ExtendLoanDTO(extension_period=3))
 
+    def test_extend_no_due_date_giving_date_uses_injected_clock(self, uow_factory, event_bus):
+        """KCH-233: the no-due-date branch's new_giving_date comes from the
+        injected Clock, not date.today(). Real today is 2026-09-25, so an
+        ignored clock would not equal the pinned 2020-03-10.
+        """
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(uow_factory, ref_service, event_bus)
+        fixed_today = date(2020, 3, 10)
+        extend_uc = ExtendLoan(uow_factory, event_bus, clock=FixedClock(fixed_today))
+
+        created = create_uc.execute(LoanCreateDTO(
+            borrower_name="B1", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1),
+        ))
+
+        extended = extend_uc.execute(created.reference_id, ExtendLoanDTO(
+            extension_period=3, extension_period_unit="months",
+            new_due_date=date(2020, 6, 10),
+        ))
+        assert extended.giving_date == fixed_today
+
 
 class TestGetAllLoans:
     def test_get_all_returns_active(self, uow_factory, event_bus):
@@ -281,6 +344,46 @@ class TestRecomputeStatuses:
         count = recompute_uc.execute()
         # Status should have been recomputed (it was set during creation based on current date)
         # Since due_date 2025-06-01 < today 2026-06-30, it should be Overdue
+        get_uc = GetAllLoans(uow_factory)
+        loans = get_uc.execute()
+        assert loans[0].status == LoanStatus.OVERDUE
+
+    def test_recompute_uses_injected_clock_before_due_date(self, uow_factory, event_bus):
+        """KCH-233: recompute reads the injected Clock. due_date is
+        2026-06-01; real today is 2026-09-25 (past it, would give OVERDUE
+        if the clock were ignored), but the injected clock is 2026-05-15
+        (before it), so the correct result is ACTIVE.
+        """
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(
+            uow_factory, ref_service, event_bus, clock=FixedClock(date(2026, 1, 1)),
+        )
+        create_uc.execute(LoanCreateDTO(
+            borrower_name="B2", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1), due_date=date(2026, 6, 1),
+        ))
+
+        recompute_uc = RecomputeAllStatuses(uow_factory, clock=FixedClock(date(2026, 5, 15)))
+        recompute_uc.execute()
+
+        get_uc = GetAllLoans(uow_factory)
+        loans = get_uc.execute()
+        assert loans[0].status == LoanStatus.ACTIVE
+
+    def test_recompute_uses_injected_clock_after_due_date(self, uow_factory, event_bus):
+        """Same loan, clock pinned past due_date -> OVERDUE."""
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(
+            uow_factory, ref_service, event_bus, clock=FixedClock(date(2026, 1, 1)),
+        )
+        create_uc.execute(LoanCreateDTO(
+            borrower_name="B3", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1), due_date=date(2026, 6, 1),
+        ))
+
+        recompute_uc = RecomputeAllStatuses(uow_factory, clock=FixedClock(date(2026, 7, 1)))
+        recompute_uc.execute()
+
         get_uc = GetAllLoans(uow_factory)
         loans = get_uc.execute()
         assert loans[0].status == LoanStatus.OVERDUE

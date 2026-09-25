@@ -134,7 +134,7 @@ STEP 4 — Start Loan Manager again.
 
     # Step 4: Recompute statuses on launch
     from loan_manager.application.use_cases.loans.recompute_statuses import RecomputeAllStatuses
-    recompute = RecomputeAllStatuses(container.get_uow)
+    recompute = RecomputeAllStatuses(container.get_uow, clock=container.clock)
     updated = recompute.execute()
     logger.info(f"Recomputed statuses for {updated} loans")
 

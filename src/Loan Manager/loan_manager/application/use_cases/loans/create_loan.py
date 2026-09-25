@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Callable
 
 from loan_manager.application.dtos.loan_dto import LoanCreateDTO, LoanDTO
 from loan_manager.application.event_bus import EventBus
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 from loan_manager.domain.entities.loan import Loan
 from loan_manager.domain.events.loan_events import LoanCreated
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
@@ -14,13 +15,20 @@ from loan_manager.domain.value_objects.reference_id import ReferenceId
 
 
 class CreateLoan:
-    def __init__(self, uow_factory: Callable, ref_id_service: ReferenceIdService, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable,
+        ref_id_service: ReferenceIdService,
+        event_bus: EventBus,
+        clock: Clock | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
         self._ref_id_service = ref_id_service
         self._event_bus = event_bus
+        self._clock = clock or SystemClock()
 
     def execute(self, dto: LoanCreateDTO) -> LoanDTO:
-        today = date.today()
+        today = self._clock.today()
         year, month = today.year, today.month
         year_month_key = self._ref_id_service.year_month_key(year, month)
 
