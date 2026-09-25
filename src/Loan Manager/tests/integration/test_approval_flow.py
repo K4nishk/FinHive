@@ -20,6 +20,7 @@ from loan_manager.infrastructure.recovery.recovery_service import RecoveryServic
 from loan_manager.infrastructure.recovery.backup_service import BackupService
 from loan_manager.application.event_bus import EventBus
 from loan_manager.application.dtos.report_dto import ApprovalResultDTO
+from loan_manager.application.interfaces.clock import FixedClock
 from loan_manager.application.use_cases.reports.approve_report import ApproveReport
 from loan_manager.application.use_cases.reports.decline_report import DeclineReport
 
@@ -28,7 +29,13 @@ def _make_uow(session):
     return SqlAlchemyUnitOfWork(session)
 
 
-def _seed_loan(uow, ref_id="2026_03_001", giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1)):
+def _seed_loan(
+    uow,
+    ref_id="2026_03_001",
+    giving_date=date(2026, 1, 1),
+    due_date=date(2026, 4, 1),
+    status=LoanStatus.ACTIVE,
+):
     now = datetime.now()
     loan = Loan(
         id=None,
@@ -41,7 +48,7 @@ def _seed_loan(uow, ref_id="2026_03_001", giving_date=date(2026, 1, 1), due_date
         giving_date=giving_date,
         due_period=None,
         due_date=due_date,
-        status=LoanStatus.ACTIVE,
+        status=status,
         is_active=True,
         created_at=now,
         updated_at=now,
@@ -258,3 +265,180 @@ class TestDeletedLoanWarning:
         assert result.success is False
         assert result.requires_confirmation is True
         assert "2026_03_999" in result.deleted_ref_ids
+
+
+class TestApproveRecomputesStatus:
+    """KCH-233 regression: an approved extension must recompute the loan's
+    status immediately (against the injected Clock), not leave the
+    pre-approval status stale until the next app-launch RecomputeAllStatuses
+    sweep.
+    """
+
+    def test_approve_extend_report_on_overdue_loan_sets_active_immediately(self, db_session):
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.OVERDUE,
+        )
+        _seed_report(uow, records_data=[{
+            "reference_id": "2026_03_001",
+            "post_extension_giving_date": date(2026, 4, 1),
+            "post_extension_due_date": date(2026, 7, 1),
+        }])
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        approver = ApproveReport(
+            uow_factory, recovery, backup, event_bus,
+            clock=FixedClock(date(2026, 5, 15)),
+        )
+        result = approver.execute("RPT_20260315_001")
+        assert result.success is True
+
+        # Fresh UoW read -- no RecomputeAllStatuses ran between approval and
+        # this read, so ACTIVE can only come from ApproveReport itself.
+        fresh_uow = _make_uow(db_session)
+        loan = fresh_uow.loans.get_by_reference_id("2026_03_001")
+        assert loan.status == LoanStatus.ACTIVE
+
+    def test_approve_extend_report_still_overdue_keeps_overdue(self, db_session):
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.OVERDUE,
+        )
+        _seed_report(uow, records_data=[{
+            "reference_id": "2026_03_001",
+            "post_extension_giving_date": date(2026, 4, 1),
+            "post_extension_due_date": date(2026, 7, 1),
+        }])
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        # Clock is past the new due_date (2026-07-01) -> still OVERDUE.
+        approver = ApproveReport(
+            uow_factory, recovery, backup, event_bus,
+            clock=FixedClock(date(2026, 8, 1)),
+        )
+        result = approver.execute("RPT_20260315_001")
+        assert result.success is True
+
+        fresh_uow = _make_uow(db_session)
+        loan = fresh_uow.loans.get_by_reference_id("2026_03_001")
+        assert loan.status == LoanStatus.OVERDUE
+
+    def test_approve_extend_report_on_archived_loan_leaves_status_alone(self, db_session):
+        """Review finding (cycle 1, MAJOR): a loan paid off (and archived via
+        set_inactive) after a normal report was generated must not have its
+        status overwritten by that report's approval -- is_active=False rows
+        keep whatever MarkPaidOff/history archival set (PAIDOFF), never a
+        status recomputed from the extension dates.
+        """
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.OVERDUE,
+        )
+        _seed_report(uow, records_data=[{
+            "reference_id": "2026_03_001",
+            "post_extension_giving_date": date(2026, 4, 1),
+            "post_extension_due_date": date(2026, 7, 1),
+        }])
+        uow.commit()
+
+        # Simulate the loan being paid off and archived after report
+        # generation but before this report's approval -- the same
+        # is_active=False/status=PAIDOFF write ApproveReport's own PAIDOFF
+        # branch (and MarkPaidOff) performs via set_inactive.
+        uow.loans.set_inactive("2026_03_001")
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        # Clock 2026-05-15 is before the post-extension due_date
+        # (2026-07-01), so an unguarded recompute would set ACTIVE.
+        approver = ApproveReport(
+            uow_factory, recovery, backup, event_bus,
+            clock=FixedClock(date(2026, 5, 15)),
+        )
+        result = approver.execute("RPT_20260315_001")
+        assert result.success is True
+
+        fresh_uow = _make_uow(db_session)
+        loan = fresh_uow.loans.get_by_reference_id("2026_03_001")
+        assert loan.status == LoanStatus.PAIDOFF
+        assert loan.is_active is False
+
+    def test_approve_extend_report_before_new_giving_date_sets_pending(self, db_session):
+        """Pending branch: the clock can also land before the *new*
+        (post-extension) giving_date, in which case the loan must show
+        PENDING immediately, not ACTIVE/OVERDUE computed off the old dates.
+        """
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            status=LoanStatus.ACTIVE,
+        )
+        _seed_report(uow, records_data=[{
+            "reference_id": "2026_03_001",
+            "post_extension_giving_date": date(2026, 4, 1),
+            "post_extension_due_date": date(2026, 7, 1),
+        }])
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        # Clock 2026-03-01 is before the new giving_date (2026-04-01).
+        approver = ApproveReport(
+            uow_factory, recovery, backup, event_bus,
+            clock=FixedClock(date(2026, 3, 1)),
+        )
+        result = approver.execute("RPT_20260315_001")
+        assert result.success is True
+
+        fresh_uow = _make_uow(db_session)
+        loan = fresh_uow.loans.get_by_reference_id("2026_03_001")
+        assert loan.giving_date == date(2026, 4, 1)
+        assert loan.status == LoanStatus.PENDING
