@@ -1,0 +1,5 @@
+{
+  "as_of": "2026-09-25",
+  "source": "No evidenced per-Mtok (prompt/completion) price for qwen/qwen-2.5-72b-instruct on OpenRouter was found in data/settings.json or output/Loan Manager/mvp2/ARB_DECISIONS.md:298-304. data/settings.json['llm']['measured_usd_per_call'] ($0.00037) is a whole-call figure for one specific 7-tool-schema request (ops/probe_openrouter.py stage 2), not a per-token rate, and dividing it by an assumed token count would be inventing a number CLAUDE.md forbids. 'models' is therefore left empty on purpose: pricing.cost_for() returns (None, None) for every model until a real per-Mtok price is evidenced and added here, so OpenAICompatClient reports cost_usd=None rather than a fabricated figure whenever OpenRouter's own usage.cost is also absent from a response.",
+  "models": {}
+}
