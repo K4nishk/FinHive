@@ -7,6 +7,8 @@ openpyxl>=3.1.2
 pytest>=8.0.0
 pytest-cov>=5.0.0
 cryptography>=42.0.0        # AES-256-GCM + HKDF, via finhive.db (ARB D-15)
+openai>=1.40,<3              # OpenAI-compatible client for OpenRouter (ARB D-4a);
+                              # only infrastructure/llm/openai_compat_client.py may import it
 
 # NOTE: the `finhive` package (finhive.db.encryption / .keys) is NOT listed here.
 # A relative `-e ../..` in a requirements file resolves against pip's WORKING
