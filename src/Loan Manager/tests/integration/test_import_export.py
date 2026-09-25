@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from loan_manager.application.interfaces.clock import FixedClock
 from loan_manager.application.use_cases.data.import_loans import ImportLoans
 from loan_manager.application.use_cases.data.export_loans import ExportLoans
 from loan_manager.application.use_cases.loans.get_loans import GetAllLoans
@@ -91,6 +92,26 @@ class TestImportLoans:
         # Second import with overwrite=False
         result = uc.commit(str(csv_file), overwrite_existing=False)
         assert result.skipped == 1
+
+    def test_commit_assigns_ref_id_from_injected_clock(self, uow_factory, tmp_path):
+        """KCH-233: auto-assigned ref_ids use the injected Clock's
+        year/month, not the wall clock. Real today is 2026-09, so an
+        ignored clock would produce a "2026_09_" prefix instead of
+        "2020_01_".
+        """
+        csv_file = tmp_path / "import.csv"
+        csv_file.write_text(
+            "borrower_name,borrower_group,amount,giving_date,depositor_name,depositor_group,due_date,reference_id\n"
+            "alice,bg1,10000,2020-01-15,dan,dg1,2020-04-15,\n"
+        )
+
+        uc = ImportLoans(uow_factory, clock=FixedClock(date(2020, 1, 20)))
+        result = uc.commit(str(csv_file))
+        assert result.inserted == 1
+
+        get_uc = GetAllLoans(uow_factory)
+        loans = get_uc.execute()
+        assert loans[0].reference_id.startswith("2020_01_")
 
 
 class TestExportLoans:

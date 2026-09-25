@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Callable
 
 from loan_manager.application.dtos.loan_dto import LoanUpdateDTO, LoanDTO
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 from loan_manager.domain.services.status_engine import StatusEngine
 from loan_manager.domain.value_objects.money import Money
 
 
 class UpdateLoan:
-    def __init__(self, uow_factory: Callable) -> None:
+    def __init__(self, uow_factory: Callable, clock: Clock | None = None) -> None:
         self._uow_factory = uow_factory
+        self._clock = clock or SystemClock()
 
     def execute(self, reference_id: str, dto: LoanUpdateDTO) -> LoanDTO:
         with self._uow_factory() as uow:
@@ -42,7 +44,9 @@ class UpdateLoan:
                 loan.status = dto.status
 
             if recompute_status and dto.status is None:
-                loan.status = StatusEngine.compute(loan.giving_date, loan.due_date, date.today())
+                loan.status = StatusEngine.compute(
+                    loan.giving_date, loan.due_date, self._clock.today()
+                )
 
             loan.updated_at = datetime.now()
             saved = uow.loans.save(loan)
