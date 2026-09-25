@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -45,9 +46,17 @@ _TABLES = [
 ]
 
 
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
+
+
 async def _reset(conn: asyncpg.Connection) -> None:
-    for table in [*_TABLES, "users", "orgs", "schema_migrations"]:
-        await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    """Isolated schema, not a table list -- see tests/integration/_isolation.py.
+
+    The previous list predated migration 0005, so it left `proposed_mutations`
+    and `agent_turns` behind and the next module's `apply_pending` failed with
+    DuplicateTableError.
+    """
+    await reset_to_clean_schema(conn)
 
 
 async def _insert_loan(
@@ -86,7 +95,7 @@ async def _insert_loan(
             column="depositor_name",
         ),
         encrypt_field("150000.00", _KEY_DATA),
-        "2026-01-01",
+        date(2026, 1, 1),
         "Active",
     )
 
@@ -133,11 +142,18 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
 
             # A1.1 -- autocomplete: distinct blind indexes group identical
             # normalized names without decrypting the whole table.
+            #
+            # GROUP BY the index alone. This used to SELECT DISTINCT over
+            # (bidx, ct), and `_ct` has a random IV, so every row was distinct
+            # whatever the index held -- the assertion expected all three
+            # spellings back, which is the opposite of grouping, and it would
+            # have passed with a blind index that grouped nothing.
             distinct_rows = await conn.fetch(
-                "SELECT DISTINCT"
-                " borrower_name_bidx,"
-                " borrower_name_ct"
-                " FROM loans"
+                "SELECT borrower_name_bidx,"
+                # array_agg, not min(): min() is not defined for bytea in
+                # every Postgres version, and any member of the group will do
+                " (array_agg(borrower_name_ct))[1] AS sample_ct"
+                " FROM loans GROUP BY borrower_name_bidx"
             )
 
             # A1.2 -- group auto-fill: looking a borrower up by name resolves
@@ -158,11 +174,10 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
                     r["reference_id"]
                     for r in exact_match_rows
                 ],
+                # one decrypted sample per index group, normalised the way
+                # the index normalises, so the assertion names the groups
                 "distinct_names": sorted(
-                    decrypt_field(
-                        r["borrower_name_ct"],
-                        _KEY_DATA,
-                    )
+                    decrypt_field(r["sample_ct"], _KEY_DATA).strip().lower()
                     for r in distinct_rows
                 ),
                 "auto_group": decrypt_field(
@@ -171,7 +186,7 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
                 ),
             }
         finally:
-            await _reset(conn)
+            await drop_test_schema(conn)
             await conn.close()
 
     result = asyncio.run(_run())
@@ -179,9 +194,8 @@ def test_exact_match_and_auto_fill_survive_encryption() -> None:
     assert result["em_ids"] == [
         "2026_01_001", "2026_01_002",
     ]
-    assert result["distinct_names"] == [
-        "Sharma Traders",
-        "Verma Traders",
-        "sharma traders",
-    ]
+    # "Sharma Traders" and "sharma traders" normalise identically, so they
+    # must share ONE index group; three groups here means the index is not
+    # grouping and autocomplete would list the same borrower twice.
+    assert result["distinct_names"] == ["sharma traders", "verma traders"]
     assert result["auto_group"] == "Sharma Group"

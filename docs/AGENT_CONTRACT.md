@@ -137,6 +137,7 @@ gh api "repos/$OWNER/$REPO/branches/main/protection" -X PUT --input - <<JSON
     "checks": [
       { "context": "Fast gates", "app_id": $GH_ACTIONS_APP_ID },
       { "context": "MVP1 regression", "app_id": $GH_ACTIONS_APP_ID },
+      { "context": "Postgres integration", "app_id": $GH_ACTIONS_APP_ID },
       { "context": "coderabbit/cli-gate", "app_id": null }
     ]
   },

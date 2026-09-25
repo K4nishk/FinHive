@@ -28,7 +28,25 @@ _MIGRATIONS_DIR = ROOT / "migrations"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 # The exact, standalone invocation the gate requires.
-_LINT_GATE_COMMAND = "pytest tests/unit/test_blind_index_lint.py -q"
+# A fast-gates step satisfies the gate if its pytest target CONTAINS this
+# module -- this file itself, or a directory it lives in. Checked by path, not
+# by matching a command string: KCH-230 widened the step from this one file to
+# `tests/unit`, and a string allowlist accepted `pytest tests/unit -q` without
+# checking that this module was still under it (review finding). Moving the
+# module out of tests/unit now fails this test.
+_THIS_MODULE = Path(__file__).resolve()
+
+
+def _step_covers_this_module(run: str) -> bool:
+    words = run.split()
+    if not words or words[0] != "pytest":
+        return False
+    targets = [w for w in words[1:] if not w.startswith("-")]
+    for t in targets:
+        target = (ROOT / t.split("::")[0]).resolve()
+        if target == _THIS_MODULE or target in _THIS_MODULE.parents:
+            return True
+    return False
 
 # Matches `ADD COLUMN <name>_bidx` or a bare `<name>_bidx` reference (e.g.
 # inside a CREATE INDEX target list), case-insensitively, for any amount
@@ -107,12 +125,12 @@ def test_ci_runs_the_blind_index_lint_gate() -> None:
     hits = [
         step
         for step in job["steps"]
-        if step.get("run", "").strip() == _LINT_GATE_COMMAND
+        if _step_covers_this_module(step.get("run", "").strip())
         and step.get("if") is None
         and not step.get("continue-on-error", False)
     ]
     assert hits, (
         "no unconditional, non-swallowed step"
-        f" runs {_LINT_GATE_COMMAND!r}"
+        f" runs pytest over {_THIS_MODULE.relative_to(ROOT)}"
         " in fast-gates"
     )

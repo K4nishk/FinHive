@@ -41,6 +41,9 @@ _REQUIRES = not (
 )
 
 
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
+
+
 @pytest.mark.skipif(
     _REQUIRES,
     reason="needs TEST_DATABASE_URL, SUPABASE_URL"
@@ -52,11 +55,10 @@ def test_seeding_twice_resolves_to_one_real_org_and_role_owner() -> None:
     async def _run() -> tuple[str, str, str, str]:
         conn = await asyncpg.connect(_DATABASE_URL)
         try:
-            # Forward-only: drop anything a prior run of this test left behind
-            # rather than editing an "applied" migration in place.
-            await conn.execute("DROP TABLE IF EXISTS users")
-            await conn.execute("DROP TABLE IF EXISTS orgs")
-            await conn.execute("DROP TABLE IF EXISTS schema_migrations")
+            # Isolated schema rather than three table names: this list
+            # predated migrations 0002-0005, so it left every later table
+            # behind -- see tests/integration/_isolation.py.
+            await reset_to_clean_schema(conn)
 
             await apply_pending(conn, _MIGRATIONS_DIR)
 
@@ -86,11 +88,9 @@ def test_seeding_twice_resolves_to_one_real_org_and_role_owner() -> None:
             )
             return first_org, first_user, str(row["org_id"]), row["role"]
         finally:
-            await conn.execute("DROP TABLE IF EXISTS users")
-            await conn.execute("DROP TABLE IF EXISTS orgs")
-            await conn.execute(
-                "DROP TABLE IF EXISTS schema_migrations"
-            )
+            # Schema-level teardown: dropping `users` by name fails once
+            # migration 0005's foreign keys reference it.
+            await drop_test_schema(conn)
             await conn.close()
 
     first_org, first_user, resolved_org_id, resolved_role = asyncio.run(_run())

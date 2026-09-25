@@ -1,13 +1,14 @@
 """Migration 0001 -- orgs and users tables (KCH-92).
 
-Requires a real Supabase Postgres reachable via
-TEST_DATABASE_URL -- skipped otherwise, per the
-``integration`` marker's contract in pyproject.toml.
-``users.id`` references Supabase ``auth.users``, so
-this needs a database with the ``auth`` schema (a
-local ``supabase start`` or a hosted branch, not a
-bare Postgres container). This test drops and
-recreates tables, so it must never fall back to
+Requires a Postgres reachable via TEST_DATABASE_URL -- skipped otherwise,
+per the ``integration`` marker's contract in pyproject.toml. A plain
+container is enough: ARB D-16 replaced Supabase with local Postgres, so
+``users.id`` is a locally issued UUID rather than a foreign key into
+Supabase's ``auth`` schema, and this test no longer needs that schema to
+exist (KCH-225, KCH-228).
+
+It works inside a schema the integration lane owns and recreates, so it
+never touches anything else in the database and must never fall back to
 DATABASE_URL.
 """
 
@@ -29,6 +30,9 @@ _DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
+from tests.integration._isolation import drop_test_schema, reset_to_clean_schema  # noqa: E402
+
+
 @pytest.mark.skipif(
     not _DATABASE_URL,
     reason="needs TEST_DATABASE_URL",
@@ -39,11 +43,10 @@ def test_user_created_and_resolved_to_org_and_role() -> None:
     async def _run() -> tuple[str, str]:
         conn = await asyncpg.connect(_DATABASE_URL)
         try:
-            # Forward-only: drop anything a prior run of this test left behind
-            # rather than editing an "applied" migration in place.
-            await conn.execute("DROP TABLE IF EXISTS users")
-            await conn.execute("DROP TABLE IF EXISTS orgs")
-            await conn.execute("DROP TABLE IF EXISTS schema_migrations")
+            # Isolated schema rather than three table names: this list
+            # predated migrations 0002-0005, so it left every later table
+            # behind -- see tests/integration/_isolation.py.
+            await reset_to_clean_schema(conn)
 
             await apply_pending(conn, _MIGRATIONS_DIR)
 
@@ -53,12 +56,12 @@ def test_user_created_and_resolved_to_org_and_role() -> None:
                 "Acme Lending",
             )
 
+            # Identity is issued locally, not by Supabase (ARB D-16,
+            # KCH-228). Migration 0001 used to declare
+            # `REFERENCES auth.users (id)` and this test populated that
+            # Supabase-owned table to satisfy it; neither exists on local
+            # Postgres, so both had to go.
             auth_user_id = uuid.uuid4()
-            await conn.execute(
-                "INSERT INTO auth.users (id)"
-                " VALUES ($1)",
-                auth_user_id,
-            )
             await conn.execute(
                 "INSERT INTO users (id, org_id, role) VALUES ($1, $2, $3)",
                 auth_user_id,
@@ -71,15 +74,9 @@ def test_user_created_and_resolved_to_org_and_role() -> None:
             )
             return str(row["org_id"]), row["role"]
         finally:
-            await conn.execute(
-                "DROP TABLE IF EXISTS users"
-            )
-            await conn.execute(
-                "DROP TABLE IF EXISTS orgs"
-            )
-            await conn.execute(
-                "DROP TABLE IF EXISTS schema_migrations"
-            )
+            # Schema-level teardown: dropping `users` by name fails once
+            # migration 0005's foreign keys reference it.
+            await drop_test_schema(conn)
             await conn.close()
 
     resolved_org_id, resolved_role = asyncio.run(_run())

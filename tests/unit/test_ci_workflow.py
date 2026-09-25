@@ -116,3 +116,39 @@ def test_lint_failure_stops_the_job_before_later_gates(tmp_path: Path) -> None:
     assert result.returncode != 0, "expected the deliberately broken ruff target to fail the job"
     assert list(markers.iterdir()) == [], "a later gate ran after the lint failure"
     assert elapsed < 30, f"fast-gate short-circuit took {elapsed:.1f}s, over the 30s budget"
+
+
+def _job(name: str) -> dict:
+    jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+    assert name in jobs, f"ci.yml has no `{name}` job (jobs: {sorted(jobs)})"
+    return jobs[name]
+
+
+def test_postgres_integration_lane_runs_and_cannot_pass_by_skipping() -> None:
+    """Pins the job KCH-230 added (review finding: deleting it left every gate
+    green).
+
+    Migrations 0001-0005 shipped unrunnable behind tests that would have caught
+    them, because no CI job executed tests/integration. This job is what closes
+    that, and FINHIVE_REQUIRE_INTEGRATION is what stops it reporting green
+    after skipping everything -- a lane that skips and a lane that passes look
+    identical without it.
+    """
+    job = _job("postgres-integration")
+    assert job.get("if") is None, "the integration lane must run unconditionally"
+    assert not job.get("continue-on-error", False), "it must not tolerate failure"
+    assert "postgres" in (job.get("services") or {}), "it needs a Postgres service"
+
+    runs = [
+        s for s in job["steps"]
+        if "pytest tests/integration" in s.get("run", "")
+        and s.get("if") is None
+        and not s.get("continue-on-error", False)
+    ]
+    assert runs, "no unconditional step runs `pytest tests/integration`"
+    env = runs[0].get("env") or {}
+    assert env.get("TEST_DATABASE_URL"), "the lane skips without TEST_DATABASE_URL"
+    assert str(env.get("FINHIVE_REQUIRE_INTEGRATION", "")) not in ("", "0"), (
+        "without FINHIVE_REQUIRE_INTEGRATION a misconfigured lane skips and "
+        "reports green -- see tests/integration/conftest.py"
+    )
