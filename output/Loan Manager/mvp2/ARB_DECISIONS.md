@@ -280,6 +280,14 @@ The probe's own first version scored finding 1 as a PASS by accepting either
 catch is worse than no test. Tightened to require `resolve_entity` and to print
 arguments, which is what surfaced findings 2 and 3.
 
+**Re-run 2026-09-25 (KCH-252):** $0.0013 over 4 calls, $0.00032/call. qwen is on
+the paid tier, so that is money, not quota. Findings 1 and 2 reproduced on qwen.
+The probe still scored findings 2 and 3 as OK, the same flaw one level down: it
+checked tool names and read no arguments. It now marks `rate=0.12` as WRONGARG and
+requires `get_current_context` for a date-relative question.
+`tests/unit/test_probe_openrouter.py` pins both checks offline. The model and its
+quirks are recorded in `data/settings.json['llm']`.
+
 **Cost accounting on a free tier measures QUOTA, not money.** Reporting `$0.0000`
 as if spend were being controlled is the failure mode; the observability plane
 must show quota consumption, latency and throughput instead.
