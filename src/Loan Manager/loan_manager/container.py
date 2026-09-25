@@ -14,6 +14,7 @@ from loan_manager.infrastructure.security.key_provider import (
     set_active_key_ring,
 )
 from loan_manager.application.event_bus import EventBus
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from finhive.db.keys import KeyRing
@@ -24,6 +25,7 @@ class Container:
         self.recovery_service = RecoveryService()
         self.backup_service = BackupService()
         self.event_bus = EventBus()
+        self.clock: Clock = SystemClock()
         self._key_ring: KeyRing | None = None
 
     def get_uow(self) -> SqlAlchemyUnitOfWork:

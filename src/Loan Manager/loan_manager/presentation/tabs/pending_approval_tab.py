@@ -256,6 +256,7 @@ class PendingApprovalTab(QWidget):
                 self._container.recovery_service,
                 self._container.backup_service,
                 self._container.event_bus,
+                clock=self._container.clock,
             )
 
             result = approve_uc.execute(report_id, force=False)
