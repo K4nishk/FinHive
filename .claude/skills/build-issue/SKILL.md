@@ -241,7 +241,8 @@ asserting something weaker than the acceptance line.
 ## Creating issues
 
 Invoke the `write-linear-issue` skill first — it carries the labelling, project and
-estimate conventions. FinHive specifics live in `CLAUDE.md` under Linear.
+estimate conventions. FinHive specifics live in the `loan-manager-conventions` skill
+under Linear.
 
 M1.1 issues are generated: edit `ops/gen_m11_csv.py`, not the CSV. The seeder is
 idempotent **by title**, so changing a title creates a duplicate rather than editing

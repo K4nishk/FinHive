@@ -7,55 +7,50 @@
   tab added to the existing single-user PySide6 desktop app, as an extension of MVP1.
   Governed by `/docs/MVP1_1_ASK_FINHIVE.md`. MVP2 (web/Postgres) is **paused after
   KCH-109**.
-- **Building a `KCH-*` issue? Invoke the `build-issue` skill first.** It carries the
-  orchestrator loop, role-to-model mapping, review gate, stacking and blocking rules,
-  and the debt policy. Kept out of this file so it does not occupy context while you
-  are writing code.
+- **Building a `KCH-*` issue? Invoke the `build-issue` skill first** — orchestrator
+  loop, role-to-model mapping, review gate, stacking and blocking rules, debt policy.
+- **Writing, moving or reviewing Loan Manager code, touching the UI, or filing a Linear
+  issue? Load the `loan-manager-conventions` skill** — layers in detail, DI, UI rules,
+  coding conventions, library constraints, repo map, Linear specifics. Kept out of
+  this file because it is injected into every task and every subagent, and most of
+  them need none of that.
 - **Decisions**: `/output/Loan Manager/mvp2/ARB_DECISIONS.md` is LIVE and
   authoritative. Read the M1.1 block before any architectural choice — several
-  decisions are conditional and one (D-17) is deliberately unresolved.
-- **Data layer note**: MVP1 is **SQLite + SQLAlchemy 2.0**, not CSV. `input/REQUIREMENTS.md`
-  still says otherwise in places; run_8 superseded it (WIKI §16, CHG-001). Specify
-  against `src/`, never against `input/`.
-- **Branch**: `development`
-- **Input**: `/input/REQUIREMENTS.md` (authoritative business spec), `/input/prompt*.md` (build/fix prompts)
-- **Output**: `/output/YYYY/MM/DD/stdout_HHMMSS.md` (design artifacts, ARD, WIKI, FINAL_REVIEW)
-- **Source**: `/src/Loan Manager/loan_manager/` (Python package)
-- **WIKI**: `/output/Loan Manager/run_8/WIKI.md` — full repository knowledge base with file index, data flows, and business rules. Read it before making architectural decisions.
-- **ARD**: `/output/Loan Manager/run_8/ARD.md` — architecture reference for onboarding context.
-- **Agent contract**: `/docs/AGENT_CONTRACT.md` — branch, implement, review gate,
-  bounded fix cycles, escalation. **Its CodeRabbit gate is superseded**: the free
-  tier ended and `coderabbit usage` exits non-zero. For M1.1 the gate is the
-  `reviewer` subagent plus the human — see the `build-issue` skill. An
-  unauthenticated CodeRabbit is a gate that did not run, which is a failure, never
-  a pass.
-
----
+  decisions are conditional and one (D-17) is deliberately unresolved. The run_8
+  WIKI (`/output/Loan Manager/run_8/WIKI.md`) is the file and data-flow index.
+- **Data layer truth**: MVP1 is **SQLite + SQLAlchemy 2.0**, not CSV.
+  `input/REQUIREMENTS.md` still says otherwise in places; run_8 superseded it (WIKI §16,
+  CHG-001). Specify against `src/`, never against `input/`.
+- **Branch**: `development`. A PR is required; direct pushes are rejected.
+- **Agent contract**: `/docs/AGENT_CONTRACT.md`. Its CodeRabbit gate does not run
+  (CodeRabbit reviews nothing here), so the gate is the `reviewer` subagent plus the
+  human — see the `build-issue` skill. A gate that did not run is a failure, never a
+  pass.
 
 ## Doctrines
 
 Three, always in force. Full application and measured figures: the `build-issue` skill.
 
 - **Ponytail** — stop at the first rung that holds: YAGNI → reuse → stdlib → native
-  → existing deps → minimal → necessary. **Rung 2 (reuse) is the default answer in
-  this repo.** The data layer, `ReferenceIdService`, `StatusEngine`,
-  `InterestCalculator`, the `reports`/`report_records` batch and `finhive/db/`
-  already exist. The original MVP1.1 plan budgeted 14.5 days rebuilding them because
-  it was written from `input/REQUIREMENTS.md` instead of from `src/`.
-- **Caveman** — dense prose, exact identifiers. Compress the wording; never the code,
+  → existing deps → minimal → necessary. **Rung 2 (reuse) is the default answer here.**
+  The data layer, `ReferenceIdService`, `StatusEngine`, `InterestCalculator`, the
+  `reports`/`report_records` batch and `finhive/db/` already exist; the original
+  MVP1.1 plan budgeted 14.5 days rebuilding them because it was written from
+  `input/REQUIREMENTS.md` instead of from `src/`.
+- **Caveman** — dense prose, exact identifiers. Compress the wording, never the code,
   commands, paths or error strings. Report honest measurements, including ones that
   cut against the thesis.
 - **RTK** — compress before it reaches a context. `rtk` is installed: `rtk test`,
-  `rtk err`, `rtk git diff`, `rtk read`. Never pipe raw output into a subagent
-  prompt: the failing lines, not the log; `file:line`, not the module. M0 measured a
-  **122:1 context re-read ratio** — half the bill was agents re-reading this file and
-  the WIKI from zero. Never quote a fixed RTK percentage; it is tree-dependent and is
-  re-measured per issue by `ops/rtk_gain.py`.
+  `rtk err`, `rtk git diff`, `rtk read`. Never pipe raw output into a subagent prompt:
+  the failing lines, not the log; `file:line`, not the module. M0 measured a **122:1
+  context re-read ratio** — half the bill was agents re-reading this file. Never quote
+  a fixed RTK percentage; it is tree-dependent.
 
 ## Model Tiers (cost-optimised)
 
 **Claude Code is the orchestrator: it delegates and does not implement.** Pick the
-cheapest model that can do the job — overkill burns budget, under-spec burns quality.
+cheapest model that can do the job. A reasoning model on a mechanical edit burns budget;
+Sonnet adjudicating a rule conflict returns a confident wrong answer.
 
 | Tier | Model | Use when |
 |---|---|---|
@@ -64,79 +59,14 @@ cheapest model that can do the job — overkill burns budget, under-spec burns q
 | **Implementation** | `claude-sonnet-4-6` | Writing code, fixing bugs, test authoring, refactoring |
 | **Generation** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries |
 
-A reasoning model on a mechanical edit burns budget for nothing; Sonnet adjudicating
-a rule conflict returns a confident wrong answer. When configuring `ops/` scripts:
-`IMPL_MODEL` → Sonnet, `MEDIATOR_MODEL` → Opus.
+`ops/` scripts: `IMPL_MODEL` → Sonnet, `MEDIATOR_MODEL` → Opus.
 
----
+## Architecture
 
-## Language & Framework Constraints
-
-- Python >= 3.10. Target compatibility: 3.10–3.13.
-- PySide6 >= 6.8.0 for GUI.
-- SQLAlchemy >= 2.0 ORM, **sync**. SQLite through MVP1; **Postgres from MVP1.1**
-  (ARB D-1a, D-16). No raw SQL outside migrations.
-- Alembic for schema migrations.
-- Pydantic >= 2.5 for all DTOs. Use `BaseModel`, field validators, model validators.
-- `python-dateutil` for date arithmetic (`relativedelta`). No manual month math.
-- `openpyxl` for XLSX. No other Excel library.
-- `Decimal` (not `float`) for all monetary calculations. Use `ROUND_HALF_UP`. Quantize to two decimal places.
-- All dates stored and compared as `datetime.date` objects in ISO 8601 format.
-- Enums via `str, Enum` for serialisation compatibility (see `domain/value_objects/status.py`).
-
----
-
-## Architecture Rules
-
-Four-layer Clean Architecture. Dependency flows inward only.
-
-```
-Presentation → Application → Domain ← Infrastructure
-```
-
-- **Domain** (`domain/`): Pure Python. No imports from `infrastructure/`, `presentation/`, `PySide6`, or `sqlalchemy`. Entities, value objects, domain services, repository interfaces, domain events.
-- **Application** (`application/`): Use cases and DTOs only. Imports `domain/` only. No DB queries, no UI code.
-- **Infrastructure** (`infrastructure/`): Implements domain repository interfaces. Imports `domain/` and `sqlalchemy`. No `PySide6`.
-- **Presentation** (`presentation/`): PySide6 UI. Calls application use cases. No business logic. No direct repository access.
-
-When adding new code, place it in the correct layer. If a piece of logic requires imports that cross layer boundaries in the wrong direction, restructure.
-
-### Dependency Injection
-
-Constructor injection via `Container` (`container.py`). No DI framework. No service locator pattern beyond `Container`.
-
-### Table Model
-
-Use `QAbstractTableModel` + `QSortFilterProxyModel` for all data tables. Never use `QTableWidget`.
-
-### Filter State
-
-`ColumnFilterWidget` owns a single-source-of-truth `FilterState`. The popup is a pure view — it holds no permanent state. Read `src/Loan Manager/docs/filter_architecture.md` before touching filter code.
-
-### Date Picker
-
-Use `setCalendarPopup(True)` + `QTimer.singleShot(0, showPopup)` for date picker activation. Never call `showCalendarWidget()` — it does not exist in PySide6.
-
-### Theme
-
-All colours come from `ThemeManager` + JSON config files (`dark_config.json`, `light_config.json`). Never hardcode hex colour values in UI code.
-
----
-
-## Coding Conventions
-
-- PEP 8 style. 
-- File naming: lowercase with underscores (`interest_calculator.py`, `loan_table_model.py`).
-- Agent/skill file naming: lowercase with hyphens (`python-reviewer.md`, `tdd-workflow.md`).
-- Normalise `borrower_name`, `borrower_group`, `depositor_name`, `depositor_group` to lowercase at write time.
-- All monetary amounts are non-negative integers (whole INR rupees). Enforce via `Money` value object or Pydantic `Field(ge=0)`.
-- Use `from __future__ import annotations` at the top of every module.
-- Use `Optional[X]` or `X | None` consistently — prefer `Optional[X]` for dataclass fields, `X | None` for type hints in function signatures.
-- Dataclasses for domain entities. Pydantic `BaseModel` for DTOs. Do not mix.
-- Frozen dataclasses for value objects (`@dataclass(frozen=True)`).
-- Use cases are classes with an `execute()` method. One use case per file.
-- Repository methods return domain entities, not ORM models. Map in the repository implementation.
-- Log via `get_logger(__name__)` from `infrastructure/logging/logger.py`. No `print()` in production code.
+Four-layer Clean Architecture, dependency inward only:
+`Presentation → Application → Domain ← Infrastructure`. Put new code in the right layer;
+if it needs an import that crosses a boundary the wrong way, restructure. Detail, DI and
+the UI conventions: the `loan-manager-conventions` skill.
 
 ---
 
@@ -189,38 +119,30 @@ These override any conflicting implementation. If code disagrees with these, the
 
 ## Testing Requirements
 
-- **Coverage target**: 85% minimum. Current: 89%.
-- Run tests: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
-- Domain services must have 100% unit test coverage.
+- **See it fail first.** A new or changed test counts only once you have watched it
+  fail *for the reason its name states*: break the property it guards (in a scratch
+  copy, never the real tree), run it, and read the failure message. Failing on a
+  `NameError`, `KeyError`, `ImportError` or config error is not that — neither is a
+  test that has only ever passed or skipped. KCH-230 found seven tests in this repo
+  that passed for the wrong reason or had never run anywhere, and three migrations
+  shipped unrunnable behind them.
+- **A skip is not a pass.** Say what ran. Run tests the way CI does — `pytest tests/unit`
+  with `lint-imports` on `PATH` (`PATH=.venv_pg/bin:$PATH`) — or the tests that skip
+  locally are exactly the ones that fail in CI.
+- **Coverage target**: 85% minimum. Domain services: 100%.
+- Run: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
 - **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
   (repository, migration, encryption) run against real Postgres and must SKIP — never
   fail — when `TEST_DATABASE_URL` is unset, because CI runs whole test directories.
-  `mvp1-regression` is *documented* as a required check (`docs/AGENT_CONTRACT.md`,
-  KCH-86) but the ruleset has never been applied: GitHub currently requires **no**
-  status checks, so a red PR can merge. Do not rely on CI to block a merge.
 - Point `TEST_DATABASE_URL` at a **dedicated, disposable** database — never the dev
   database. The lane drops and recreates schemas; the dev ledger lives in `public`.
-- Validate filter logic with sample data checkpoints: `bg3` → 2 records (b3, b4); `dg3` → 4 records (b6, b7, b8, b9).
-- Every new use case must have a corresponding test file.
-- Every bug fix must include a regression test that would have caught the bug.
-- No UI tests in prototype scope — verify UI changes manually or via code review.
-- Run the full test suite before any commit. Do not commit with failing tests.
+- Do not assume CI blocks a merge: required checks live in the repo ruleset — verify
+  them there before relying on a red check to stop anything.
+- Every new use case has a test file. Every bug fix has a regression test that would
+  have caught it. No UI tests in prototype scope — verify UI changes manually or in
+  review. Run the full suite before any commit; never commit with failing tests.
 
 ---
-
-## Linear
-
-Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
-`~/.claude/CLAUDE.md` for the full convention. FinHive specifics:
-
-- **Product label**: `product:finhive` on every issue, always first
-- **Projects**: `FinHive <milestone> · <name>` — e.g. `FinHive M1a · Local Setup, Login & Encryption`
-- **Workstream label**: `ops`, `ci-cd`, `data`, `security`, `backend`, `business-logic`, `frontend`, `agent`, `auth`, `testing`, `observability`, `docs`
-- **Source of truth**, split by milestone — row order is build order in both, never re-sort either:
-  - `output/Loan Manager/mvp1.1/linear_import.csv` — **M1.1** (KCH-222…253), generated by `ops/gen_m11_csv.py`
-  - `output/Loan Manager/mvp2/linear_import.csv` — M0 and M1a…M5
-  - The four absorbed issues (KCH-99, 100, 105, 114) still live in the mvp2 CSV under the old M1a project name; they are re-milestoned in Linear, not moved between files
-- **Import**: `python3 ops/seed_linear.py` (dry run) → `--apply`. Idempotent by title.
 
 ## Explicit Prohibitions
 
@@ -229,7 +151,11 @@ Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
 - **Do not** use `QTableWidget` for data tables. Use `QAbstractTableModel`.
 - **Do not** call `showCalendarWidget()`. It does not exist.
 - **Do not** hardcode hex colours in presentation code. Use `ThemeManager`.
-- **Do not** use `float` for monetary values. Use `Decimal`.
+- **Do not** use `float` for monetary values. Use `Decimal`, quantised to two places
+  with `ROUND_HALF_UP`. Python's default context rounds half-even, which silently
+  shifts paise: `2.345` becomes `2.34`, not MVP1's `2.35`.
+- **Do not** write raw SQL outside `migrations/` (ARB D-1a: parameterised ORM only).
+  A raw write also bypasses the encrypting repository and lands plaintext.
 - **Do not** use `giving_date` in any interest or time calculation.
 - **Do not** import `PySide6` in domain or application layers.
 - **Do not** import `sqlalchemy` in domain or presentation layers.
@@ -252,32 +178,5 @@ Team `KCH` is shared with other products (Aegis, AssetAuditor). See the global
   repository, or you produce a database the app cannot read.
 - **Do not** specify work against `input/REQUIREMENTS.md` storage claims. They are
   superseded; `src/` is the truth.
-
----
-
-## File Structure
-
-```
-/input/*                          Requirements and prompt specs (read-only reference)
-/output/<Title>/<run_order>/*     Design artifacts per run (ARD, WIKI, FINAL_REVIEW, docs/)
-/src/<Title>/*                    Source code (populated during implementation stages)
-/.claude/agents/*                 Subagent definitions (markdown + YAML frontmatter)
-/.claude/skills/*                 Skill definitions (markdown)
-/.claude/tools/*                  Reference snippets (do not modify)
-```
-
-### Loan Manager Source (`/src/Loan Manager/loan_manager/`)
-
-```
-main.py              Entry point: logging → recovery check → DB init → status recompute → UI launch
-config.py            All path constants: DATA_DIR, DB_PATH, LOG_FILE, RECOVERY_FILE, etc.
-container.py         DI wiring: Container class
-domain/              Layer 1: entities, value_objects, services, repositories (interfaces), events
-application/         Layer 2: use_cases/, dtos/, interfaces/unit_of_work.py, event_bus.py
-infrastructure/      Layer 3: database/ (ORM models, session, UoW), repositories/ (implementations),
-                              csv/ (import/export), recovery/, logging/, migrations/
-presentation/        Layer 4: main_window, tabs/, dialogs/, widgets/, view_models/, themes/
-```
-
----
-
+- **Do not** run anything that drops tables or schemas without first checking **which
+  database** it targets.
