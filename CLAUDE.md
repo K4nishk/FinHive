@@ -166,9 +166,10 @@ These override any conflicting implementation. If code disagrees with these, the
 - **Do not** make assumptions without evidence. Mark uncertain decisions as `[REVIEW REQUIRED]`.
 - **Do not** skip the stage-gate approval process. Every stage must STOP and await `PROCEED` or `PROCEED WITH MODIFICATIONS`.
 - **Do not** commit `.DS_Store`, `__pycache__/`, `.coverage`, `*.pyc`, or `data/loans.db` to git.
-- **Do not** `git add -A` / `git add .`. Stage named paths. Both `data/loans.db` and
-  `.DS_Store` are already tracked, so a blanket add sweeps them in. Review
-  `git diff --cached --name-only` and scan the staged diff for secrets before committing.
+- **Do not** `git add -A` / `git add .`. Stage named paths. `.DS_Store` is tracked, so a
+  blanket add sweeps it in. (`loans.db` was untracked and `*.db` ignored on 2026-09-25 —
+  this repo is public.) Review `git diff --cached --name-only` and scan the staged diff
+  for secrets before committing.
 - **Do not** send a raw amount or a raw entity name to an LLM. Tokenise first.
 - **Do not** read `loans.status` in agent tools — derive via `StatusEngine` at read;
   the persisted column is stale after a batch approve.
