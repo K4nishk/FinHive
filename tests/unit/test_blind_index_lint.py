@@ -28,18 +28,25 @@ _MIGRATIONS_DIR = ROOT / "migrations"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 # The exact, standalone invocation the gate requires.
-# Any unconditional fast-gates step whose pytest target COVERS this module
-# satisfies the gate. KCH-230 widened the step from this one file to the whole
-# `tests/unit` directory, because running a single file was how 20 other unit
-# modules -- and the entire integration lane -- went unexecuted by CI.
-# Asserting the literal one-file command would now block that widening, which
-# is the mistake test_migration_0001 made by ASSERTING the Supabase foreign key
-# it should have prevented.
-_LINT_GATE_COMMANDS = (
-    "pytest tests/unit/test_blind_index_lint.py -q",
-    "pytest tests/unit -q",
-    "pytest tests/unit",
-)
+# A fast-gates step satisfies the gate if its pytest target CONTAINS this
+# module -- this file itself, or a directory it lives in. Checked by path, not
+# by matching a command string: KCH-230 widened the step from this one file to
+# `tests/unit`, and a string allowlist accepted `pytest tests/unit -q` without
+# checking that this module was still under it (review finding). Moving the
+# module out of tests/unit now fails this test.
+_THIS_MODULE = Path(__file__).resolve()
+
+
+def _step_covers_this_module(run: str) -> bool:
+    words = run.split()
+    if not words or words[0] != "pytest":
+        return False
+    targets = [w for w in words[1:] if not w.startswith("-")]
+    for t in targets:
+        target = (ROOT / t.split("::")[0]).resolve()
+        if target == _THIS_MODULE or target in _THIS_MODULE.parents:
+            return True
+    return False
 
 # Matches `ADD COLUMN <name>_bidx` or a bare `<name>_bidx` reference (e.g.
 # inside a CREATE INDEX target list), case-insensitively, for any amount
@@ -118,12 +125,12 @@ def test_ci_runs_the_blind_index_lint_gate() -> None:
     hits = [
         step
         for step in job["steps"]
-        if step.get("run", "").strip() in _LINT_GATE_COMMANDS
+        if _step_covers_this_module(step.get("run", "").strip())
         and step.get("if") is None
         and not step.get("continue-on-error", False)
     ]
     assert hits, (
         "no unconditional, non-swallowed step"
-        f" runs any of {_LINT_GATE_COMMANDS!r}"
+        f" runs pytest over {_THIS_MODULE.relative_to(ROOT)}"
         " in fast-gates"
     )

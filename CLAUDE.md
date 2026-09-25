@@ -194,8 +194,12 @@ These override any conflicting implementation. If code disagrees with these, the
 - Domain services must have 100% unit test coverage.
 - **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
   (repository, migration, encryption) run against real Postgres and must SKIP — never
-  fail — when `TEST_DATABASE_URL` is unset, because `mvp1-regression` runs the whole
-  `tests/` directory as a required check.
+  fail — when `TEST_DATABASE_URL` is unset, because CI runs whole test directories.
+  `mvp1-regression` is *documented* as a required check (`docs/AGENT_CONTRACT.md`,
+  KCH-86) but the ruleset has never been applied: GitHub currently requires **no**
+  status checks, so a red PR can merge. Do not rely on CI to block a merge.
+- Point `TEST_DATABASE_URL` at a **dedicated, disposable** database — never the dev
+  database. The lane drops and recreates schemas; the dev ledger lives in `public`.
 - Validate filter logic with sample data checkpoints: `bg3` → 2 records (b3, b4); `dg3` → 4 records (b6, b7, b8, b9).
 - Every new use case must have a corresponding test file.
 - Every bug fix must include a regression test that would have caught the bug.

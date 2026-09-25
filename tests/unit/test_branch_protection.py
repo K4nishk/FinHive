@@ -134,3 +134,16 @@ def test_documented_ruleset_binds_mvp1_regression_to_actions_app() -> None:
         '"context": "MVP1 regression", "app_id": $GH_ACTIONS_APP_ID'
         in _contract_text()
     )
+
+
+def test_documented_status_check_matches_postgres_integration_job_name() -> None:
+    """KCH-230: the integration lane must be among the documented required
+    checks. It exists because migrations 0001-0005 shipped unrunnable while the
+    tests that would have caught them never ran in CI -- a lane that can be
+    red at merge time does not close that."""
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    job_name = workflow["jobs"]["postgres-integration"]["name"]
+    assert job_name in _protection_contexts(), (
+        "docs/AGENT_CONTRACT.md's required_status_checks.checks must "
+        f"name the postgres-integration job as it actually reports: {job_name!r}"
+    )

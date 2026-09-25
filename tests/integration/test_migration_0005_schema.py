@@ -63,7 +63,12 @@ async def _columns(
         "SELECT column_name, data_type,"
         " is_nullable, column_default"
         " FROM information_schema.columns"
-        " WHERE table_name = $1"
+        # current_schema(), not just the table name: both catalog views span
+        # every schema, and a dev database holds real copies of these tables
+        # in `public`. Without this the assertions could pass on the wrong
+        # table -- and _columns keys a dict by column name, so duplicates
+        # silently overwrite each other.
+        " WHERE table_name = $1 AND table_schema = current_schema()"
         " ORDER BY ordinal_position",
         table,
     )
@@ -83,7 +88,7 @@ async def _indexes(
 ) -> list[str]:
     rows = await conn.fetch(
         "SELECT indexname FROM pg_indexes"
-        " WHERE tablename = $1"
+        " WHERE tablename = $1 AND schemaname = current_schema()"
         " ORDER BY indexname",
         table,
     )

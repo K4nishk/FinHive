@@ -83,3 +83,12 @@ async def drop_test_schema(conn: Any, schema: str = TEST_SCHEMA) -> None:
     """
     await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
+
+async def use_schema(conn: Any, schema: str = TEST_SCHEMA) -> None:
+    """Point an extra connection at a schema another one already created.
+
+    For tests that need several connections to see the same tables, such as
+    test_migrations_lock: one connection resets the schema, the rest join it.
+    """
+    await conn.execute(f"SET search_path TO {schema}")
+

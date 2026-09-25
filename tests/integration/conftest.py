@@ -1,8 +1,10 @@
 """Integration-lane guard: skip locally, but never skip silently in CI.
 
-The TRAP in KCH-230 is that `mvp1-regression` runs whole test directories as
-a required check, so these tests MUST skip rather than fail on a machine with
-no Postgres -- otherwise every contributor goes red.
+The TRAP in KCH-230 is that CI runs whole test directories, so these tests
+MUST skip rather than fail on a machine with no Postgres -- otherwise every
+contributor and every unrelated PR goes red. (The jobs are documented as
+required checks in docs/AGENT_CONTRACT.md, but that ruleset has not been
+applied to GitHub, so today a red run does not actually block a merge.)
 
 The inverse trap is worse and is what actually happened here. Migrations
 0001-0005 shipped with three defects that this directory would have caught on
