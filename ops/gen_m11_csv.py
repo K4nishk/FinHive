@@ -303,9 +303,14 @@ ROWS = [
      "12. Passing 0.12 understates interest 100x: INR 4,500 becomes INR 45, "
      "silently, and the model narrates the wrong figure with confidence.\n\n"
      "So EVERY numeric field carries its unit in the description AND a validating "
-     "range: rate is a percentage 0-100 (ge=0, le=100), not a fraction; amount is "
-     "whole INR rupees; months and days are integers. A field whose unit is only "
-     "implied WILL be guessed wrong.\n\n"
+     "range: amount is whole INR rupees; months and days are integers; rate is a "
+     "percentage, never a fraction. A field whose unit is only implied WILL be "
+     "guessed wrong.\n\n"
+     "TRAP, checked 2026-09-25: ge=0, le=100 alone ADMITS 0.12, the exact value both "
+     "models sent, so a range is not the guard. rate also needs a validator that "
+     "rejects 0 < rate < 1 with an error the model can act on ('rate is a percentage "
+     "- did you mean 12?'). [REVIEW REQUIRED: owner to confirm no real loan carries "
+     "an annual rate below 1%; if one can, the guard needs another signal.]\n\n"
      "TRAP, reproduced on this repo: Pydantic defaults to extra='ignore'. A tool "
      "model given giving_date SILENTLY DROPS it and the call succeeds. CLAUDE.md says "
      "giving_date is never used in interest or time calculations — with the default "
@@ -315,8 +320,9 @@ ROWS = [
      "to MVP2 (finhive/agent) and the only thing keeping it true — the root "
      "pyproject.toml import-linter contract covers finhive/ only, never "
      "loan_manager/.\n\n"
-     "Acceptance: an undeclared field raises ValidationError, and the guard test "
-     "fails if an agent module imports PySide6 or sqlalchemy.",
+     "Acceptance: an undeclared field raises ValidationError, "
+     "calculate_interest(rate=0.12) raises ValidationError naming the unit, and the "
+     "guard test fails if an agent module imports PySide6 or sqlalchemy.",
      "2", "2", "mvp1.1,contracts"),
 
     ("business-logic", "Implement EntityResolver over the four name fields",
@@ -369,7 +375,9 @@ ROWS = [
      "prompted — otherwise the filter matches nothing and the agent reports 'no "
      "loans found' with complete confidence (§5.2).\n\n"
      "Acceptance: an undated fixture loan never contributes to a day-weighted overdue "
-     "total, and query_loans returns no borrower names.",
+     "total, query_loans returns no borrower names, and query_loans with an unresolved "
+     "borrower_group ('sharma group') or depositor_group returns a resolve-first "
+     "error, not a zero count.",
      "2", "3", "mvp1.1,tools"),
 
     ("security", "Tokenise names and amounts on both ingress and egress",

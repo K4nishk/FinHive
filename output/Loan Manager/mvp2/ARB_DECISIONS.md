@@ -280,6 +280,21 @@ The probe's own first version scored finding 1 as a PASS by accepting either
 catch is worse than no test. Tightened to require `resolve_entity` and to print
 arguments, which is what surfaced findings 2 and 3.
 
+**Re-run 2026-09-25 (KCH-252, qwen only, three runs, $0.0039 in total):** findings 1 and 2
+reproduced every time. The 7-schema stage-2 call costs $0.00037. qwen is on the paid tier,
+so that is money, not quota.
+
+The probe itself still had the same flaw one level down. It read tool names, never the
+arguments or the turn, so `rate=0.12` scored OK on the live run. Reading the code shows
+that llama's finding-3 answer would also have scored OK. So would a raw-name query sent in
+the same turn as `resolve_entity`. The probe now marks the rate as WRONGARG, and marks a
+`query_loans` issued before the result it depends on as a MISS.
+`tests/unit/test_probe_openrouter.py` pins every case offline.
+
+A range alone (`ge=0, le=100`) admits `0.12`, so KCH-235 now specifies a validator that
+rejects `0 < rate < 1` [REVIEW REQUIRED: whether any annual rate below 1% is real]. The
+model, its cost and its quirks are recorded in `data/settings.json['llm']`.
+
 **Cost accounting on a free tier measures QUOTA, not money.** Reporting `$0.0000`
 as if spend were being controlled is the failure mode; the observability plane
 must show quota consumption, latency and throughput instead.

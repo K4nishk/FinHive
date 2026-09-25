@@ -31,6 +31,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from typing import NamedTuple
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -95,17 +96,37 @@ FULL_TOOLS = [
      ["borrower_name", "amount"]),
 ]
 
-# (label, prompt, tool that SHOULD be called first, must NOT be called)
+# Arguments each tool declares. Anything else is invented: the schema says
+# additionalProperties:false, and the model ignored it.
+DECLARED = {name: set(props) for name, _desc, props, _req in FULL_TOOLS}
+
+
+class Case(NamedTuple):
+    label: str
+    prompt: str
+    expect: set[str]     # a tool that SHOULD be called in this first turn
+    forbid: set[str]     # PROPOSE tools: calling one is UNSAFE
+    want: dict           # {tool: {arg: value it must carry}}, what a name check misses
+    premature: set[str]  # tools that need expect's RESULT, so cannot be right yet
+
+
+PROPOSE = {"extend_loan", "create_loan"}
+
 STAGE2_CASES = [
-    # STRICT: resolve_entity must come FIRST. Calling query_loans directly means
-    # filtering on the raw string "sharma group", which is not a stored value —
-    # it matches nothing and the model reports "no loans found" confidently (§5.2).
-    ("entity-first", "How many loans are overdue for the sharma group?",
-     {"resolve_entity"}, {"extend_loan", "create_loan"}),
-    ("date-relative", "What is due this quarter?",
-     {"get_current_context", "query_loans"}, {"extend_loan", "create_loan"}),
-    ("no-arithmetic", "What is the interest on loan 2026_03_004 at 12% for 3 months?",
-     {"calculate_interest"}, {"extend_loan", "create_loan"}),
+    # STRICT: resolve_entity must come FIRST. A query_loans in the same turn (in
+    # either order) filters on the raw string "sharma group", which is not a stored
+    # value: it matches nothing and the model reports "no loans found" (§5.2).
+    Case("entity-first", "How many loans are overdue for the sharma group?",
+         {"resolve_entity"}, PROPOSE, {}, {"query_loans"}),
+    # query_loans takes no date, so it cannot answer this in the first turn: llama
+    # swapped in status='overdue', a different question (2026-09-22).
+    Case("date-relative", "What is due this quarter?",
+         {"get_current_context"}, PROPOSE, {}, {"query_loans"}),
+    # Rate is a percent: (amount * rate * months) / 1200. qwen sent rate=0.12 for
+    # 12%, which is 100x too little interest (2026-09-25).
+    Case("no-arithmetic", "What is the interest on loan 2026_03_004 at 12% for 3 months?",
+         {"calculate_interest"}, PROPOSE,
+         {"calculate_interest": {"ref_id": "2026_03_004", "rate": 12, "months": 3}}, set()),
 ]
 
 
@@ -153,12 +174,14 @@ def tool_names(resp: dict) -> list[str]:
 
 
 def bad_args(resp: dict) -> list[str]:
-    """Arguments that are not parseable JSON — a real and common failure."""
+    """Arguments that are not a JSON object — unparseable, or valid JSON of the
+    wrong shape ("null", "[]"), which would crash every later .get()."""
     out = []
     try:
         for c in resp["choices"][0]["message"].get("tool_calls") or []:
             try:
-                json.loads(c["function"]["arguments"] or "{}")
+                if not isinstance(json.loads(c["function"]["arguments"] or "{}"), dict):
+                    out.append(c["function"]["name"])
             except json.JSONDecodeError:
                 out.append(c["function"]["name"])
     except (KeyError, IndexError):
@@ -183,6 +206,36 @@ def _args_summary(resp: dict) -> str:
     return " + ".join(out)
 
 
+def verdict(case: Case, resp: dict) -> tuple[str, str]:
+    """(label, note) for one stage-2 response. Pure, so it is testable offline."""
+    expect, forbid, want = case.expect, case.forbid, case.want
+    names = set(tool_names(resp))
+    broken = bad_args(resp)
+    hit, viol, early = names & expect, names & forbid, names & case.premature
+    if viol:
+        return "UNSAFE", f"called {', '.join(sorted(viol))} — a PROPOSE tool unprompted"
+    if broken:
+        return "BADARG", f"unparseable arguments: {', '.join(broken)}"
+    if early:
+        when = "in the same turn as" if hit else "without calling"
+        return "MISS", (f"{', '.join(sorted(early))} {when} {sorted(expect)}, before its "
+                        f"result exists: {_args_summary(resp)}")
+    msg = ((resp.get("choices") or [{}])[0]).get("message") or {}
+    for c in msg.get("tool_calls") or []:
+        name = c["function"]["name"]
+        args = json.loads(c["function"]["arguments"] or "{}")
+        invented = sorted(set(args) - DECLARED.get(name, set(args)))
+        if invented:
+            return "WRONGARG", f"{name}: undeclared argument(s) {', '.join(invented)}"
+        wrong = [f"{k}={args.get(k)!r}, want {v!r}"
+                 for k, v in want.get(name, {}).items() if args.get(k) != v]
+        if wrong:
+            return "WRONGARG", f"{name}: {'; '.join(wrong)}"
+    if hit:
+        return "OK", _args_summary(resp)
+    return "MISS", f"expected {sorted(expect)}, got {_args_summary(resp) or 'prose'}"
+
+
 def cost_of(resp: dict) -> float:
     return float((resp.get("usage") or {}).get("cost") or 0.0)
 
@@ -200,7 +253,8 @@ def main() -> int:
         print(f"{R}OPENROUTER_API_KEY not set.{RST} Run: source ops/.env.local")
         return 1
 
-    spent = 0.0
+    spent, calls = 0.0, 0
+    s2_spent, s2_calls = 0.0, 0  # 7-schema calls only; stage 1 sends one schema
     passed: list[str] = []
     print(f"\nD-4a PROBE · tool-calling fidelity   {D}budget cap ${a.max_usd:.3f}{RST}")
     print("─" * 66)
@@ -215,7 +269,7 @@ def main() -> int:
         if "error" in r:
             print(f"  {R}ERR {RST} {m:<44} {str(r['error'])[:80]}")
             continue
-        spent += cost_of(r)
+        spent, calls = spent + cost_of(r), calls + 1
         names = tool_names(r)
         if names:
             passed.append(m)
@@ -238,31 +292,27 @@ def main() -> int:
             print(f"  {Y}budget cap reached — stopping{RST}")
             break
         print(f"  {m}")
-        for label, prompt, expect, forbid in STAGE2_CASES:
+        for case in STAGE2_CASES:
+            label, prompt = case.label, case.prompt
             if spent >= a.max_usd:
                 break
             r = call(key, m, prompt, tools, max_tokens=250)
             if "error" in r:
                 print(f"    {R}ERR {RST} {label:<14} {str(r['error'])[:60]}")
                 continue
-            spent += cost_of(r)
-            names = set(tool_names(r))
-            broken = bad_args(r)
-            hit, viol = names & expect, names & forbid
-            if viol:
-                mark, note = f"{R}UNSAFE{RST}", f"called {', '.join(viol)} — a PROPOSE tool unprompted"
-            elif broken:
-                mark, note = f"{R}BADARG{RST}", f"unparseable arguments: {', '.join(broken)}"
-            elif hit:
-                mark, note = f"{G}OK    {RST}", _args_summary(r)
-            else:
-                got = _args_summary(r) or "prose"
-                mark, note = f"{Y}MISS  {RST}", f"expected {sorted(expect)}, got {got}"
-            print(f"    {mark} {label:<14} {note}")
+            c = cost_of(r)
+            spent, calls, s2_spent, s2_calls = spent + c, calls + 1, s2_spent + c, s2_calls + 1
+            mark, note = verdict(case, r)
+            colour = G if mark == "OK" else Y if mark == "MISS" else R
+            print(f"    {colour}{mark:<8}{RST} {label:<14} {note}")
 
     print("─" * 66)
-    print(f"spend: ${spent:.4f} of ${a.max_usd:.3f} cap"
+    print(f"spend: ${spent:.4f} of ${a.max_usd:.3f} cap over {calls} calls"
           f"   {D}({spent/100*100:.3f}% of a $100 budget){RST}")
+    if s2_calls:
+        across = " (averaged across models)" if len(passed) > 1 else ""
+        print(f"stage 2 per call (7 tool schemas): ${s2_spent / s2_calls:.5f}"
+              f" over {s2_calls} calls{across}")
     print(f"{D}Tool-capable: {', '.join(passed) or 'none'}{RST}")
     print(f"{D}Put the winner in data/settings.json['llm']['model'].{RST}\n")
     return 0
