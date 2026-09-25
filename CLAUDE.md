@@ -22,10 +22,10 @@
   `input/REQUIREMENTS.md` still says otherwise in places; run_8 superseded it (WIKI §16,
   CHG-001). Specify against `src/`, never against `input/`.
 - **Branch**: `development`. A PR is required; direct pushes are rejected.
-- **Agent contract**: `/docs/AGENT_CONTRACT.md`. Its CodeRabbit gate does not run
-  (CodeRabbit reviews nothing here), so the gate is the `reviewer` subagent plus the
-  human — see the `build-issue` skill. A gate that did not run is a failure, never a
-  pass.
+- **Agent contract**: `/docs/AGENT_CONTRACT.md`. CodeRabbit was removed (2026-09-25),
+  so the review gate is the `reviewer` subagent plus the human — see the `build-issue`
+  skill. The unattended orchestrator (`ops/orchestrator.sh`) used CodeRabbit as its
+  gate and is dormant. A gate that did not run is a failure, never a pass.
 
 ## Doctrines
 

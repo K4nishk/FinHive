@@ -3,6 +3,15 @@
 Supervised autonomous development: agents implement Linear issues in dependency order
 and open stacked PRs, CodeRabbit reviews every branch. **Nothing merges without you.**
 
+> **⚠ The unattended loop is dormant (2026-09-25).** CodeRabbit was removed from the
+> repository: the GitHub App was uninstalled and `.coderabbit.yaml` deleted.
+> `orchestrator.sh` and `pr_gate.sh` used the CodeRabbit CLI as their review gate, and
+> the orchestrator's preflight refuses to start without it, so they cannot run.
+> Issues are built interactively with the `build-issue` skill instead, gated by a
+> `reviewer` subagent plus you. `seed_linear.py`, `usage.py`, `rtk_gain.py` and
+> `preflight.sh` are unaffected. Everything below that mentions CodeRabbit describes
+> the dormant loop.
+
 | File | Role | Status |
 |---|---|---|
 | `tmux_orchestrator.sh` | the attended cockpit — build, review, queue, repo, test panes | ✅ built |
