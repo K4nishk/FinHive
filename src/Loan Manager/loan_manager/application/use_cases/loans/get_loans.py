@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import date
 from typing import Callable, Optional
 
 from loan_manager.application.dtos.loan_dto import LoanDTO, LoanFilterDTO
+from loan_manager.application.interfaces.clock import Clock, SystemClock
 
 
 class GetAllLoans:
-    def __init__(self, uow_factory: Callable) -> None:
+    def __init__(self, uow_factory: Callable, clock: Clock | None = None) -> None:
         self._uow_factory = uow_factory
+        self._clock = clock or SystemClock()
 
     def execute(self, filters: Optional[LoanFilterDTO] = None) -> list[LoanDTO]:
         db_filters = None
@@ -39,7 +40,7 @@ class GetAllLoans:
         # no-filter, not select-all).
         if by_months:
             selected_months = set(by_months)
-            current_year = date.today().year
+            current_year = self._clock.today().year
             loans = [
                 loan for loan in loans
                 if loan.due_date is not None
