@@ -11,6 +11,7 @@ from datetime import date, datetime
 import pytest
 
 from loan_manager.application.dtos.loan_dto import LoanFilterDTO
+from loan_manager.application.interfaces.clock import FixedClock
 from loan_manager.application.use_cases.loans.get_loans import GetAllLoans
 from loan_manager.domain.entities.loan import Loan
 from loan_manager.domain.value_objects.money import Money
@@ -62,7 +63,13 @@ class _FakeUnitOfWork:
         return False
 
 
-CURRENT_YEAR = date.today().year
+# A FixedClock, not date.today(): these tests pin "current year" so a run
+# straddling a real year boundary (process starts Dec 31, asserts Jan 1)
+# can't flake. GetAllLoans below is always given this same clock, so its
+# year-scoping matches the fixture's notion of "current year" regardless of
+# the wall clock.
+_TEST_CLOCK = FixedClock(date(2026, 6, 1))
+CURRENT_YEAR = _TEST_CLOCK.today().year
 
 
 @pytest.fixture
@@ -85,37 +92,37 @@ def _names(loans) -> set[str]:
 
 class TestByMonthsSetMembership:
     def test_single_month_matches_only_that_month(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[6]))
         assert _names(result) == {"june_due"}
 
     def test_multiple_months_returns_union(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[3, 7]))
         assert _names(result) == {"march_due", "july_due", "overdue_march"}
 
     def test_month_not_selected_is_excluded(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[3, 7]))
         assert "june_due" not in _names(result)
 
     def test_excludes_records_with_no_due_date(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[3, 6, 7]))
         assert "no_due_date" not in _names(result)
 
     def test_scopes_to_current_calendar_year(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[3]))
         assert "prior_year_march" not in _names(result)
 
     def test_includes_overdue_records_matching_selection(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=[3]))
         assert "overdue_march" in _names(result)
 
     def test_empty_selection_behaves_as_no_filter(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         no_filter_result = uc.execute(LoanFilterDTO())
         empty_selection_result = uc.execute(LoanFilterDTO(by_months=[]))
         assert _names(empty_selection_result) == _names(no_filter_result)
@@ -125,7 +132,7 @@ class TestByMonthsSetMembership:
         assert "no_due_date" in _names(empty_selection_result)
 
     def test_none_selection_behaves_as_no_filter(self, sample_loans):
-        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans))
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(sample_loans), clock=_TEST_CLOCK)
         result = uc.execute(LoanFilterDTO(by_months=None))
         assert _names(result) == _names(sample_loans)
 
@@ -134,3 +141,23 @@ class TestByMonthsSetMembership:
             LoanFilterDTO(by_months=[0])
         with pytest.raises(ValueError):
             LoanFilterDTO(by_months=[13])
+
+
+class TestByMonthsUsesInjectedClockYear:
+    def test_scopes_to_injected_clock_year_not_wall_clock(self):
+        """KCH-233: the by_months year-scoping reads the injected Clock's
+        year, not date.today().year. This test's own clock (2020) and
+        CURRENT_YEAR (2026, this module's pinned test year -- itself
+        independent of the real wall clock) are different, so a GetAllLoans
+        that ignored its injected clock and fell back to the real system
+        date would return neither "clock_year" (2020) nor -- except by the
+        year-2026 coincidence this test does not rely on -- "wall_clock_year"
+        (2026), and the assertion below would fail either way.
+        """
+        loans = [
+            _make_loan("clock_year", date(2020, 3, 10)),
+            _make_loan("wall_clock_year", date(CURRENT_YEAR, 3, 10)),
+        ]
+        uc = GetAllLoans(lambda: _FakeUnitOfWork(loans), clock=FixedClock(date(2020, 6, 1)))
+        result = uc.execute(LoanFilterDTO(by_months=[3]))
+        assert _names(result) == {"clock_year"}
