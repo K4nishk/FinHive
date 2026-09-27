@@ -21,6 +21,9 @@ class IReportRepository(ABC):
     def mark_declined(self, report_id: str) -> None: ...
 
     @abstractmethod
+    def mark_reverted(self, report_id: str) -> None: ...
+
+    @abstractmethod
     def get_pending_reference_ids(self) -> set[str]: ...
 
     @abstractmethod

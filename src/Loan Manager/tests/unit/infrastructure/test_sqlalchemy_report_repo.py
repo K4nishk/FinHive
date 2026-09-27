@@ -157,6 +157,59 @@ class TestAssignReferenceId:
         assert fresh.status == ReportStatus.APPROVED
 
 
+class TestMarkReverted:
+    def test_mark_reverted_round_trips_status_and_keeps_records(self, db_session):
+        """KCH-244: mark_reverted must move an APPROVED report's status to
+        REVERTED without clearing its records -- unlike mark_declined, which
+        clears records via cascade, UndoApprovedReport reads report.records
+        again on the way in and a reverted report is never re-approved."""
+        repo = SqlAlchemyReportRepository(db_session)
+        report = Report(
+            id=None,
+            report_id=ReportId("RPT_20260315_800"),
+            report_mode=CalculationMode.MONTHLY,
+            status=ReportStatus.APPROVED,
+            records=[
+                ReportRecord(
+                    id=None,
+                    report_id="RPT_20260315_800",
+                    reference_id="2026_03_050",
+                    borrower_name="borrower",
+                    depositor_name="depositor",
+                    depositor_group="dg1",
+                    amount=10000,
+                    giving_date=date(2026, 1, 1),
+                    due_date=date(2026, 4, 1),
+                    extension_period=3,
+                    extension_period_unit=ExtensionPeriodUnit.MONTHS,
+                    interest_rate=Decimal("12"),
+                    commission_rate=Decimal("6"),
+                    tds_flag=False,
+                    interest_amount=Decimal("300.00"),
+                    commission_amount=Decimal("150.00"),
+                    tds_amount=Decimal("0.00"),
+                    chq_amount=Decimal("300.00"),
+                    post_extension_giving_date=date(2026, 4, 1),
+                    post_extension_due_date=date(2026, 7, 1),
+                    paidoff_date=None,
+                )
+            ],
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+        repo.save(report)
+        db_session.commit()
+
+        repo.mark_reverted("RPT_20260315_800")
+        db_session.commit()
+
+        fresh = SqlAlchemyReportRepository(db_session).get_by_report_id("RPT_20260315_800")
+        assert fresh.status == ReportStatus.REVERTED
+        assert len(fresh.records) == 1
+        assert fresh.records[0].reference_id == "2026_03_050"
+        assert fresh.records[0].post_extension_giving_date == date(2026, 4, 1)
+
+
 class TestGetPendingReferenceIdsFiltersNull:
     def test_create_records_reference_id_none_is_excluded(self, db_session):
         repo = SqlAlchemyReportRepository(db_session)

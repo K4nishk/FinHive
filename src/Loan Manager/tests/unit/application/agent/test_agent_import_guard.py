@@ -15,8 +15,8 @@ imports:
     dependency for Clean Architecture (the agent boundary talks to use
     cases, never to a repository/session interface or a UI module directly).
   - the mutating use cases (create/update/extend/delete_loan, mark_paidoff,
-    recompute_statuses, import_loans, approve/decline_report), by their
-    fully-qualified module path, however it is spelled: absolute
+    recompute_statuses, import_loans, approve/decline/undo_approved_report),
+    by their fully-qualified module path, however it is spelled: absolute
     (`from loan_manager.application.use_cases.loans import create_loan`),
     relative (`from ...use_cases.loans import create_loan`), or a direct
     dotted import (`import loan_manager.application.use_cases.loans.create_loan`).
@@ -87,6 +87,9 @@ _DENIED_PREFIXES: frozenset[str] = frozenset(
         "loan_manager.application.use_cases.data.import_loans",
         "loan_manager.application.use_cases.reports.approve_report",
         "loan_manager.application.use_cases.reports.decline_report",
+        # KCH-244: the human-approval undo step -- the agent proposes, it
+        # never approves its own proposal, and it never undoes one either.
+        "loan_manager.application.use_cases.reports.undo_approved_report",
     }
 )
 
@@ -348,3 +351,24 @@ def test_guard_catches_violation() -> None:
     assert violations('exec("x = 1")\n') == ["exec(...)"]
     assert violations('eval("1 + 1")\n') == ["eval(...)"]
     assert violations('import builtins\nbuiltins.__import__("x")\n') == ["builtins"]
+
+
+def test_guard_denies_undo_approved_report() -> None:
+    """KCH-244: UndoApprovedReport is the human-approval undo step, exactly
+    like approve_report/decline_report above -- denied by absolute import,
+    by dotted `import`, and by relative import resolved against the file's
+    own package."""
+    assert violations(
+        "from loan_manager.application.use_cases.reports import undo_approved_report\n"
+    ) == ["loan_manager.application.use_cases.reports.undo_approved_report"]
+    assert violations(
+        "from loan_manager.application.use_cases.reports.undo_approved_report "
+        "import UndoApprovedReport\n"
+    ) == ["loan_manager.application.use_cases.reports.undo_approved_report.UndoApprovedReport"]
+    assert violations(
+        "import loan_manager.application.use_cases.reports.undo_approved_report\n"
+    ) == ["loan_manager.application.use_cases.reports.undo_approved_report"]
+    assert violations(
+        "from ..use_cases.reports import undo_approved_report\n",
+        package="loan_manager.application.agent",
+    ) == ["loan_manager.application.use_cases.reports.undo_approved_report"]

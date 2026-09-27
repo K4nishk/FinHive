@@ -10,6 +10,10 @@ class ReportStatus(str, Enum):
     PENDING = "Pending"
     APPROVED = "Approved"
     DECLINED = "Declined"
+    # KCH-244: an APPROVED report undone by UndoApprovedReport. reports.status
+    # is String(10) with no CHECK constraint -- "Reverted" (8 chars) fits, so
+    # no migration is needed.
+    REVERTED = "Reverted"
 
 class CalculationMode(str, Enum):
     MONTHLY = "Monthly"
