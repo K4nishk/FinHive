@@ -135,6 +135,48 @@ STEP 4 — Start Loan Manager again.
         )
         sys.exit(1)
 
+    # Step 3c: Refuse to run against a pre-KCH-242 database.
+    # Mirrors Step 3b exactly, for the same reason: `create_all()` only
+    # creates missing TABLES, so a database written before this issue lacks
+    # `reports.actor`/`report_records.borrower_group_ct` and every other
+    # column the CREATE-proposal flow (KCH-243+) needs. This migration
+    # ALWAYS rebuilds `report_records` (nullable reference_id/giving_date
+    # requires SQLite's 12-step rebuild, not a plain ALTER) on the
+    # operator's real ledger, so it is refuse-and-instruct here too, never
+    # auto-applied from startup -- same one-way-transform reasoning as Step
+    # 3b, and it must run strictly after that encryption migration (it
+    # ALTERs the same encrypted columns' table).
+    from loan_manager.infrastructure.migrations.add_report_proposal_columns import (
+        needs_migration as needs_report_proposal_migration,
+    )
+
+    if needs_report_proposal_migration(DB_PATH):
+        logger.error("Database predates report proposals (KCH-242) — refusing to start")
+        app_dir = Path(__file__).resolve().parent.parent
+        print(
+            f"""
+Cannot start Loan Manager.
+
+{DB_PATH}
+was created before report proposals (KCH-242) became part of the schema, so
+it is missing columns the app now expects on `reports` and `report_records`.
+
+This is NOT done automatically. It rebuilds `report_records` in place, which
+is a one-way schema change on your only copy of the loan book, and that is
+not a decision this program should make silently.
+
+A backup will be written alongside the database before anything is changed,
+the same way Step 3b's encryption migration writes one.
+
+Run the migration, then start Loan Manager again:
+
+    cd "{app_dir}"
+    python -m loan_manager.infrastructure.migrations.add_report_proposal_columns --db "{DB_PATH}"
+""",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Step 4: Recompute statuses on launch
     from loan_manager.application.use_cases.loans.recompute_statuses import RecomputeAllStatuses
     recompute = RecomputeAllStatuses(container.get_uow, clock=container.clock)

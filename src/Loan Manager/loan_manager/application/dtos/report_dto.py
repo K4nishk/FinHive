@@ -4,18 +4,22 @@ from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
 
-from loan_manager.domain.value_objects.status import ReportStatus, CalculationMode, ExtensionPeriodUnit
+from loan_manager.domain.value_objects.status import ReportActor, ReportStatus, CalculationMode, ExtensionPeriodUnit
 
 
 class ReportRecordDTO(BaseModel):
     id: Optional[int]
     report_id: str
-    reference_id: str
+    # Optional (KCH-242): NULL on a CREATE-mode record until approval mints
+    # a loan and assigns one -- see Report.__post_init__.
+    reference_id: Optional[str]
     borrower_name: str
     depositor_name: str
     depositor_group: Optional[str]
     amount: int
-    giving_date: date
+    # Optional (KCH-242): a CREATE-mode record has no existing loan, so no
+    # current giving_date -- the proposed one is post_extension_giving_date.
+    giving_date: Optional[date]
     due_date: Optional[date]
     extension_period: int
     extension_period_unit: ExtensionPeriodUnit
@@ -29,6 +33,8 @@ class ReportRecordDTO(BaseModel):
     post_extension_giving_date: Optional[date]
     post_extension_due_date: Optional[date]
     paidoff_date: Optional[date]
+    borrower_group: Optional[str] = None
+    due_period: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -41,6 +47,14 @@ class ReportDTO(BaseModel):
     records: list[ReportRecordDTO]
     created_at: datetime
     updated_at: datetime
+    # Required, no default (KCH-242 review, MAJOR): a defaulted FORM here let
+    # a call site that forgot to map `actor` silently mislabel an AGENT
+    # report as FORM instead of failing loudly (GetPendingReports did
+    # exactly this). user_request/turn_id stay optional -- both are
+    # genuinely absent for a FORM report.
+    actor: ReportActor
+    user_request: Optional[str] = None
+    turn_id: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

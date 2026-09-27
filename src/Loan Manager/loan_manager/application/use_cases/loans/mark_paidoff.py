@@ -137,4 +137,7 @@ class MarkPaidOff:
             ],
             created_at=saved.created_at,
             updated_at=saved.updated_at,
+            actor=saved.actor,
+            user_request=saved.user_request,
+            turn_id=saved.turn_id,
         )
