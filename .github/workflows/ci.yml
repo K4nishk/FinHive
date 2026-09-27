@@ -138,6 +138,12 @@ jobs:
           cache: pip
           cache-dependency-path: src/Loan Manager/requirements.txt
 
+      # PySide6 needs libEGL even for offscreen Qt; ubuntu-latest does not ship it.
+      # Without it any test that imports a presentation module fails at
+      # collection (ImportError: libEGL.so.1). KCH-234.
+      - name: Install Qt runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1
+
       - name: Install MVP1 dependencies
         run: pip install -r requirements.txt
 
@@ -156,4 +162,6 @@ jobs:
         run: pip install -e "$GITHUB_WORKSPACE"
 
       - name: Run MVP1 unit, integration and smoke tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests/ -v --cov=loan_manager

@@ -446,8 +446,8 @@ principal: `amount = interest × 1200 / (rate × months)`. Leaving any one of th
 clear re-opens the path ADR-2.4 closed, and is exactly the case the derivation check
 at the end of this document exists to catch.
 
-**Master key location is INTERIM.** `FINHIVE_MASTER_KEY` from `ops/.env.local`,
-behind `keys.py`. Stated plainly: the key sits beside the ciphertext, so this
+**Master key location is INTERIM.** `FINHIVE_KEY_VERSION` + `FINHIVE_MASTER_KEY_V<n>`
+from `ops/.env.local`, behind `keys.py`. Stated plainly: the key sits beside the ciphertext, so this
 defends a stolen backup or a synced folder and **not** an attacker with read access
 to the home directory. Written trigger to move to the OS keychain: a second user,
 any hosted deployment, or the database file leaving this machine.
