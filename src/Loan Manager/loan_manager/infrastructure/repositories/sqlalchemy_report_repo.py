@@ -171,6 +171,22 @@ class SqlAlchemyReportRepository(IReportRepository):
             model.records.clear()
             self._session.flush()
 
+    def mark_reverted(self, report_id: str) -> None:
+        """KCH-244: undo an APPROVED report. Copy of mark_approved -- a
+        `checked_update` set-intersection identity check, records left
+        untouched (unlike mark_declined, which clears them: a reverted
+        report keeps its records, since UndoApprovedReport reads them
+        again from `report.records` on the way in and a re-approve is
+        never offered after a revert)."""
+        checked_update(
+            self._session.query(ReportModel).filter(
+                ReportModel.report_id == report_id
+            ),
+            {"status": ReportStatus.REVERTED.value, "updated_at": datetime.now()},
+            synchronize_session="fetch",
+        )
+        self._session.flush()
+
     def get_pending_reference_ids(self) -> set[str]:
         """Get all reference_ids from pending report records.
 

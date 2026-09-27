@@ -7,6 +7,7 @@ from loan_manager.application.dtos.report_dto import ApprovalResultDTO
 from loan_manager.application.event_bus import EventBus
 from loan_manager.application.interfaces.clock import Clock, SystemClock
 from loan_manager.application.use_cases.loans.create_loan import CreateLoan
+from loan_manager.domain.entities.report import ReportRecord
 from loan_manager.domain.events.loan_events import LoanCreated
 from loan_manager.domain.events.report_events import ReportApproved
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
@@ -14,6 +15,27 @@ from loan_manager.domain.services.status_engine import StatusEngine
 from loan_manager.domain.value_objects.status import CalculationMode, ReportStatus
 from loan_manager.infrastructure.recovery.backup_service import BackupService
 from loan_manager.infrastructure.recovery.recovery_service import RecoveryService
+
+
+def record_to_loan_create_dto(rec: ReportRecord) -> LoanCreateDTO:
+    """CREATE row -> LoanCreateDTO (KCH-244 extraction, behaviour unchanged).
+
+    Module-level so UndoApprovedReport can rebuild the SAME DTO -- including
+    `derive_due_date`'s giving_date+due_period derivation -- to compare
+    against the minted loan's current due_date without a false conflict when
+    `post_extension_due_date` itself is None (KCH-244 plan wrinkle: a
+    due_period-only CREATE record).
+    """
+    return LoanCreateDTO(
+        borrower_name=rec.borrower_name,
+        borrower_group=rec.borrower_group,
+        depositor_name=rec.depositor_name,
+        depositor_group=rec.depositor_group,
+        amount=rec.amount,
+        giving_date=rec.post_extension_giving_date,
+        due_period=rec.due_period,
+        due_date=rec.post_extension_due_date,
+    )
 
 
 class ApproveReport:
@@ -132,16 +154,7 @@ class ApproveReport:
                 # proposed values live in post_extension_giving_date/
                 # post_extension_due_date.
                 for rec in report.records:
-                    loan_dto = LoanCreateDTO(
-                        borrower_name=rec.borrower_name,
-                        borrower_group=rec.borrower_group,
-                        depositor_name=rec.depositor_name,
-                        depositor_group=rec.depositor_group,
-                        amount=rec.amount,
-                        giving_date=rec.post_extension_giving_date,
-                        due_period=rec.due_period,
-                        due_date=rec.post_extension_due_date,
-                    )
+                    loan_dto = record_to_loan_create_dto(rec)
                     loan = self._create_loan.stage(uow, loan_dto)
                     uow.reports.assign_reference_id(rec.id, str(loan.reference_id))
                     created_loan_ref_ids.append(str(loan.reference_id))

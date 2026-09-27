@@ -63,6 +63,15 @@ _KNOWN_READ_NAMES = {
 }
 
 
+def test_no_undo_or_revert_tool_is_registered() -> None:
+    """KCH-244: UndoApprovedReport is explicitly not an agent tool -- the
+    human-approval boundary undoes its own approvals; the agent proposes
+    report batches and must never see an undo/revert affordance."""
+    for name in TOOL_SPECS:
+        assert "undo" not in name.lower()
+        assert "revert" not in name.lower()
+
+
 def test_read_mode_schemas_exclude_propose() -> None:
     # Ground truth is hardcoded here, independent of TOOL_SPECS' own .mode
     # values, so that mislabeling a tool's mode in the registry cannot make

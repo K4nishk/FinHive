@@ -77,3 +77,14 @@ class ApprovalResultDTO(BaseModel):
     duplicate_ref_ids: list[str] = []
     deleted_ref_ids: list[str] = []
     requires_confirmation: bool = False
+
+
+class UndoResultDTO(BaseModel):
+    """KCH-244. `reason` is one of "not_approved" (report is PENDING,
+    DECLINED or already REVERTED), "paidoff_not_undoable", "changed_since_approval"
+    (see `conflict_ref_ids`), or "unrecognized_report_mode" (orchestrator
+    ruling: a future CalculationMode this use case does not know how to
+    restore is refused, never silently no-opped)."""
+    success: bool
+    reason: Optional[str] = None
+    conflict_ref_ids: list[str] = []
