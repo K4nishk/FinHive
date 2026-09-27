@@ -23,6 +23,7 @@ class ErrorCode(str, Enum):
     UNRESOLVED_ENTITY = "UNRESOLVED_ENTITY"
     UNSUPPORTED_STATUS = "UNSUPPORTED_STATUS"
     REF_ID_NOT_FOUND = "REF_ID_NOT_FOUND"
+    UNKNOWN_TOKEN = "UNKNOWN_TOKEN"  # noqa: S105 - an error code, not a secret
 
 
 def _jsonable(value: Any) -> Any:
