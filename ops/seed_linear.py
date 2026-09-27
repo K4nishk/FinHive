@@ -29,6 +29,7 @@ import csv
 import http.client
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -176,12 +177,43 @@ query($teamId: ID!, $after: String, $first: Int!) {
 """
 
 
+# Build order across milestones — M1.1 (Loan Manager MVP1.1, the active product per
+# CLAUDE.md) runs right after M0, ahead of the paused M1a-M5 web track, regardless of
+# KCH number. A number-only sort put M1.1 (KCH-222+) behind M5's lower numbers.
+MILESTONE_ORDER = ["M0", "M1.1", "M1a", "M1b", "M2", "M3", "M4", "M5"]
+MILESTONE_RANK = {m: i for i, m in enumerate(MILESTONE_ORDER)}
+UNKNOWN_RANK = len(MILESTONE_ORDER)  # unrecognised/missing project sorts last, never dropped
+
+
+def _milestone_token(project_name: str | None) -> str:
+    """Pull the milestone token ('M0', 'M1.1', ...) out of a Linear project name
+    shaped 'FinHive <milestone> · <description>' (see ops/gen_m11_csv.py and
+    output/Loan Manager/*/linear_import.csv). Anything else, including no project
+    at all, returns '' — which MILESTONE_RANK does not contain, so it ranks last.
+    """
+    m = re.match(r"^FinHive\s+(\S+)", project_name or "")
+    return m.group(1) if m else ""
+
+
+def queue_sort_key(issue: dict) -> tuple[int, int]:
+    """(milestone_rank, kch_number) — the order write_queue emits ops/queue.tsv in.
+
+    `issue` is one node from Q_QUEUE: {"identifier", "title", "estimate", "project"}
+    where "project" is {"name": ...} or None. Pure function, no I/O, so it is unit
+    tested directly without a Linear client.
+    """
+    milestone = _milestone_token((issue.get("project") or {}).get("name"))
+    rank = MILESTONE_RANK.get(milestone, UNKNOWN_RANK)
+    number = int(issue["identifier"].rsplit("-", 1)[1])
+    return (rank, number)
+
+
 def write_queue(key: str, team_id: str, path: Path) -> int:
     """Write ops/queue.tsv in build order.
 
-    Creation order IS build order — issues were seeded top-to-bottom from a CSV that
-    was already sorted by milestone and dependency, so Linear's own ordering is the
-    queue. Column 2 is the identifier.
+    Build order is milestone rank first (queue_sort_key: M0, M1.1, then the paused
+    M1a-M5 web track), issue number second within a milestone. Column 2 is the
+    identifier.
     """
     # These nodes carry title and project, so the body is much larger per row than the
     # id+title pager — it truncates well below first:50. Halve on failure, same as
@@ -201,7 +233,7 @@ def write_queue(key: str, team_id: str, path: Path) -> int:
         if not node["pageInfo"]["hasNextPage"]:
             break
         after = node["pageInfo"]["endCursor"]
-    rows.sort(key=lambda r: int(r["identifier"].rsplit("-", 1)[1]))
+    rows.sort(key=queue_sort_key)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
@@ -210,6 +242,13 @@ def write_queue(key: str, team_id: str, path: Path) -> int:
         for i, r in enumerate(rows, 1):
             proj = (r["project"] or {}).get("name", "-").replace("\t", " ")
             title = r["title"].replace("\t", " ")
+            milestone = _milestone_token((r["project"] or {}).get("name"))
+            if MILESTONE_RANK.get(milestone, UNKNOWN_RANK) == UNKNOWN_RANK:
+                # Row is still written (queue_sort_key never drops anything) — this
+                # only flags that its milestone couldn't be ranked, so it landed at
+                # the tail of queue.tsv instead of in build order.
+                print(f"{YEL}  unranked project for {r['identifier']} ({proj}) "
+                      f"— sorted last{RST}", file=sys.stderr)
             fh.write(f"{i}\t{r['identifier']}\t{r['estimate'] or 0}\t{proj}\t{title}\n")
     return len(rows)
 
