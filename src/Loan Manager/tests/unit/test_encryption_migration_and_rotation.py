@@ -409,14 +409,20 @@ class TestBackendSchemaConvergence:
 
 
 @needs_crypto
-def test_no_plaintext_in_any_encrypted_table(tmp_path):
-    """The original no-plaintext proof read `SELECT * FROM loans` only.
+def test_legacy_migration_leaves_no_plaintext_names_in_file(tmp_path):
+    """What this actually proves, honestly scoped: migrating a pre-KCH-227
+    `loans` table (`_legacy_db` above -- one table, borrower/depositor names
+    and groups only, no `loan_history`, no `report_records`, no derived
+    amounts) leaves none of the fixture's plaintext names/groups readable in
+    the migrated file.
 
-    `loan_history` and `report_records` -- including the four derived amounts
-    that ADR-2.4 calls non-optional, because a plaintext `interest_amount`
-    solves for the principal -- were never checked by it. This scans the raw
-    file, so it covers every table at once and cannot be satisfied by a table
-    it forgot to name.
+    `_legacy_db` also seeds an `amount` column (10000, 25000) -- present in
+    the fixture, but NOT one of the secrets this test's needle list checks,
+    so this test asserts nothing about whether `amount` leaked.
+
+    It does NOT prove the cross-table or derived-amount claims -- those, plus
+    the WAL/journal and freshly-written (non-legacy) rows, are covered by
+    `tests/integration/test_encryption_at_rest.py`.
     """
     from loan_manager.infrastructure.migrations.encrypt_existing_rows import migrate
 
