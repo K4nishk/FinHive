@@ -21,7 +21,7 @@ only across disjoint files, stacked PRs, see-it-fail-first, CI-parity test runs.
 
 | # | Decision |
 |---|---|
-| U-1 | **Per-issue branches** `feature/kch-NNN`, one stacked draft PR each; parallel lanes |
+| U-1 | **Per-issue branches** `feature/kch-NNN`, one PR each, in a single linear stack (see §5); parallel implementation, serial PR chain |
 | U-2 | **Done = everything**: working tab (≤row 17) + mutation safety (18–22) + real-data migration & evals (23–28) + **D-17 SQL-emission spike** |
 | U-3 | **Recorded fakes only** in the cloud — no live LLM calls from agents |
 | U-4 | **KCH-100 deferred to M2** (re-milestone; new domain code stays in `loan_manager/domain`) |
@@ -117,7 +117,9 @@ Wave 0 is orchestrator-only (no product code). Cap: **4 issues in flight** (Q17)
 
 1. Base = `origin/development` (local `feature/kch-252-sro3rl` is merged and behind).
 2. Per issue: `git worktree add ../wt/kch-NNN -b feature/kch-NNN <lane-tip>`; implementer works only there (Agent `isolation: "worktree"`).
-3. After review passes: rebase onto current lane tip, re-run full suite on the combined tree, push `feature/kch-NNN`, open **draft** PR against the previous branch in the lane (lowest PR in a lane → `development`), subscribe to PR activity.
+3. After review passes: rebase onto current lane tip, re-run full suite on the combined tree, push `feature/kch-NNN`, open the PR **ready for review** (not draft — the review cycle has already passed; draft is reserved for the AGENT_CONTRACT escalation case) against the **previous PR's branch in the single stack**, never `development` unless it is the bottom of the stack, subscribe to PR activity.
+
+   **Correction 2026-09-27.** Wave 1 was branched in parallel from `development` and every PR opened as a draft against `development`, which broke the build-issue rule ("open the PR against the branch below it, never `development` directly") and left KCH-237 on an `integration/m11-c1` branch that no PR merges. Restacked the same day into one chain, merged bottom-up: `development ← 235 ← 236 ← 105 ← 233 ← 234 ← 230 ← 231 ← 237 ← 242 ← 238 ← …`. #37 (this plan) and #38 (KCH-232, ops-only) stay on `development`. `integration/m11-cN` branches are now local verification only, never a PR base.
 4. Multi-dependency issues (237, 239, 241, 243, 248, 249) branch from merge-only `integration/m11-cN` branches (lane tips merged, no new code) at checkpoints C1–C4 — no waiting on your merges (Q1).
 5. Stage named paths only; `git diff --cached --name-only` + secret scan before every commit; never `.DS_Store`, `*.db`, `.env*`.
 
