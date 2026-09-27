@@ -22,3 +22,6 @@ class IReportRepository(ABC):
 
     @abstractmethod
     def get_pending_reference_ids(self) -> set[str]: ...
+
+    @abstractmethod
+    def assign_reference_id(self, record_id: int, ref_id: str) -> None: ...

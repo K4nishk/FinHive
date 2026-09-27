@@ -40,7 +40,7 @@ import dataclasses
 import shutil
 import sqlite3
 import struct
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from importlib.util import find_spec
 from pathlib import Path
@@ -51,10 +51,18 @@ from loan_manager.application.event_bus import EventBus
 from loan_manager.application.use_cases.loans.create_loan import CreateLoan
 from loan_manager.application.use_cases.loans.mark_paidoff import MarkPaidOff
 from loan_manager.application.use_cases.reports.approve_report import ApproveReport
+from loan_manager.domain.entities.report import Report, ReportRecord
 from loan_manager.domain.services.interest_calculator import InterestCalculator
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
 from loan_manager.domain.services.status_engine import StatusEngine
-from loan_manager.domain.value_objects.status import ExtensionPeriodUnit, LoanStatus
+from loan_manager.domain.value_objects.report_id import ReportId
+from loan_manager.domain.value_objects.status import (
+    CalculationMode,
+    ExtensionPeriodUnit,
+    LoanStatus,
+    ReportActor,
+    ReportStatus,
+)
 from loan_manager.infrastructure.database.models import Base, LoanHistoryModel
 from loan_manager.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from loan_manager.infrastructure.recovery.backup_service import BackupService
@@ -106,11 +114,20 @@ BORROWER_C2 = "halloway tresscombe"
 DEPOSITOR_C2 = "control depositor two"
 AMOUNT_C2 = 7_234_567_890  # > 2**32
 
+# KCH-242: a CREATE-mode (agent-proposed) report's own NPI -- the free-text
+# prompt behind it (`reports.user_request`, mapped as EncryptedString same as
+# every identity column) and the new borrower's group
+# (`report_records.borrower_group`). Neither existed on any table before
+# this issue, so neither was ever covered by the scan below.
+REQUEST_NEEDLE = "please add a new loan for quillfeather brannoxdale of 4210000"
+GROUP_CREATE_NEEDLE = "xandorlyn-create-group"
+
 ALL_NAMES = [
     BORROWER_A, DEPOSITOR_A, DGROUP_A, GROUP_SHARED,
     BORROWER_B, DEPOSITOR_B, GROUP_B,
     BORROWER_C1, DEPOSITOR_C1,
     BORROWER_C2, DEPOSITOR_C2,
+    REQUEST_NEEDLE, GROUP_CREATE_NEEDLE,
 ]
 ALL_AMOUNTS = [AMOUNT_A, AMOUNT_B, AMOUNT_C1, AMOUNT_C2]
 
@@ -361,6 +378,10 @@ def world(tmp_path_factory):
         "post_extension_giving_date": None,
         "post_extension_due_date": None,
         "paidoff_date": date(2026, 4, 15),
+        # KCH-242 additions -- unset on every pre-existing (non-CREATE)
+        # report record, this one included.
+        "borrower_group": None,
+        "due_period": None,
     }
 
     # Same trap, same fix, for loan A/B: `world["loan_a"]`/`world["loan_b"]`
@@ -400,6 +421,54 @@ def world(tmp_path_factory):
         "status": LoanStatus.PAIDOFF.value,
         "is_active": False,
     }
+
+    # KCH-242: a CREATE-mode (agent-proposed) report, saved but never
+    # approved -- approval's own atomicity/encryption path is covered
+    # separately in tests/integration/test_approval_flow.py. Saved through
+    # the real repository (never a raw INSERT), like everything else in this
+    # file, so its `user_request`/`borrower_group` genuinely go through
+    # `EncryptedString` rather than being asserted encrypted by assumption.
+    with uow_factory() as create_uow:
+        create_report = Report(
+            id=None,
+            report_id=ReportId("RPT_20260410_001"),
+            report_mode=CalculationMode.CREATE,
+            status=ReportStatus.PENDING,
+            records=[
+                ReportRecord(
+                    id=None,
+                    report_id="RPT_20260410_001",
+                    reference_id=None,
+                    borrower_name="quillfeather brannoxdale",
+                    depositor_name=DEPOSITOR_A,
+                    depositor_group=None,
+                    amount=4_210_000,
+                    giving_date=None,
+                    due_date=None,
+                    extension_period=0,
+                    extension_period_unit=ExtensionPeriodUnit.MONTHS,
+                    interest_rate=Decimal("0"),
+                    commission_rate=Decimal("0"),
+                    tds_flag=False,
+                    interest_amount=None,
+                    commission_amount=None,
+                    tds_amount=None,
+                    chq_amount=None,
+                    post_extension_giving_date=date(2026, 4, 10),
+                    post_extension_due_date=date(2026, 7, 10),
+                    paidoff_date=None,
+                    borrower_group=GROUP_CREATE_NEEDLE,
+                    due_period=3,
+                )
+            ],
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            actor=ReportActor.AGENT,
+            user_request=REQUEST_NEEDLE,
+            turn_id="turn-kch242-fixture",
+        )
+        create_uow.reports.save(create_report)
+        create_uow.commit()
 
     yield {
         "db_path": db_path,

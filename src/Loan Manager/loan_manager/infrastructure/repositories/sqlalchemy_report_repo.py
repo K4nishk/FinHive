@@ -12,6 +12,7 @@ from loan_manager.domain.value_objects.report_id import ReportId
 from loan_manager.domain.value_objects.status import (
     CalculationMode,
     ExtensionPeriodUnit,
+    ReportActor,
     ReportStatus,
 )
 from loan_manager.infrastructure.database.blind_index_sync import checked_update
@@ -43,6 +44,8 @@ def report_model_to_entity(model: ReportModel) -> Report:
             post_extension_giving_date=r.post_extension_giving_date,
             post_extension_due_date=r.post_extension_due_date,
             paidoff_date=r.paidoff_date,
+            borrower_group=r.borrower_group,
+            due_period=r.due_period,
         )
         for r in model.records
     ]
@@ -55,6 +58,9 @@ def report_model_to_entity(model: ReportModel) -> Report:
         records=records,
         created_at=model.created_at,
         updated_at=model.updated_at,
+        actor=ReportActor(model.actor),
+        user_request=model.user_request,
+        turn_id=model.turn_id,
     )
 
 
@@ -81,6 +87,8 @@ def report_record_to_model(record: ReportRecord) -> ReportRecordModel:
         post_extension_giving_date=record.post_extension_giving_date,
         post_extension_due_date=record.post_extension_due_date,
         paidoff_date=record.paidoff_date,
+        borrower_group=record.borrower_group,
+        due_period=record.due_period,
     )
 
 
@@ -123,6 +131,9 @@ class SqlAlchemyReportRepository(IReportRepository):
             status=report.status.value,
             created_at=report.created_at,
             updated_at=report.updated_at,
+            actor=report.actor.value,
+            user_request=report.user_request,
+            turn_id=report.turn_id,
         )
         for record in report.records:
             model.records.append(report_record_to_model(record))
@@ -161,14 +172,38 @@ class SqlAlchemyReportRepository(IReportRepository):
             self._session.flush()
 
     def get_pending_reference_ids(self) -> set[str]:
-        """Get all reference_ids from pending report records."""
+        """Get all reference_ids from pending report records.
+
+        Filters out NULL: a CREATE-mode record (KCH-242) has no reference_id
+        until its proposal is approved, and a `None` in this set would make
+        DeleteLoan's `reference_id in pending_refs` membership check
+        meaningless noise rather than a real "loan is in a pending report"
+        signal.
+        """
         models = (
             self._session.query(ReportRecordModel.reference_id)
             .join(ReportModel, ReportRecordModel.report_id == ReportModel.report_id)
             .filter(ReportModel.status == ReportStatus.PENDING.value)
+            .filter(ReportRecordModel.reference_id.isnot(None))
             .all()
         )
         return {m[0] for m in models}
+
+    def assign_reference_id(self, record_id: int, ref_id: str) -> None:
+        """Attach a freshly minted reference_id to a CREATE-mode record
+        (KCH-242), once ApproveReport has staged the loan it names.
+
+        Goes through the ORM attribute, not a bulk `Query.update()`:
+        `reference_id` is not an identity column (no `_bidx` companion), so
+        there is no blind-index sync to worry about, but assigning the
+        attribute is still the natural, auditable way to touch a single
+        already-loaded row.
+        """
+        record = self._session.query(ReportRecordModel).get(record_id)
+        if record is None:
+            raise ValueError(f"report record not found: {record_id}")
+        record.reference_id = ref_id
+        self._session.flush()
 
     def update_record(self, record_id: int, updates: dict) -> Optional[ReportRecordModel]:
         """Update a specific report record by its primary key."""

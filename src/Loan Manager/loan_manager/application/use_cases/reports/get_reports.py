@@ -52,11 +52,16 @@ class GetPendingReports:
                         post_extension_giving_date=rec.post_extension_giving_date,
                         post_extension_due_date=rec.post_extension_due_date,
                         paidoff_date=rec.paidoff_date,
+                        borrower_group=rec.borrower_group,
+                        due_period=rec.due_period,
                     )
                     for rec in r.records
                 ],
                 created_at=r.created_at,
                 updated_at=r.updated_at,
+                actor=r.actor,
+                user_request=r.user_request,
+                turn_id=r.turn_id,
             )
             for r in reports
         ]
@@ -158,4 +163,6 @@ class UpdateReportRecord:
                 post_extension_giving_date=record_model.post_extension_giving_date,
                 post_extension_due_date=record_model.post_extension_due_date,
                 paidoff_date=record_model.paidoff_date,
+                borrower_group=record_model.borrower_group,
+                due_period=record_model.due_period,
             )

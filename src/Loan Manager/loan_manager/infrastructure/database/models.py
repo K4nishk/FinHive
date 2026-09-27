@@ -113,6 +113,20 @@ class ReportModel(Base):
     report_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
     report_mode: Mapped[str] = mapped_column(String(10), nullable=False)
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="Pending")
+    # KCH-242: who proposed the report -- "FORM" (a human, via the report
+    # form -- every report before this issue) or "AGENT" (Ask FinHive,
+    # KCH-243+). `server_default` too, not just `default`, so the migration's
+    # `ALTER TABLE ... ADD COLUMN actor ... DEFAULT 'FORM'` backfills every
+    # pre-existing row without a second UPDATE pass.
+    actor: Mapped[str] = mapped_column(String(5), nullable=False, default="FORM", server_default="FORM")
+    # The user's own words behind an AGENT-authored report -- NPI (it can
+    # name a borrower/amount), encrypted at rest like every other identity
+    # column. NULL for a FORM report, which has no such prompt.
+    user_request: Mapped[Optional[str]] = mapped_column("user_request_ct", EncryptedString(), nullable=True)
+    # Correlates an AGENT report back to the conversation turn that proposed
+    # it (KCH-240 wires the FK/index; this column alone carries no
+    # referential constraint yet -- see DEBT).
+    turn_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -126,18 +140,37 @@ class ReportRecordModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     report_id: Mapped[str] = mapped_column(String(20), ForeignKey("reports.report_id", ondelete="CASCADE"), nullable=False, index=True)
-    reference_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    # No borrower_group on this table -- report_records never had one.
+    # Nullable since KCH-242: a CREATE-mode row proposes a borrower who has
+    # no loan yet, so there is no reference_id until ApproveReport mints one
+    # on approval (assign_reference_id). Every other mode still always has
+    # one -- enforced by the domain entity's __post_init__, not here.
+    reference_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    # borrower_group (KCH-242): CREATE-mode only -- the group a NEW borrower
+    # would be filed under, since there is no existing loan row to read it
+    # from. Deliberately NO `_bidx` companion: this table has never had one
+    # for borrower_group (unlike `loans`/`loan_history`), and a CREATE
+    # proposal's group is not searched by exact match the way an existing
+    # loan's is.
+    borrower_group: Mapped[Optional[str]] = mapped_column("borrower_group_ct", EncryptedString(), nullable=True)
     borrower_name: Mapped[str] = mapped_column("borrower_name_ct", EncryptedString(), nullable=False)
     depositor_name: Mapped[str] = mapped_column("depositor_name_ct", EncryptedString(), nullable=False)
     depositor_group: Mapped[Optional[str]] = mapped_column("depositor_group_ct", EncryptedString(), nullable=True)
-    # No borrower_group_bidx either -- mirrors the absent borrower_group.
+    # No borrower_group_bidx -- see the borrower_group comment above.
     borrower_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_name_bidx: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, index=True)
     depositor_group_bidx: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True, index=True)
     amount: Mapped[int] = mapped_column("amount_ct", EncryptedRupees(), nullable=False)
-    giving_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Nullable since KCH-242: a CREATE-mode row has no existing loan, so
+    # there is no current giving_date -- the proposed one lives in
+    # post_extension_giving_date below, per the CREATE row convention.
+    giving_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # due_period (KCH-242): CREATE-mode only -- the new loan's due_period,
+    # carried alongside post_extension_due_date so ApproveReport's CREATE
+    # branch can build a LoanCreateDTO without re-deriving it. Plaintext:
+    # it is a term length, not a financial amount (derivation-check note in
+    # the KCH-242 plan: a term does not let anyone solve for the principal).
+    due_period: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     extension_period: Mapped[int] = mapped_column(Integer, nullable=False)
     extension_period_unit: Mapped[str] = mapped_column(String(10), nullable=False)
     interest_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
