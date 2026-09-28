@@ -48,6 +48,8 @@ class GenerateReport:
                     post_extension_giving_date=rec.post_extension_giving_date,
                     post_extension_due_date=rec.post_extension_due_date,
                     paidoff_date=rec.paidoff_date,
+                    borrower_group=rec.borrower_group,
+                    due_period=rec.due_period,
                 )
                 for rec in dto.records
             ]
@@ -60,6 +62,9 @@ class GenerateReport:
                 records=records,
                 created_at=now,
                 updated_at=now,
+                actor=dto.actor,
+                user_request=dto.user_request,
+                turn_id=dto.turn_id,
             )
 
             saved = uow.reports.save(report)
@@ -96,6 +101,8 @@ class GenerateReport:
                     post_extension_giving_date=r.post_extension_giving_date,
                     post_extension_due_date=r.post_extension_due_date,
                     paidoff_date=r.paidoff_date,
+                    borrower_group=r.borrower_group,
+                    due_period=r.due_period,
                 )
                 for r in saved.records
             ],

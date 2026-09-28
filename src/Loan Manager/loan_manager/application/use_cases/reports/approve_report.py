@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Callable
 
 from loan_manager.application.dtos.loan_dto import LoanCreateDTO
@@ -12,6 +13,7 @@ from loan_manager.domain.events.loan_events import LoanCreated
 from loan_manager.domain.events.report_events import ReportApproved
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
 from loan_manager.domain.services.status_engine import StatusEngine
+from loan_manager.domain.value_objects.money import Money
 from loan_manager.domain.value_objects.status import CalculationMode, ReportStatus
 from loan_manager.infrastructure.recovery.backup_service import BackupService
 from loan_manager.infrastructure.recovery.recovery_service import RecoveryService
@@ -122,6 +124,32 @@ class ApproveReport:
             existing_ref_ids = set(loans_by_ref_id)
             deleted = report_ref_ids - existing_ref_ids
 
+            # Review cycle 2, MAJOR-1 (ORCHESTRATOR RULING, replacing cycle
+            # 1's fold into `deleted`): an UPDATE-mode record whose loan
+            # still exists but was made inactive (paid off/archived) since
+            # the proposal was made is refused REGARDLESS of `force` --
+            # kept in its OWN field, never `deleted_ref_ids`, so the UI's
+            # duplicate/deleted "proceed anyway?" prompt (which force
+            # exists to answer) never covers it, and the reason shown can
+            # say "paid off" rather than the wrong "deleted". EXTEND/
+            # PAIDOFF/CREATE modes are untouched -- this check is gated on
+            # UPDATE alone, and cycle 1's own `report_ref_ids` emptiness
+            # already keeps CREATE out of it.
+            inactive_update: set[str] = set()
+            if report.report_mode == CalculationMode.UPDATE:
+                inactive_update = {
+                    ref_id for ref_id, loan in loans_by_ref_id.items() if not loan.is_active
+                }
+
+            if inactive_update:
+                return ApprovalResultDTO(
+                    success=False,
+                    duplicate_ref_ids=sorted(duplicates),
+                    deleted_ref_ids=sorted(deleted),
+                    inactive_ref_ids=sorted(inactive_update),
+                    requires_confirmation=False,
+                )
+
             if (duplicates or deleted) and not force:
                 return ApprovalResultDTO(
                     success=False,
@@ -166,6 +194,42 @@ class ApproveReport:
                     if loan:
                         uow.history.archive(loan, rec.paidoff_date)
                         uow.loans.set_inactive(rec.reference_id)
+            elif report.report_mode == CalculationMode.UPDATE:
+                # Field-edit proposal (KCH-243, agent update_loan): apply the
+                # proposed borrower_name/depositor_name/amount onto the
+                # existing loan. Groups, dates and status are read-only in
+                # this mode -- update_loan's args only ever CHECK groups
+                # (GROUP_MISMATCH), never change them, and there is no
+                # date/status field on the proposal to apply here. Without
+                # this branch the record would fall into the `else` below,
+                # whose `if rec.post_extension_giving_date and
+                # rec.post_extension_due_date` guard is always False for an
+                # UPDATE record (both are None -- see propose_update.py), so
+                # approval would silently do nothing (the same silent-skip
+                # shape calculate_interest.py already guards against for
+                # deleted loans, here for an entire report mode instead).
+                for rec in report.records:
+                    if rec.reference_id in deleted:
+                        continue
+                    # No `is None`/`is_active` check here (review cycle 2,
+                    # MINOR-4: removed as dead code) -- every ref inactive
+                    # since the proposal was made already triggered the
+                    # `inactive_update` refusal above, for the WHOLE
+                    # report, before this loop ever runs; every ref left in
+                    # `report_ref_ids` and not in `deleted` is therefore
+                    # guaranteed to have a live loan in `loans_by_ref_id`.
+                    loan = loans_by_ref_id[rec.reference_id]
+                    # Defence in depth (review cycle 1, MAJOR-1): normalise
+                    # here too, matching LoanCreateDTO/LoanUpdateDTO.
+                    # to_lowercase, so this branch can never write a
+                    # mixed-case name even if a future caller of
+                    # GenerateReport skipped propose_update.py's own
+                    # normalisation.
+                    loan.borrower_name = rec.borrower_name.strip().lower()
+                    loan.depositor_name = rec.depositor_name.strip().lower()
+                    loan.amount = Money(rec.amount)
+                    loan.updated_at = datetime.now()
+                    uow.loans.save(loan)
             else:
                 # Normal reports: bulk update dates, then recompute status
                 # against the post-extension dates so an approval doesn't

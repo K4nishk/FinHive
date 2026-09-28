@@ -15,10 +15,12 @@ from pydantic import ValidationError
 
 from .conftest import VALID_PAYLOADS
 
-# Fields whose description/name is allowed to mention "date". Empty: no field
-# anywhere in the agent tool boundary may name a date, per CLAUDE.md
-# ("giving_date is never used in interest or time-period calculations").
-_DATE_ALLOWLIST: frozenset[str] = frozenset()
+# Fields whose description/name is allowed to mention "date". Empty except
+# for the one deliberate exception KCH-243 adds: ExtendLoan.new_due_date, the
+# agreed new due date for a loan that currently has none (there is no
+# existing due_date to extend FROM) -- args.py's module docstring and
+# propose_extend.py explain why this is not the banned `giving_date`.
+_DATE_ALLOWLIST: frozenset[str] = frozenset({"new_due_date"})
 
 
 def _flatten_optional(prop: dict) -> dict:
@@ -207,3 +209,27 @@ def test_extend_loan_tds_flag_null_falls_back_to_default() -> None:
         args_mod.ExtendLoan(ref_id="2026_03_004", months=3, rate=12, tds_flag=None).tds_flag
         is False
     )
+
+
+def test_extend_new_due_date_parses_iso() -> None:
+    """KCH-243: the one allowlisted date field parses a plain ISO string,
+    same as every other date the app boundary handles."""
+    from datetime import date
+
+    parsed = args_mod.ExtendLoan(
+        ref_id="2026_03_004", months=3, rate=12, new_due_date="2026-09-30"
+    )
+    assert parsed.new_due_date == date(2026, 9, 30)
+
+
+def test_extend_new_due_date_defaults_to_none() -> None:
+    assert args_mod.ExtendLoan(ref_id="2026_03_004", months=3, rate=12).new_due_date is None
+
+
+def test_update_group_only_rejected() -> None:
+    """KCH-243: borrower_group/depositor_group are membership CHECKS, never
+    an updatable field -- a group alone does not satisfy 'at least one
+    field to update' (args.py's `_require_at_least_one_field` excludes
+    both from `updatable`)."""
+    with pytest.raises(ValidationError, match="at least one field"):
+        args_mod.UpdateLoan(ref_id="2026_03_004", borrower_group="sharma-group")

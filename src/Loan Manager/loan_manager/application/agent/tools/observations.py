@@ -1,4 +1,5 @@
-"""Uniform tool-observation shape for every READ tool (KCH-237).
+"""Uniform tool-observation shape for every READ and PROPOSE tool (KCH-237,
+extended by KCH-243 for the PROPOSE error codes below).
 
 Every tool returns plain JSON: `ok(**payload)` for success,
 `error(code, message, next_action, **details)` for failure. Both walk their
@@ -23,6 +24,25 @@ class ErrorCode(str, Enum):
     UNRESOLVED_ENTITY = "UNRESOLVED_ENTITY"
     UNSUPPORTED_STATUS = "UNSUPPORTED_STATUS"
     REF_ID_NOT_FOUND = "REF_ID_NOT_FOUND"
+    # KCH-243, PROPOSE tools only, below.
+    # A group value resolved to a candidate, but not exactly (ambiguous, or
+    # only a fuzzy match) -- the caller must ask the user before acting.
+    CONFIRM_REQUIRED = "CONFIRM_REQUIRED"
+    # extend_loan on a loan with no due_date, called without new_due_date.
+    UNDATED_LOAN = "UNDATED_LOAN"
+    # extend_loan's new_due_date is not after today, or was given for a
+    # loan that already has a due_date (it must be omitted there).
+    NEW_DUE_DATE_INVALID = "NEW_DUE_DATE_INVALID"
+    # update_loan's given borrower_group/depositor_group resolves to a real
+    # group, but not the loan's own -- a membership check failure, never an
+    # instruction to move the loan.
+    GROUP_MISMATCH = "GROUP_MISMATCH"
+    # The ref_id is already named by another PENDING report.
+    ALREADY_PENDING = "ALREADY_PENDING"
+    # Nothing would change: every candidate record was filtered out (all
+    # undated, all already pending) or every proposed field already matches
+    # the loan's current value. No report is generated.
+    NOTHING_TO_PROPOSE = "NOTHING_TO_PROPOSE"
 
 
 def _jsonable(value: Any) -> Any:

@@ -23,12 +23,17 @@ use `Field(strict=True)`: pydantic's lax `int` mode accepts `True` (bool is
 an int subclass), the string `"3"`, and `3.0`, any of which would otherwise
 smuggle the wrong type past an LLM's loose JSON past this boundary.
 
-No field anywhere carries a date — `giving_date` never enters interest or
-time-period arithmetic, and the agent boundary should not be able to name a
-date field at all.
+No field anywhere carries a date, with ONE deliberate exception: `ExtendLoan.
+new_due_date` (KCH-243). `giving_date` itself is still banned outright, and
+`new_due_date` never enters interest arithmetic either -- it exists solely
+to let extend_loan set a FIRST due date on a loan that was given with none
+(there is no due_date to extend FROM), the same undated-extend case
+`extend_loan.py`'s UI use case already handles. It is allowlisted by name in
+`test_tool_args.py::_DATE_ALLOWLIST`.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -193,17 +198,33 @@ class ExtendLoan(ToolArgs):
         Field(description="Whether TDS applies to this extension"),
         BeforeValidator(_default_when_null(False)),
     ] = False
+    # KCH-243: the module docstring's ONE date exception. Required when the
+    # loan has no due_date to extend from (UNDATED_LOAN otherwise); must be
+    # omitted for a loan that already has one (NEW_DUE_DATE_INVALID
+    # otherwise) -- propose_extend.py enforces both, this field only carries
+    # the value.
+    new_due_date: Annotated[
+        date,
+        Field(
+            description=(
+                "ONLY for a loan with no due date: agreed new due date, "
+                "ISO YYYY-MM-DD; omit otherwise"
+            )
+        ),
+    ] | None = None
 
 
 class CreateLoan(ToolArgs):
     borrower_name: Annotated[
         str, Field(min_length=1, max_length=200, description="Borrower's full name")
     ]
-    # DEBT [REVIEW REQUIRED]: borrower_group/depositor_group are Slug, i.e. a
-    # value resolve_entity already returned for an EXISTING group. create_loan
-    # has no way to name a brand-new group that has never been seen before —
-    # unclear whether that is intended (every group must pre-exist) or a gap.
-    # Not this issue's call; flagging for KCH-242/243.
+    # borrower_group/depositor_group are Slug, i.e. a value resolve_entity
+    # already returned for an EXISTING group. create_loan has no way to
+    # name a brand-new group that has never been seen before -- RESOLVED
+    # (KCH-243 review cycle 1, [REVIEW REQUIRED] verdict 2, ACCEPTED): this
+    # is intentional, not a gap. propose_create.py's resolve_group rejects
+    # an unknown group with UNRESOLVED_ENTITY and routes the user to the
+    # New Loan form, so a typo can never mint a permanent new group string.
     borrower_group: Slug
     depositor_name: Annotated[
         str, Field(min_length=1, max_length=200, description="Depositor's full name")
@@ -222,6 +243,15 @@ NewDepositorName = Annotated[
 
 
 class UpdateLoan(ToolArgs):
+    """PROPOSE changing borrower_name, depositor_name and/or amount on an
+    existing loan. borrower_group/depositor_group, if given, are MEMBERSHIP
+    CHECKS ONLY -- verified against the loan's own current group
+    (GROUP_MISMATCH if it doesn't match) and never written; update_loan has
+    no way to move a loan to a different group ([REVIEW REQUIRED], plan
+    DEBT). A group alone, with no other field set, does not satisfy
+    `_require_at_least_one_field` below -- checking a group is not
+    proposing a change."""
+
     ref_id: RefId
     borrower_name: NewBorrowerName | None = None
     borrower_group: Slug | None = None
@@ -231,13 +261,7 @@ class UpdateLoan(ToolArgs):
 
     @model_validator(mode="after")
     def _require_at_least_one_field(self) -> UpdateLoan:
-        updatable = (
-            "borrower_name",
-            "borrower_group",
-            "depositor_name",
-            "depositor_group",
-            "amount",
-        )
+        updatable = ("borrower_name", "depositor_name", "amount")
         if not any(getattr(self, field) is not None for field in updatable):
             raise ValueError("update_loan requires at least one field to update")
         return self
