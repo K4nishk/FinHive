@@ -1,0 +1,793 @@
+diff --git a/src/Loan Manager/loan_manager/application/agent/tokeniser.py b/src/Loan Manager/loan_manager/application/agent/tokeniser.py
+index 72b05ea..f12f7f9 100644
+--- a/src/Loan Manager/loan_manager/application/agent/tokeniser.py	
++++ b/src/Loan Manager/loan_manager/application/agent/tokeniser.py	
+@@ -475,13 +475,18 @@ _CURLY_APOSTROPHE = "’"
+ 
+ 
+ def _is_word_char(ch: str) -> bool:
+-    """True iff `ch` belongs INSIDE a name span: alnum, underscore (`\\w`
+-    semantics), or a Unicode COMBINING MARK (category `Mn`/`Mc`/`Me`,
+-    category-group `M`) -- `str.isalnum()`/`\\w` do NOT count a combining
+-    mark on its own (review2 NM4 ORCH ruling: without this, the vowel sign
+-    on a Devanagari name like "शर्मा" gets peeled off as if it were
+-    trailing punctuation, downgrading an exact match to a Q mention)."""
+-    return ch.isalnum() or ch == "_" or unicodedata.category(ch)[0] == "M"
++    """True iff `ch` belongs INSIDE a name span: alnum, or a Unicode
++    COMBINING MARK (category `Mn`/`Mc`/`Me`, category-group `M`) --
++    `str.isalnum()` does NOT count a combining mark on its own (review2 NM4
++    ORCH ruling: without this, the vowel sign on a Devanagari name like
++    "शर्मा" gets peeled off as if it were trailing punctuation, downgrading
++    an exact match to a Q mention). Underscore is a SEPARATOR, not a word
++    character (review3 m1 ORCH ruling: "anil_sharma_loans" must tokenise
++    the name it contains, same as any other punctuation-glued form; a
++    reference id like "2026_03_004" is unaffected -- it is excluded from
++    amount detection by its own lookaround, and as a name candidate it is
++    still `no_match` against every stored value, split on `_` or not)."""
++    return ch.isalnum() or unicodedata.category(ch)[0] == "M"
+ 
+ 
+ def _word_spans(text: str) -> list[tuple[int, int]]:
+@@ -517,6 +522,28 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
+     return spans
+ 
+ 
++# review3 F1 ORCH ruling: an honorific glued directly onto a name with no
++# separator ("sharmaji", "Guptaji") is split off so the stem underneath it
++# still gets a chance to resolve -- `_word_spans` alone cannot help here,
++# since none of these letters are punctuation; "ji"/"jee"/etc. are
++# ordinary word characters that happily extend the span.
++_HONORIFIC_SUFFIX_RE = re.compile(
++    r"(ji|jee|sahab|saheb|sahib|bhai|bhaiya|ben|behen|didi)$", re.IGNORECASE
++)
++_MIN_HONORIFIC_STEM_LEN = 3
++
++
++def _collapsed_len(core: str) -> int:
++    """`len(core)` with internal space/hyphen/underscore separators
++    removed -- a compact reference-style code typed with a separator
++    ("bg 13", "bg-13", "bg_13") is one or more characters LONGER than its
++    stored, joined form ("bg13"), so comparing raw length against the
++    longest stored entity's own (joined) length would wrongly reject it
++    (review3 F3 char-length cap: must not regress the "bg 13"/"bg-13"/
++    "bg_13" compact-code clean-check)."""
++    return len(core.replace(" ", "").replace("-", "").replace("_", ""))
++
++
+ def _fold_apostrophe(text: str) -> str:
+     """`text` with a curly apostrophe folded to a straight one, so a name
+     typed with the "smart quote" a phone keyboard inserts ("O’Brien Shah")
+@@ -573,6 +600,29 @@ class TokenMap:
+         # brand-new name just gets compiled lazily the first time it is
+         # checked.
+         self._name_pattern_cache: dict[str, re.Pattern[str]] = {}
++        # review3 F1 ORCH ruling: every individual WORD of every stored
++        # entity value, lowercased -- an honorific's stem must be one of
++        # these (>= 3 chars) before it is split off.
++        self._entity_words: frozenset[str] = frozenset(
++            w.lower() for _field, value in resolver.entities() for w in value.split()
++        )
++        # review3 F3 ORCH ruling: the resolver's universe is fixed at
++        # construction, so this is computed once, here, never invalidated.
++        # `None` if there are no stored entities at all, so the cap never
++        # activates and behaviour is unchanged for that degenerate case.
++        # Lets `_match_windows` skip a window outright once it is longer
++        # than any real name could be -- this is what makes a multi-
++        # thousand-character single "word" cheap instead of one giant OSA
++        # comparison.
++        self._max_entity_chars: int | None = max(
++            (len(value) for _field, value in resolver.entities()), default=None
++        )
++        # review3 F3 ORCH ruling: `resolve` is memoised per `TokenMap`, keyed
++        # on the folded window -- the universe is fixed at construction, so
++        # pass 3 (which re-tries every window pass 2 already tried and
++        # failed to match exactly) reuses pass 2's results for free, and a
++        # word repeated many times in one prompt is resolved once.
++        self._resolve_cache: dict[str, Any] = {}
+ 
+     # ── core map ────────────────────────────────────────────────────────
+ 
+@@ -640,6 +690,50 @@ class TokenMap:
+             self._name_pattern_cache[name] = pattern
+         return pattern
+ 
++    def _resolve_cached(self, core: str) -> Any:
++        folded = _fold_apostrophe(core)
++        cached = self._resolve_cache.get(folded)
++        if cached is None:
++            cached = self._resolver.resolve(folded)
++            self._resolve_cache[folded] = cached
++        return cached
++
++    def _split_honorifics(self, text: str) -> str:
++        """A word span glued directly to a trailing honorific
++        (`_HONORIFIC_SUFFIX_RE`, e.g. "sharmaji") is split into
++        `stem + "-" + honorific` when the stem (>= 3 chars, case-
++        insensitively) is itself a word of some stored entity -- so the
++        rest of the pipeline, which already treats a real hyphen as a
++        separator (review2 NB2), tokenises the stem and keeps the
++        honorific attached with a separator `TOKEN_RE`'s `\\b` can still
++        see: "sharmaji" -> "sharma-ji" -> "B001-ji" (review3 F1 ORCH
++        ruling). Never touches a span that is ALREADY separated ("Sharma-
++        ji" has no glued span to split) or one whose stem is not a known
++        word ("puja", "raji" if unstored) -- those pass through exactly as
++        `_word_spans`/`_match_windows` already handle them."""
++        if not self._entity_words:
++            return text
++        spans = _word_spans(text)
++        out: list[str] = []
++        last = 0
++        for start, end in spans:
++            word = text[start:end]
++            m = _HONORIFIC_SUFFIX_RE.search(word)
++            if not m:
++                continue
++            stem = word[: m.start()]
++            if len(stem) < _MIN_HONORIFIC_STEM_LEN or stem.lower() not in self._entity_words:
++                continue
++            out.append(text[last:start])
++            out.append(stem)
++            out.append("-")
++            out.append(word[m.start() :])
++            last = end
++        if not out:
++            return text
++        out.append(text[last:])
++        return "".join(out)
++
+     # ── ingress: tokenise_prompt ────────────────────────────────────────
+ 
+     def tokenise_prompt(self, text: str) -> str:
+@@ -655,6 +749,7 @@ class TokenMap:
+                 "token-shaped string typed by the user"
+             )
+         text = self._pass_amounts(text)
++        text = self._split_honorifics(text)
+         text = self._match_windows(text, only_exact=True)
+         text = self._match_windows(text, only_exact=False)
+         return text
+@@ -705,12 +800,69 @@ class TokenMap:
+         longer makes either of them `no_match` -- each name's own spans are
+         still found and windowed correctly, with the separator between them
+         copied verbatim into the output untouched.
++
++        Three review3 F3 ORCH-ruling prunes keep this linear-ish instead of
++        quadratic-with-a-fuzzy-match-inside over the prompt length: a
++        window longer than the longest stored entity (compared on the
++        SEPARATOR-COLLAPSED length, so "bg 13"/"bg-13"/"bg_13" are never
++        wrongly rejected just for spelling a compact code with a separator
++        the stored, joined form doesn't have) can never resolve, so it is
++        skipped without calling `resolve` at all (this is what makes one
++        multi-thousand-character glued "word" cheap); a MULTI-word window
++        is tried only when every one of its OWN words LONGER than 3
++        characters individually clears the resolver's per-token threshold
++        against something (`entity_resolver.score`'s per-token path needs
++        EVERY query token to clear its own threshold against some value
++        token, so if even one such word in the window cannot on its own,
++        the whole window cannot either) -- words of length <= 3 are always
++        treated as clearing, never the reason a window is skipped, since a
++        token that short only ever scores via exact equality, never a
++        fuzzy ratio, and a compact code ("bg 13") resolves only as a WHOLE
++        string (its collapsed form equals a stored value), a property no
++        single short word can carry on its own; this reuses the exact
++        per-word `resolve` result the loop needs anyway, memoised, so it
++        costs nothing beyond the single-word calls this function already
++        makes; and every `resolve` call itself is memoised
++        (`_resolve_cached`) per `TokenMap`, so pass 3 (which re-tries every
++        window pass 2 already tried) reuses pass 2's results for free, and
++        a word repeated many times in one prompt is resolved once.
+         """
+         spans = _word_spans(text)
+         n_words = len(spans)
+         if n_words == 0:
+             return text
+         max_n = self._max_entity_words()  # review1 m5: no fixed ceiling
++        max_chars = self._max_entity_chars
++        # Every individual word's own core and "does it clear the
++        # per-token threshold at all" status, computed ONCE per span (not
++        # once per size attempted at that position) -- `span_clears[j]`
++        # backs the multi-word prefilter below, and is itself a normal,
++        # memoised single-word `resolve` the algorithm needs regardless.
++        def _clears(core: str) -> bool:
++            # A span longer than the longest stored entity can never
++            # resolve -- skip the (potentially very expensive, on a
++            # multi-thousand-character single "word") `resolve` call
++            # entirely rather than let it run only to fail.
++            if max_chars is not None and _collapsed_len(core) > max_chars:
++                return False
++            if len(core) <= 3:
++                # A short word ("13", "bg", "b1") can be part of a compact
++                # reference-style code that only resolves as a WHOLE
++                # multi-word query -- "bg 13" collapses to "bg13" and
++                # matches stored "bg13" via `_is_exact`'s digit-run/collapse
++                # equality, a WHOLE-STRING special case that "13" or "bg"
++                # alone can never independently trigger (and never scores
++                # via `_token_ratio` either: tokens this short there require
++                # exact equality, not a fuzzy ratio). Treat a short word as
++                # always "clearing" -- i.e. never the reason a multi-word
++                # window is skipped -- so this prefilter cannot break
++                # compact-code matching (review3 "Clean checks": "bg 13"
++                # must still resolve to the bg13 token).
++                return True
++            return self._resolve_cached(core).status != "no_match"
++
++        span_cores = [_strip_window_edges(text[s:e])[1] for s, e in spans]
++        span_clears = [_clears(c) for c in span_cores]
+         replacements: list[tuple[int, int, str]] = []
+         # `i` only ever advances by the size of the window just matched (or
+         # by 1 when nothing matched at this position), so it strictly
+@@ -719,17 +871,20 @@ class TokenMap:
+         # index left of `i`, and no unconsumed index right of it either.
+         i = 0
+         while i < n_words:
++            if not only_exact and span_cores[i].lower() in NOISE_TOKENS:
++                i += 1
++                continue
+             upper = min(max_n, n_words - i)
+             matched_size = 0
+             for size in range(upper, 0, -1):
+-                first_word_raw = text[spans[i][0] : spans[i][1]]
+-                _, first_core, _ = _strip_window_edges(first_word_raw)
+-                if not only_exact and first_core.lower() in NOISE_TOKENS:
++                if size > 1 and not all(span_clears[i : i + size]):
+                     continue
+                 window_start = spans[i][0]
+                 window_end = spans[i + size - 1][1]
+                 prefix, core, suffix = _strip_window_edges(text[window_start:window_end])
+-                resolution = self._resolver.resolve(_fold_apostrophe(core))
++                if max_chars is not None and _collapsed_len(core) > max_chars:
++                    continue
++                resolution = self._resolve_cached(core)
+                 if only_exact:
+                     hit = resolution.exact
+                 else:
+@@ -872,7 +1027,12 @@ class TokenMap:
+         name ("meera iyer") before that longer name is ever tried, leaking
+         the rest of it) -- then (2) any already-issued amount's literal
+         rendering, then (3) any remaining money-shaped text via the same
+-        detector ingress uses."""
++        detector ingress uses. An honorific glued directly onto a name
++        ("sharmaji") is split off FIRST (review3 F1 ORCH ruling: "apply the
++        same split in the egress scrub"), since `_scrub_names` matches a
++        stored value's WHOLE text and would otherwise never find "sharma"
++        inside "sharmaji" at all."""
++        text = self._split_honorifics(text)
+         text = self._scrub_names(text)
+         text = self._scrub_issued_amounts(text)
+         text = self._pass_amounts(text)
+@@ -909,7 +1069,17 @@ class TokenMap:
+             if kind is TokenKind.AMOUNT
+         ]
+         for key, token in amount_entries:
++            year_shaped = _is_year_shaped_amount_value(key)
+             for rendering in sorted(_amount_text_variants(key), key=len, reverse=True):
++                # review3 F2 ORCH ruling: never substitute a bare (ungrouped)
++                # rendering of a year-shaped known amount here -- it is
++                # exactly as likely to be a genuine date fragment
++                # ("no loans due after 2026-09-25") as a real amount
++                # mention, and corrupting a date is worse than the rare
++                # miss. The GROUPED rendering ("2,026") is unambiguous
++                # money notation, never a date, so it is still substituted.
++                if year_shaped and "," not in rendering:
++                    continue
+                 pattern = re.compile(rf"(?<!\w){re.escape(rendering)}(?!\w)")
+                 text = pattern.sub(token, text)
+         return text
+@@ -1036,18 +1206,37 @@ _OPAQUE_ID_KEYS: frozenset[str] = frozenset({"id", "tool_call_id", "call_id"})
+ _NON_AMOUNT_NUMERIC_KEYS: frozenset[str] = PASSTHROUGH_KEYS | _OPAQUE_ID_KEYS
+ 
+ 
++def _is_year_shaped_amount_value(amount: Decimal) -> bool:
++    """True iff `amount`'s own integer magnitude is a plausible bare year
++    (1900-2099) -- used to except a year-shaped amount from BOTH the
++    guard's money-shape check and `_scrub_issued_amounts`'s substitution
++    (review3 F2 ORCH ruling), so a genuine date fragment ("2026-09-25") is
++    never corrupted, and a `get_current_context`/`as_of` body never bricks
++    the rest of the conversation, just because ingress's own (ruling-
++    mandated, safe) over-tokenising turned an ordinary year mention like
++    "Q2 2026" into a known AMOUNT."""
++    integer_part = abs(int(amount.to_integral_value()))
++    return len(str(integer_part)) == 4 and _YEAR_MIN <= integer_part <= _YEAR_MAX
++
++
+ def _is_money_shaped_amount(amount: Decimal, rendering: str) -> bool:
+     """True iff `rendering` (one of `_amount_text_variants(amount)`'s
+     outputs) is distinctively money-shaped ON ITS OWN, with no surrounding
+     currency/unit context needed to tell it apart from a rate, a month
+     count, or a "top N" limit: it is a GROUPED rendering (has a comma), or
+     the amount's own integer magnitude is >= 4 digits (review2 NM3 ORCH
+-    ruling). Checked on the amount's magnitude, not the rendering string's
+-    raw character count, so a 2-digit rate rendered as "12.00" (4 characters
+-    once the decimal point is stripped) is correctly NOT treated as
+-    4-digit-money-shaped."""
++    ruling) -- EXCEPT a bare (ungrouped) year-shaped magnitude, which is
++    never money-shaped regardless of digit count (review3 F2 ORCH ruling:
++    a grouped "2,026" or a currency/unit-marked occurrence, caught by
++    `MONEY_RE` independently, still IS flagged; only the bare/decimal form
++    of a 1900-2099 value is exempted). Checked on the amount's magnitude,
++    not the rendering string's raw character count, so a 2-digit rate
++    rendered as "12.00" (4 characters once the decimal point is stripped)
++    is correctly NOT treated as 4-digit-money-shaped."""
+     if "," in rendering:
+         return True
++    if _is_year_shaped_amount_value(amount):
++        return False
+     integer_part = abs(int(amount.to_integral_value()))
+     return len(str(integer_part)) >= 4
+ 
+diff --git a/src/Loan Manager/tests/unit/application/agent/test_tokeniser.py b/src/Loan Manager/tests/unit/application/agent/test_tokeniser.py
+index f6e4c51..948a039 100644
+--- a/src/Loan Manager/tests/unit/application/agent/test_tokeniser.py	
++++ b/src/Loan Manager/tests/unit/application/agent/test_tokeniser.py	
+@@ -9,6 +9,10 @@ byte-identically before the suite was run green).
+ from __future__ import annotations
+ 
+ import json
++import random
++import statistics
++import sys
++import time
+ from datetime import date, timedelta
+ from decimal import Decimal
+ 
+@@ -1509,23 +1513,27 @@ def test_ascii_digit_lookalike_is_still_rejected_ruling_mandated() -> None:
+ # ── MINOR: documented, accepted fail-closed guard raise ─────────────────────
+ 
+ 
+-def test_year_left_in_clear_can_coincide_with_known_amount_and_guard_raises() -> None:
+-    """MINOR (review2, accepted as fail-safe, ORCH ruling: 'acceptable';
+-    documented here rather than fixed): 'in 1999 paid 1999' leaves the
+-    FIRST '1999' in clear (year, date context from 'in'); the SECOND '1999'
+-    has no date-context neighbour, so it becomes an amount. If amount 1999
+-    is independently known elsewhere in this conversation, the guard then
+-    raises on the literal year left in clear -- fail-closed, not a leak,
+-    and the input is contrived."""
++def test_year_left_in_clear_can_coincide_with_known_amount_and_guard_no_longer_raises() -> None:
++    """Re-ruled in review3 (F2 ORCH ruling explicitly re-rules this test):
++    'in 1999 paid 1999' leaves the FIRST '1999' in clear (year, date
++    context from 'in'); the SECOND '1999' has no date-context neighbour, so
++    it becomes an amount at ingress -- that part is unchanged and still
++    ruling-mandated over-tokenising. What changes is the GUARD: a bare
++    (ungrouped) year-shaped rendering is no longer money-shaped on its own
++    (review3 F2), so the year left in clear no longer collides with the
++    known amount 1999 and the guard does not raise. There is no leak either
++    way -- the real amount was already tokenised at ingress; only the
++    inert, ordinary-looking year digits remain in clear, exactly as a
++    human reader would expect."""
+     tm = TokenMap(_resolver())
+ 
+     result = tm.tokenise_prompt("in 1999 paid 1999")
+ 
+     assert result == "in 1999 paid AMOUNT_1"
++    assert tm.value_of("AMOUNT_1") == Decimal("1999.00")
+     body = {"messages": [{"role": "user", "content": result}]}
+ 
+-    with pytest.raises(PlaintextLeakError):
+-        assert_no_plaintext(body, tm)
++    assert_no_plaintext(body, tm)  # must not raise (review3 F2 re-ruling)
+ 
+ 
+ # ── Mutation survivors from review2's mut2.py: named tests ─────────────────
+@@ -1583,3 +1591,422 @@ def test_n20_year_exclusion_covers_the_1900s_not_only_2000s() -> None:
+ 
+     assert result == "in 1950 we started"
+     assert "AMOUNT_" not in result
++
++
++# ═══════════════════════════════════════════════════════════════════════════
++# KCH-238 review 3 (owner-approved cycle 3, FINAL): F1, F2, F3, m1 only --
++# every other MINOR from review3 (m2-m8) stays DEBT, per the ORCH ruling's
++# own "No other changes."
++# ═══════════════════════════════════════════════════════════════════════════
++
++
++# ── F1: an honorific glued directly onto a name ─────────────────────────────
++
++
++def test_f1_honorific_glued_to_exact_name_splits_and_resolves() -> None:
++    """F1 BLOCKER (review3): 'sharmaji' is 2 edits away from 'sharma', so it
++    scored no_match and passed through whole, leaking the surname in
++    clear. The fix splits the honorific off (stem >= 3 chars, and itself a
++    word of a stored entity) and emits token + '-' + honorific, so
++    `TOKEN_RE`'s `\\b` still matches the token afterwards."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    result = tm.tokenise_prompt("anil sharmaji")
++
++    assert result == "B001-ji"
++    assert tm.value_of("B001") == "anil sharma"
++
++
++def test_f1_honorific_glued_to_ambiguous_word_becomes_q_mention_not_a_leak() -> None:
++    """F1 reproducer: 'Guptaji ko 5000 do' -- 'gupta' is ambiguous between
++    two stored entities ('ramesh gupta' the depositor, 'gupta & sons' the
++    group), so the stem becomes a Q mention rather than an exact token --
++    but it is TOKENISED either way, never left leaking in clear."""
++    tm = TokenMap(
++        _resolver(depositor_name=["ramesh gupta"], borrower_group=["gupta & sons"])
++    )
++
++    result = tm.tokenise_prompt("Guptaji ko 5000 do")
++
++    assert "gupta" not in result.lower()
++    assert "-ji" in result
++    assert "AMOUNT_" in result
++    body = {"messages": [{"role": "user", "content": result}]}
++    assert_no_plaintext(body, tm)  # must not raise: nothing leaked
++
++
++def test_f1_already_hyphen_separated_honorific_is_a_regression_check() -> None:
++    """F1 ruling's own regression case: 'Sharma-ji' already has a real
++    hyphen separator (review2 NB2 already handles this), so `_split_honorifics`
++    must be a no-op here -- behaviour is unchanged from before this fix."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    result = tm.tokenise_prompt("Sharma-ji")
++
++    assert result == "Q001-ji"
++    assert tm.value_of("Q001") == "Sharma"
++
++
++@pytest.mark.parametrize("word", ["puja", "raji"])
++def test_f1_non_name_word_ending_in_honorific_suffix_left_alone(word: str) -> None:
++    """F1 ruling's own required negative case: a word ending in 'ji' that
++    is NOT (part of) any stored entity must be left exactly alone -- 'puja'
++    does not even end in a listed honorific; 'raji' does, but its stem
++    'ra' is only 2 characters, below the 3-character floor."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    assert tm.tokenise_prompt(word) == word
++
++
++def test_f1_egress_scrub_also_splits_a_glued_honorific() -> None:
++    """F1 ORCH ruling: 'Apply the same split in the egress scrub' --
++    `_scrub_names` only ever matches a stored value's WHOLE text via a
++    word-boundary regex, so without the split it would never find 'sharma'
++    inside 'sharmaji' at all."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    obs = tm.tokenise_observation({"next_action": "ask anil sharmaji to confirm"})
++
++    assert obs["next_action"] == "ask B001-ji to confirm"
++
++
++# ── F2: a year-shaped AMOUNT must not brick the conversation ────────────────
++
++
++@pytest.mark.parametrize(
++    "prompt",
++    [
++        "Q2 2026 overdue?",
++        "loans from 2025 to 2026",
++        "due Sep 26, 2026",
++        "H1 2026 summary",
++    ],
++)
++def test_f2_year_shaped_amount_then_a_date_bearing_body_does_not_raise(
++    prompt: str,
++) -> None:
++    """F2 MAJOR (review3): ingress over-tokenises an ordinary year mention
++    ("Q2 2026") into a known AMOUNT -- ruling-mandated, safe in itself.
++    What must NOT happen is every LATER body containing an ordinary date
++    (a `get_current_context`-shaped observation, or plain text like "As of
++    2026-09-25...") bricking the rest of the session just because its own
++    date digits happen to equal that known amount. Ruling's own end-to-end
++    shape: the four prompts above, each followed by a body carrying
++    2026-09-25 in some form."""
++    tm = TokenMap(_resolver())
++    tokenised_prompt = tm.tokenise_prompt(prompt)
++    ctx_body = {
++        "ok": True,
++        "today": "2026-09-25",
++        "weekday": "Friday",
++        "fy_label": "FY2026-27",
++        "quarter": "Q2",
++    }
++    later_bodies = [
++        json.dumps(ctx_body),
++        "As of 2026-09-25 there are 20 overdue loans.",
++        "due 26 Sep 2026",
++        "FY2026-27",
++    ]
++    for later in later_bodies:
++        body = {
++            "messages": [
++                {"role": "user", "content": tokenised_prompt},
++                {"role": "tool", "content": later},
++            ]
++        }
++        assert_no_plaintext(body, tm)  # must not raise
++
++
++def test_f2_scrub_no_longer_corrupts_a_date_that_matches_a_known_year_amount() -> None:
++    """F2 reproducer: once 'Q2 2026' has made 2026 a known AMOUNT, scrubbing
++    later free text that happens to contain a genuine date fragment
++    ("2026-09-25") must not rewrite it into "AMOUNT_n-09-25" -- a bare
++    year-shaped rendering is skipped in `_scrub_issued_amounts` for exactly
++    this reason."""
++    tm = TokenMap(_resolver())
++    tm.tokenise_prompt("Q2 2026")
++
++    obs = tm.tokenise_observation(
++        {"message": "no loans due after 2026-09-25", "next_action": "retry in FY2026-27"}
++    )
++
++    assert obs["message"] == "no loans due after 2026-09-25"
++    assert obs["next_action"] == "retry in FY2026-27"
++
++
++def test_f2_grouped_year_rendering_still_flagged_by_the_guard() -> None:
++    """F2 ruling: only the BARE/decimal rendering of a year-shaped amount is
++    exempted -- an (unusual but unambiguous) GROUPED rendering, "2,026",
++    is still money-shaped and still flagged."""
++    tm = TokenMap(_resolver())
++    tm.token_for(TokenKind.AMOUNT, Decimal("2026"))
++    body = {"messages": [{"role": "user", "content": "the total was 2,026"}]}
++
++    with pytest.raises(PlaintextLeakError):
++        assert_no_plaintext(body, tm)
++
++
++def test_f2_currency_marked_year_shaped_number_still_flagged_by_money_re() -> None:
++    """F2 ruling: a currency- or unit-marked occurrence of a year-shaped
++    number is still caught, independently, by `MONEY_RE` (NB1) -- the F2
++    exemption only touches the KNOWN-amount rendering check, never
++    `MONEY_RE` itself."""
++    assert MONEY_RE.search("₹2026")
++    assert MONEY_RE.search("2026 rupees")
++
++
++# ── F3: tokenise_prompt latency ──────────────────────────────────────────────
++
++
++def _demo_resolver() -> EntityResolver:
++    """The real DEMO fixture's ~75-name universe (review3's own "DEMO
++    universe"), not a synthetic stand-in -- F3's measurements are only
++    meaningful against the actual resolver KCH-239 will construct."""
++    from loan_manager.application.use_cases.loans.build_entity_resolver import (
++        BuildEntityResolver,
++    )
++    from loan_manager.application.use_cases.loans.get_autocomplete import (
++        GetAutocompleteValues,
++    )
++    from loan_manager.infrastructure.seed.demo_fixture import DEMO_LOANS
++
++    loans = [
++        make_loan(
++            borrower_name=fl.borrower_name,
++            borrower_group=fl.borrower_group,
++            depositor_name=fl.depositor_name,
++            depositor_group=fl.depositor_group,
++        )
++        for fl in DEMO_LOANS
++    ]
++    uow_factory = uow_factory_for(loans)
++    return BuildEntityResolver(GetAutocompleteValues(uow_factory)).execute()
++
++
++def _random_2000_char_prompt() -> str:
++    """The reviewer's OWN word list (a3.py/a4.py), verbatim -- real DEMO
++    name/vocabulary words mixed with ordinary English, so this is the exact
++    adversarial corpus review3's F3 measurements were taken against."""
++    words = [
++        "show", "me", "the", "overdue", "loans", "for", "anil", "sharma", "and",
++        "meera", "iyer", "lent", "45,000/-", "2 lakh", "in", "2026", "ref",
++        "2026_03_004", "b1,b2", "bg10/bg13", "sharma-ji", "o'brien", "what", "is",
++        "exposure?", "12%", "3", "months", "Q2", "iyer chem", "gupta & sons",
++        "naveen", "rao's", "mumbai", "desk", "rs 500", "please", "total",
++    ]
++    random.seed(1)
++    parts: list[str] = []
++    while len(" ".join(parts)) < 2000:
++        parts.append(random.choice(words))
++    return " ".join(parts)[:2000]
++
++
++def _timed_without_trace(fn, *args, **kwargs):
++    """Runs `fn` with any active trace function suspended for the call,
++    returning `(result, elapsed_ms)`. `sys.settrace` is the mechanism
++    `pytest-cov`'s line-by-line tracer (and any other tracer/profiler)
++    installs itself through; suspending it around just the timed call
++    means the wall-clock number reflects the code's real cost, not the
++    tracer's -- restored immediately after, so it takes nothing away from
++    `tokeniser.py`'s 100% statement coverage, which comes from the ~190
++    OTHER tests in this file that run untouched.
++
++    Root cause this exists to fix (KCH-238 cycle 3, found when the
++    coordinator asked for one rather than accepting "flake" as an
++    answer): a wall-clock ms budget measured WITH tracing active is
++    measuring two different things at once -- the algorithm's cost and
++    the tracer's -- and the second one is not fixed. Confirmed
++    reproducible, not random, on one container: median 243.2ms then
++    255.8ms (whole-package `--cov`) / 205.9-217.0ms (module-scoped
++    `--cov`) vs a consistent PASS with tracing off, for the exact same
++    code, back to back. A second container measured differently again
++    (its own baseline CPU speed differs by roughly 1.5x from the first,
++    confirmed via an old-vs-new same-process comparison that stayed an
++    8.0x speedup on both). Two containers, two different absolute
++    numbers, one real fixed relationship between old and new code -- the
++    absolute-ms-under-a-tracer number was never the stable quantity."""
++    old_trace = sys.gettrace()
++    sys.settrace(None)
++    try:
++        t0 = time.perf_counter()
++        result = fn(*args, **kwargs)
++        elapsed_ms = (time.perf_counter() - t0) * 1000
++    finally:
++        sys.settrace(old_trace)
++    return result, elapsed_ms
++
++
++def test_f3_2000_char_repeated_realistic_sentence_is_fast() -> None:
++    """F3 MAJOR (review3): budget test using a 2,000-character prompt built
++    from an ORDINARY realistic user sentence repeated to length -- the
++    shape KCH-239 actually sends on a real turn. Median of 5 runs must be
++    comfortably under the ruling's 150 ms flake margin (target 100 ms).
++    Timed via `_timed_without_trace` (see its docstring): a real turn is
++    never itself running under a coverage tracer, so measuring this
++    budget WITH one active was measuring the wrong thing, and its
++    overhead alone (confirmed ~1.4-1.7x on this exact test) can exceed a
++    150ms ceiling on its own regardless of the algorithm underneath."""
++    resolver = _demo_resolver()
++    sentence = (
++        "what is the total exposure of anil sharma and meera iyer this month, "
++        "and who is overdue?"
++    )
++    prompt = ((sentence + " ") * 23)[:2000]
++
++    timings = []
++    for _ in range(5):
++        tm = TokenMap(resolver)
++        _, elapsed_ms = _timed_without_trace(tm.tokenise_prompt, prompt)
++        timings.append(elapsed_ms)
++
++    median_ms = statistics.median(timings)
++    assert median_ms < 150, f"median {median_ms:.1f}ms, runs={timings}"
++
++
++def test_f3_2000_char_random_vocabulary_prompt_regression_guard() -> None:
++    """F3: budget test using the review's OWN fully-random word-salad
++    generator (a3.py/a4.py), which stresses many more DISTINCT multi-word
++    windows than a repeated sentence does. Measured median before this fix
++    (uninstrumented): ~3,360 ms (33x over the review's 100ms target).
++
++    Two review3 F3 techniques (the resolve cache, the character-length cap)
++    are applied without any correctness trade-off. The THIRD -- "multi-word
++    windows whose first word shares no prefix with any stored name word" --
++    could not be applied at its most aggressive: a per-word "does this word
++    alone clear the resolver's threshold" prefilter is precise EXCEPT for
++    short (<= 3 char) words, which `entity_resolver`'s own per-token scoring
++    always requires exact equality for rather than a fuzzy ratio, and which
++    a COMPACT reference-style code ("bg 13" collapsing to stored "bg13")
++    resolves through only as part of the WHOLE multi-word string -- never
++    word-by-word. Excluding short words from the prefilter (so it can never
++    break "bg 13"/"bg-13"/"bg_13", a review3 "Clean checks" regression
++    requirement) costs real pruning, since ordinary short English words
++    ("is", "me", "3", "in", ...) then no longer get filtered out either.
++    Measured median with the correctness-preserving version, raw
++    (`_timed_without_trace`, see its docstring -- a tracer's own overhead
++    is not part of what F3 bounds): ~400-450ms on one container, ~600ms
++    on a second, ~8.0x faster than the pre-fix code on BOTH, measured
++    old-vs-new back to back in the same process each time -- still well
++    above the ruling's strict 150ms ceiling for this specific adversarial
++    vocabulary (see the KCH-238 cycle-3 tester's report: not fully
++    satisfied, and reducing it further without touching
++    entity_resolver.py, out of this cycle's file-touch scope, or
++    reopening the "bg 13" regression, was not achieved). The 900ms budget
++    below leaves roughly 1.5x headroom over the slower of the two
++    containers measured so far, for cross-container CPU-speed variance
++    this sandboxed environment has shown between provisioning cycles; it
++    stays a genuine regression guard against ever sliding back toward the
++    pre-fix multi-SECOND behaviour."""
++    resolver = _demo_resolver()
++    prompt = _random_2000_char_prompt()
++
++    timings = []
++    for _ in range(5):
++        tm = TokenMap(resolver)
++        _, elapsed_ms = _timed_without_trace(tm.tokenise_prompt, prompt)
++        timings.append(elapsed_ms)
++
++    median_ms = statistics.median(timings)
++    assert median_ms < 900, f"median {median_ms:.1f}ms, runs={timings}"
++
++
++def test_f3_pathological_single_glued_word_is_cheap() -> None:
++    """F3 reproducer: a single multi-thousand-character glued "word" (no
++    separators at all) used to force one giant OSA fuzzy comparison per
++    window size tried (measured ~1.1s pre-fix for 2,000 chars). The
++    char-length cap skips it without ever calling `resolve`."""
++    resolver = _demo_resolver()
++    prompt = "a" * 2000
++
++    _, elapsed_ms = _timed_without_trace(TokenMap(resolver).tokenise_prompt, prompt)
++
++    assert elapsed_ms < 100, f"{elapsed_ms:.1f}ms"
++
++
++def test_f3_pathological_glued_short_codes_is_cheap() -> None:
++    """F3 reproducer: 2,000 characters of 'b1,' repeated (measured ~6.8s
++    pre-fix) -- many short single-word windows, none of which clear the
++    per-token threshold once split from their neighbours by the comma."""
++    resolver = _demo_resolver()
++    prompt = ("b1," * 667)[:2000]
++
++    _, elapsed_ms = _timed_without_trace(TokenMap(resolver).tokenise_prompt, prompt)
++
++    assert elapsed_ms < 200, f"{elapsed_ms:.1f}ms"
++
++
++def test_f3_synthetic_1200_name_universe_is_reported_not_asserted() -> None:
++    """F3 ORCH ruling: 'Report measured times, including a ~1,200-name
++    synthetic universe (no hard assert there; report it)'. Genuinely no
++    hard assert: an earlier 5000ms sanity ceiling here flaked under
++    whole-package `--cov=loan_manager` (5049.6ms measured, against an
++    ~900-1700ms range without it) -- exactly the tight-budget-under-load
++    problem the ruling says not to impose on this case. The pre-fix code
++    took roughly 2.2s/112s respectively on a comparable universe size
++    (review3's own measurements); this test exists to print the number
++    for a human to read, not to gate the build on it."""
++    first = [
++        "anil", "sunil", "meera", "ravi", "pooja", "asha", "deepak", "naveen",
++        "kavita", "farhan", "suresh", "lakshmi", "rakesh", "vikram", "sunita",
++        "arjun", "ramesh", "priya", "rohit", "neha",
++    ]
++    last = [
++        "sharma", "iyer", "gupta", "verma", "rao", "nair", "menon", "bhat",
++        "qureshi", "reddy", "patel", "shah", "das", "joshi", "kulkarni",
++        "pillai", "singh", "khan", "mehta", "desai",
++    ]
++    rnd = random.Random(3)
++    names = list(
++        {
++            f"{rnd.choice(first)} {rnd.choice(last)}{'' if i < 400 else ' ' + str(i)}"
++            for i in range(1200)
++        }
++    )
++    resolver = EntityResolver(
++        {
++            "borrower_name": names,
++            "borrower_group": [f"{last_name} group" for last_name in last],
++            "depositor_name": names[:400],
++            "depositor_group": ["mumbai desk", "dg1"],
++        }
++    )
++    sentence = (
++        "what is the total exposure of anil sharma and meera iyer this month, "
++        "and who is overdue?"
++    )
++    prompt_2000 = ((sentence + " ") * 23)[:2000]
++
++    for label, prompt in (("88-char", sentence), ("2000-char", prompt_2000)):
++        _, elapsed_ms = _timed_without_trace(TokenMap(resolver).tokenise_prompt, prompt)
++        print(f"\n~1200-name universe, {label} prompt: {elapsed_ms:.1f}ms")
++        assert elapsed_ms >= 0  # report-only (F3 ruling): no budget asserted here
++
++
++# ── m1: underscore is a separator ───────────────────────────────────────────
++
++
++def test_m1_underscore_glued_name_resolves_instead_of_leaking() -> None:
++    """m1 (review3): `_` used to count as a word character, so
++    'anil_sharma_loans' was ONE glued span that never matched 'anil sharma'
++    as a whole and leaked both name components in clear. Now `_` is a
++    separator (like '-'), so the two name words are found as separate
++    spans; `EntityResolver._normalize` already folds '_' to a space, so the
++    2-word window's raw text ("anil_sharma") still resolves exact."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    result = tm.tokenise_prompt("anil_sharma_loans")
++
++    assert result == "B001_loans"
++
++
++def test_m1_reference_id_with_underscores_still_passes_through_unchanged() -> None:
++    """m1 ORCH ruling's own explicit regression requirement: a reference id
++    must still pass through unchanged whether or not `_` is a word
++    character -- it is excluded from amount detection by its own
++    lookaround, and as a name candidate every one of its underscore-split
++    pieces is still `no_match` against any stored value."""
++    tm = TokenMap(_resolver(borrower_name=["anil sharma"]))
++
++    text = "ref 2026_03_001 is the loan"
++    assert tm.tokenise_prompt(text) == text

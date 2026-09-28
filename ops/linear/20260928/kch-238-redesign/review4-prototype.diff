@@ -1,0 +1,70 @@
+--- tree/loan_manager/application/agent/tokeniser.py	2026-09-28 03:35:27.543683649 +0000
++++ tree_fix/loan_manager/application/agent/tokeniser.py	2026-09-28 03:41:37.311151071 +0000
+@@ -623,6 +623,16 @@
+         # failed to match exactly) reuses pass 2's results for free, and a
+         # word repeated many times in one prompt is resolved once.
+         self._resolve_cache: dict[str, Any] = {}
++        self._collapsed_values: frozenset[str] = frozenset(
++            re.sub(r"[\s_-]+", "", v.lower()) for _f, v in resolver.entities()
++        )
++        idx: set[str] = set()
++        for _f, v in resolver.entities():
++            norm = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", v.lower())).strip()
++            for s_ in {norm, norm.replace(" ", ""), *norm.split(" ")}:
++                idx.add(s_)
++                idx.update(s_[:k] + s_[k + 1 :] for k in range(len(s_)))
++        self._del1_index: frozenset[str] = frozenset(idx)
+ 
+     # ── core map ────────────────────────────────────────────────────────
+ 
+@@ -718,6 +728,12 @@
+         last = 0
+         for start, end in spans:
+             word = text[start:end]
++            if word.lower() in self._entity_words:
++                continue
++            poss = _POSSESSIVE_RE.search(_fold_apostrophe(word))
++            if poss:
++                end -= len(poss.group(0))
++                word = text[start:end]
+             m = _HONORIFIC_SUFFIX_RE.search(word)
+             if not m:
+                 continue
+@@ -845,6 +861,11 @@
+             # entirely rather than let it run only to fail.
+             if max_chars is not None and _collapsed_len(core) > max_chars:
+                 return False
++            if core.lower() in NOISE_TOKENS:
++                return True
++            q = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", _fold_apostrophe(core).lower())).strip()
++            if " " not in q and not ({q} | {q[:k] + q[k + 1 :] for k in range(len(q))}) & self._del1_index:
++                return False
+             if len(core) <= 3:
+                 # A short word ("13", "bg", "b1") can be part of a compact
+                 # reference-style code that only resolves as a WHOLE
+@@ -877,10 +898,14 @@
+             upper = min(max_n, n_words - i)
+             matched_size = 0
+             for size in range(upper, 0, -1):
+-                if size > 1 and not all(span_clears[i : i + size]):
+-                    continue
+                 window_start = spans[i][0]
+                 window_end = spans[i + size - 1][1]
++                if size > 1 and not all(span_clears[i : i + size]) and re.sub(
++                    r"[\W_]+", "", text[window_start:window_end].lower()
++                ) not in self._collapsed_values:
++                    continue
++                if size == 1 and not span_clears[i] and len(span_cores[i]) > 3:
++                    continue
+                 prefix, core, suffix = _strip_window_edges(text[window_start:window_end])
+                 if max_chars is not None and _collapsed_len(core) > max_chars:
+                     continue
+@@ -1235,7 +1260,7 @@
+     is correctly NOT treated as 4-digit-money-shaped."""
+     if "," in rendering:
+         return True
+-    if _is_year_shaped_amount_value(amount):
++    if rendering.isdigit() and _is_year_shaped_amount_value(amount):
+         return False
+     integer_part = abs(int(amount.to_integral_value()))
+     return len(str(integer_part)) >= 4
