@@ -15,6 +15,54 @@ from loan_manager.domain.services.interest_calculator import InterestCalculator
 from loan_manager.domain.value_objects.status import ExtensionPeriodUnit
 
 
+def report_to_dto(r, conflict_ref_ids: tuple[str, ...] = ()) -> ReportDTO:
+    """Map a domain `Report` to its DTO. Module-level (KCH-245) so both
+    `GetPendingReports` and `GetRecentlyApprovedReports` build the identical
+    DTO shape from one place instead of drifting field-by-field.
+    `conflict_ref_ids` is caller-computed -- this function itself never
+    looks at other reports."""
+    return ReportDTO(
+        id=r.id,
+        report_id=str(r.report_id),
+        report_mode=r.report_mode,
+        status=r.status,
+        records=[
+            ReportRecordDTO(
+                id=rec.id,
+                report_id=rec.report_id,
+                reference_id=rec.reference_id,
+                borrower_name=rec.borrower_name,
+                depositor_name=rec.depositor_name,
+                depositor_group=rec.depositor_group,
+                amount=rec.amount,
+                giving_date=rec.giving_date,
+                due_date=rec.due_date,
+                extension_period=rec.extension_period,
+                extension_period_unit=rec.extension_period_unit,
+                interest_rate=rec.interest_rate,
+                commission_rate=rec.commission_rate,
+                tds_flag=rec.tds_flag,
+                interest_amount=rec.interest_amount,
+                commission_amount=rec.commission_amount,
+                tds_amount=rec.tds_amount,
+                chq_amount=rec.chq_amount,
+                post_extension_giving_date=rec.post_extension_giving_date,
+                post_extension_due_date=rec.post_extension_due_date,
+                paidoff_date=rec.paidoff_date,
+                borrower_group=rec.borrower_group,
+                due_period=rec.due_period,
+            )
+            for rec in r.records
+        ],
+        created_at=r.created_at,
+        updated_at=r.updated_at,
+        actor=r.actor,
+        user_request=r.user_request,
+        turn_id=r.turn_id,
+        conflict_ref_ids=sorted(conflict_ref_ids),
+    )
+
+
 class GetPendingReports:
     def __init__(self, uow_factory: Callable) -> None:
         self._uow_factory = uow_factory
@@ -23,48 +71,27 @@ class GetPendingReports:
         with self._uow_factory() as uow:
             reports = uow.reports.get_all_pending()
 
-        return [
-            ReportDTO(
-                id=r.id,
-                report_id=str(r.report_id),
-                report_mode=r.report_mode,
-                status=r.status,
-                records=[
-                    ReportRecordDTO(
-                        id=rec.id,
-                        report_id=rec.report_id,
-                        reference_id=rec.reference_id,
-                        borrower_name=rec.borrower_name,
-                        depositor_name=rec.depositor_name,
-                        depositor_group=rec.depositor_group,
-                        amount=rec.amount,
-                        giving_date=rec.giving_date,
-                        due_date=rec.due_date,
-                        extension_period=rec.extension_period,
-                        extension_period_unit=rec.extension_period_unit,
-                        interest_rate=rec.interest_rate,
-                        commission_rate=rec.commission_rate,
-                        tds_flag=rec.tds_flag,
-                        interest_amount=rec.interest_amount,
-                        commission_amount=rec.commission_amount,
-                        tds_amount=rec.tds_amount,
-                        chq_amount=rec.chq_amount,
-                        post_extension_giving_date=rec.post_extension_giving_date,
-                        post_extension_due_date=rec.post_extension_due_date,
-                        paidoff_date=rec.paidoff_date,
-                        borrower_group=rec.borrower_group,
-                        due_period=rec.due_period,
-                    )
-                    for rec in r.records
-                ],
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-                actor=r.actor,
-                user_request=r.user_request,
-                turn_id=r.turn_id,
-            )
-            for r in reports
-        ]
+        # KCH-245: a reference_id shared by TWO OR MORE pending reports is a
+        # conflict -- approving one first would silently make the other
+        # stale. CREATE-mode records carry reference_id=None until approval
+        # (see Report.__post_init__) and must never count as "shared" with
+        # each other, so they are filtered out here exactly like
+        # ApproveReport's own `report_ref_ids` does.
+        ref_id_to_reports: dict[str, set[str]] = {}
+        for r in reports:
+            report_id = str(r.report_id)
+            for rec in r.records:
+                if rec.reference_id is not None:
+                    ref_id_to_reports.setdefault(rec.reference_id, set()).add(report_id)
+        conflicted_refs = {
+            ref_id for ref_id, report_ids in ref_id_to_reports.items() if len(report_ids) >= 2
+        }
+
+        result = []
+        for r in reports:
+            own_refs = {rec.reference_id for rec in r.records if rec.reference_id is not None}
+            result.append(report_to_dto(r, tuple(own_refs & conflicted_refs)))
+        return result
 
 
 class UpdateReportRecord:

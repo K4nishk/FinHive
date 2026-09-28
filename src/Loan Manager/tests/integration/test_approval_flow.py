@@ -800,7 +800,8 @@ class TestApproveCreateReport:
         assert report.status == ReportStatus.APPROVED
         assert report.records[0].reference_id == str(loan.reference_id)
 
-    def test_approve_create_report_is_atomic_on_failure(self, db_session, monkeypatch):
+    @pytest.mark.parametrize("actor", [ReportActor.FORM, ReportActor.AGENT])
+    def test_approve_create_report_is_atomic_on_failure(self, db_session, monkeypatch, actor):
         """The SECOND of two CREATE records fails to stage -- simulated via
         a patched `CreateLoan.stage` that raises on its second call, standing
         in for any real mid-loop staging failure (a DB constraint violation,
@@ -821,10 +822,16 @@ class TestApproveCreateReport:
         overwrite a stranger's loan rather than fail loudly). Patching
         `stage()` isolates the property actually under test -- ApproveReport
         commits once, atomically -- from both of those unrelated layers.
+
+        KCH-245 (ACCEPTANCE 2): parametrized over `actor` -- a FORM batch
+        and an AGENT batch are otherwise-identical CREATE reports, and this
+        atomicity guarantee must hold for both, not just the one the old
+        tab exercised.
         """
         uow = _make_uow(db_session)
         _seed_create_report(
             uow,
+            actor=actor,
             records_data=[
                 {
                     "borrower_name": "good borrower",
@@ -887,6 +894,7 @@ class TestApproveCreateReport:
         )
         report = fresh_uow.reports.get_by_report_id("RPT_20260410_001")
         assert report.status == ReportStatus.PENDING
+        assert report.actor == actor
         assert report.records[0].reference_id is None
         assert report.records[1].reference_id is None
         # KCH-242 review cycle 2, MINOR-2: a rolled-back approve must never
