@@ -12,7 +12,11 @@ from loan_manager.application.dtos.report_dto import GenerateReportDTO, ReportRe
 from loan_manager.application.use_cases.loans.get_autocomplete import GetAutocompleteValues
 from loan_manager.application.use_cases.reports.calculate_interest import CalculateInterest
 from loan_manager.application.use_cases.reports.generate_report import GenerateReport
-from loan_manager.domain.value_objects.status import CalculationMode, ExtensionPeriodUnit
+from loan_manager.domain.value_objects.status import (
+    CalculationMode,
+    ExtensionPeriodUnit,
+    ReportActor,
+)
 from loan_manager.presentation.dialogs.calculation_dialog import CalculationDialog
 from loan_manager.presentation.errors import surfacing_storage_errors
 
@@ -213,7 +217,7 @@ class CalculatorTab(QWidget):
                     paidoff_date=None,
                 ))
 
-            gen_dto = GenerateReportDTO(mode=mode, records=records)
+            gen_dto = GenerateReportDTO(mode=mode, records=records, actor=ReportActor.FORM)
             gen_uc = GenerateReport(
                 self._container.get_uow,
                 self._container.event_bus,

@@ -21,6 +21,11 @@ class CalculationMode(str, Enum):
     BOTH = "Both"
     PAIDOFF = "Paidoff"
     CREATE = "Create"
+    # KCH-243: an agent update_loan proposal -- borrower_name/depositor_name/
+    # amount only, never dates/status/groups. approve_report.py has a
+    # dedicated branch; UndoApprovedReport (KCH-244) refuses to undo one
+    # (unrecognized_report_mode) rather than silently no-opping.
+    UPDATE = "Update"
 
 class ExtensionPeriodUnit(str, Enum):
     MONTHS = "months"

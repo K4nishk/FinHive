@@ -33,6 +33,7 @@ from loan_manager.application.use_cases.reports.generate_report import GenerateR
 from loan_manager.application.use_cases.reports.get_reports import GetPendingReports, UpdateReportRecord
 from loan_manager.domain.services.reference_id_service import ReferenceIdService
 from loan_manager.domain.value_objects.status import (
+    ReportActor,
     CalculationMode,
     ExtensionPeriodUnit,
     LoanStatus,
@@ -530,10 +531,77 @@ class TestGenerateReport:
         report = gen_uc.execute(GenerateReportDTO(
             mode=CalculationMode.MONTHLY,
             records=[record_dto],
+            actor=ReportActor.FORM,
         ))
 
         assert report.report_id.startswith("RPT_")
         assert len(report.records) == 1
+
+    def test_generate_report_persists_agent_fields(self, uow_factory, event_bus):
+        """KCH-243: actor/user_request/turn_id round-trip through
+        GenerateReport, and borrower_group/due_period (KCH-242 fields
+        generate_report.py never actually mapped before this issue) survive
+        a real save+reload via GetPendingReports, not just the same-call
+        return DTO."""
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(uow_factory, ref_service, event_bus)
+        gen_uc = GenerateReport(uow_factory, event_bus)
+        get_reports_uc = GetPendingReports(uow_factory)
+
+        created = create_uc.execute(LoanCreateDTO(
+            borrower_name="B1", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        ))
+
+        record_dto = ReportRecordDTO(
+            id=None,
+            report_id="placeholder",
+            reference_id=created.reference_id,
+            borrower_name="B1",
+            depositor_name="D1",
+            depositor_group=None,
+            amount=10000,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            extension_period=3,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("12"),
+            commission_rate=Decimal("6"),
+            tds_flag=False,
+            interest_amount=Decimal("300.00"),
+            commission_amount=Decimal("150.00"),
+            tds_amount=Decimal("0.00"),
+            chq_amount=Decimal("300.00"),
+            post_extension_giving_date=date(2026, 4, 1),
+            post_extension_due_date=date(2026, 7, 1),
+            paidoff_date=None,
+            borrower_group="G1",
+            due_period=3,
+        )
+
+        report = gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.MONTHLY,
+            records=[record_dto],
+            actor=ReportActor.AGENT,
+            user_request="extend B1's loan",
+            turn_id="turn-1",
+        ))
+
+        assert report.actor == ReportActor.AGENT
+        assert report.user_request == "extend B1's loan"
+        assert report.turn_id == "turn-1"
+        assert report.records[0].borrower_group == "G1"
+        assert report.records[0].due_period == 3
+
+        # Reload through a SEPARATE use case/query, not the same call's
+        # return value -- proves these fields were actually written, not
+        # merely echoed back from the input DTO.
+        reloaded = next(r for r in get_reports_uc.execute() if r.report_id == report.report_id)
+        assert reloaded.actor == ReportActor.AGENT
+        assert reloaded.user_request == "extend B1's loan"
+        assert reloaded.turn_id == "turn-1"
+        assert reloaded.records[0].borrower_group == "G1"
+        assert reloaded.records[0].due_period == 3
 
 
 class TestGetPendingReports:

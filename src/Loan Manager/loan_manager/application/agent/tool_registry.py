@@ -115,7 +115,10 @@ TOOL_SPECS: Mapping[str, ToolSpec] = MappingProxyType(
         "extend_loan": ToolSpec(
             name="extend_loan",
             description=(
-                "PROPOSE extending a loan's due date. Creates a proposal for "
+                "PROPOSE extending a loan's due date by `months`. If the loan "
+                "already has a due date, omit new_due_date -- it extends from "
+                "the existing one. If the loan has NO due date, new_due_date is "
+                "REQUIRED (the agreed new due date). Creates a proposal for "
                 "human approval; never writes."
             ),
             mode=ToolMode.PROPOSE,
@@ -132,8 +135,11 @@ TOOL_SPECS: Mapping[str, ToolSpec] = MappingProxyType(
         "update_loan": ToolSpec(
             name="update_loan",
             description=(
-                "PROPOSE updating an existing loan's fields. Creates a proposal "
-                "for human approval; never writes."
+                "PROPOSE changing an existing loan's borrower_name, "
+                "depositor_name and/or amount. borrower_group/depositor_group, "
+                "if given, are membership checks only -- they must match the "
+                "loan's existing group and are never changed by this tool. "
+                "Creates a proposal for human approval; never writes."
             ),
             mode=ToolMode.PROPOSE,
             args_model=UpdateLoan,
@@ -141,8 +147,10 @@ TOOL_SPECS: Mapping[str, ToolSpec] = MappingProxyType(
         "extend_overdue_batch": ToolSpec(
             name="extend_overdue_batch",
             description=(
-                "PROPOSE extending every overdue loan in a borrower group. "
-                "Creates a proposal for human approval; never writes."
+                "PROPOSE extending every loan CURRENTLY OVERDUE in one EXACT, "
+                "existing borrower group, as ONE proposal covering the whole "
+                "group -- never one loan at a time. borrower_group must be an "
+                "exact match. Creates a proposal for human approval; never writes."
             ),
             mode=ToolMode.PROPOSE,
             args_model=ExtendOverdueBatch,

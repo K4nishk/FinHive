@@ -690,6 +690,87 @@ class TestUndoRefusesUnrecognizedReportMode:
         assert result.reason == "unrecognized_report_mode"
 
 
+class TestUndoRefusesApprovedUpdateReport:
+    """Binding orchestrator ruling (KCH-243): CalculationMode.UPDATE (an
+    agent update_loan proposal) is exactly a report_mode UndoApprovedReport
+    does not recognise -- neither CREATE nor PAIDOFF nor one of
+    _EXTEND_MODES (MONTHLY/DAILY/BOTH). Undoing an APPROVED UPDATE report
+    must be refused with "unrecognized_report_mode" and change nothing --
+    not silently no-opped, and never treated as an EXTEND report (which
+    would try to bulk_update_dates from an UPDATE record's None
+    post_extension_* fields)."""
+
+    def test_undo_of_approved_update_report_is_refused_and_changes_nothing(
+        self, db_session
+    ):
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow, ref_id="2026_03_050",
+            giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        )
+        report_id_str = "RPT_20260501_003"
+        now = datetime.now()
+        record = ReportRecord(
+            id=None,
+            report_id=report_id_str,
+            reference_id="2026_03_050",
+            borrower_name="renamed borrower",
+            depositor_name="renamed depositor",
+            depositor_group="dg1",
+            amount=99999,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            extension_period=0,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("0"),
+            commission_rate=Decimal("0"),
+            tds_flag=False,
+            interest_amount=None,
+            commission_amount=None,
+            tds_amount=None,
+            chq_amount=None,
+            post_extension_giving_date=None,
+            post_extension_due_date=None,
+            paidoff_date=None,
+        )
+        report = Report(
+            id=None,
+            report_id=ReportId(report_id_str),
+            report_mode=CalculationMode.UPDATE,
+            status=ReportStatus.PENDING,
+            records=[record],
+            created_at=now,
+            updated_at=now,
+        )
+        uow.reports.save(report)
+        uow.commit()
+
+        approver, _, uow_factory = _approver(db_session)
+        approval = approver.execute(report_id_str)
+        assert approval.success is True
+
+        approved_loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_050")
+        assert approved_loan.borrower_name == "renamed borrower"
+        assert approved_loan.depositor_name == "renamed depositor"
+        assert int(approved_loan.amount) == 99999
+        assert approved_loan.giving_date == date(2026, 1, 1)
+        assert approved_loan.due_date == date(2026, 4, 1)
+
+        undoer = _undoer(uow_factory)
+        result = undoer.execute(report_id_str)
+
+        assert result.success is False
+        assert result.reason == "unrecognized_report_mode"
+
+        unchanged_loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_050")
+        assert unchanged_loan.borrower_name == "renamed borrower"
+        assert unchanged_loan.depositor_name == "renamed depositor"
+        assert int(unchanged_loan.amount) == 99999
+
+        unchanged_report = _make_uow(db_session).reports.get_by_report_id(report_id_str)
+        assert unchanged_report.status == ReportStatus.APPROVED
+
+
 # ---------------------------------------------------------------------------
 # Review cycle 1, MAJOR-1: CREATE undo must detect an edit to ANY field
 # approval wrote -- not just giving_date/due_date. `_create_conflicts`

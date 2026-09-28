@@ -207,6 +207,240 @@ class TestApproveNormalReport:
         assert loan.due_date == date(2026, 7, 1)
 
 
+class TestApproveUpdateReport:
+    """KCH-243: an UPDATE-mode report (agent update_loan) applies ONLY
+    borrower_name/depositor_name/amount -- groups, dates and status are
+    untouched (there is nothing in the record to apply them from; see
+    propose_update.py)."""
+
+    def _seed_update_report(
+        self, uow, report_id_str="RPT_20260501_001", ref_id="2026_03_050",
+        giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+    ):
+        now = datetime.now()
+        record = ReportRecord(
+            id=None,
+            report_id=report_id_str,
+            reference_id=ref_id,
+            borrower_name="renamed borrower",
+            depositor_name="renamed depositor",
+            depositor_group="dg1",
+            amount=99999,
+            giving_date=giving_date,
+            due_date=due_date,
+            extension_period=0,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("0"),
+            commission_rate=Decimal("0"),
+            tds_flag=False,
+            interest_amount=None,
+            commission_amount=None,
+            tds_amount=None,
+            chq_amount=None,
+            post_extension_giving_date=None,
+            post_extension_due_date=None,
+            paidoff_date=None,
+        )
+        report = Report(
+            id=None,
+            report_id=ReportId(report_id_str),
+            report_mode=CalculationMode.UPDATE,
+            status=ReportStatus.PENDING,
+            records=[record],
+            created_at=now,
+            updated_at=now,
+        )
+        return uow.reports.save(report)
+
+    def test_approve_update_report_applies_fields_only(self, db_session):
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow, ref_id="2026_03_050",
+            giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        )
+        self._seed_update_report(uow)
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        approver = ApproveReport(uow_factory, recovery, backup, event_bus)
+        result = approver.execute("RPT_20260501_001")
+
+        assert result.success is True
+
+        loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_050")
+        assert loan.borrower_name == "renamed borrower"
+        assert loan.depositor_name == "renamed depositor"
+        assert int(loan.amount) == 99999
+        # Groups/dates/status untouched -- update_loan never proposes them.
+        assert loan.borrower_group == "bg1"
+        assert loan.giving_date == date(2026, 1, 1)
+        assert loan.due_date == date(2026, 4, 1)
+
+        report = _make_uow(db_session).reports.get_by_report_id("RPT_20260501_001")
+        assert report.status == ReportStatus.APPROVED
+
+    def test_approve_update_skips_inactive(self, db_session):
+        """Review cycle 1, MINOR (ORCHESTRATOR RULING): a loan paid off
+        (and archived/deactivated) after the UPDATE proposal was made must
+        refuse the WHOLE approval -- success=False, naming the ref_id --
+        never a silent skip reported as success (the old behaviour: loan
+        left untouched but the report marked Approved anyway, with nothing
+        telling the caller a record was dropped)."""
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow, ref_id="2026_03_051",
+            giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        )
+        uow.loans.set_inactive("2026_03_051")
+        self._seed_update_report(
+            uow, report_id_str="RPT_20260501_002", ref_id="2026_03_051",
+        )
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        approver = ApproveReport(uow_factory, recovery, backup, event_bus)
+        result = approver.execute("RPT_20260501_002")
+
+        assert result.success is False
+        assert result.inactive_ref_ids == ["2026_03_051"]
+        assert result.deleted_ref_ids == []  # paid off, not deleted -- separate field
+        assert result.requires_confirmation is False
+
+        loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_051")
+        assert loan.is_active is False
+        assert loan.borrower_name == "borrower"  # unchanged, never "renamed borrower"
+        assert int(loan.amount) == 10000
+
+        report = _make_uow(db_session).reports.get_by_report_id("RPT_20260501_002")
+        assert report.status == ReportStatus.PENDING  # never marked Approved
+
+    def test_approve_update_on_inactive_loan_refused_even_with_force(self, db_session):
+        """Review cycle 2, MAJOR-1 (ORCHESTRATOR RULING): force=True exists
+        to push through a duplicate/deleted-ref WARNING after a human looks
+        at it -- it must never let an UPDATE apply (or silently skip) stale
+        name/amount data onto a loan that is no longer live. One click on
+        the UI's "Proceed anyway?" must not reach success=True here."""
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow, ref_id="2026_03_053",
+            giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        )
+        uow.loans.set_inactive("2026_03_053")
+        self._seed_update_report(
+            uow, report_id_str="RPT_20260501_005", ref_id="2026_03_053",
+        )
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        approver = ApproveReport(uow_factory, recovery, backup, event_bus)
+        result = approver.execute("RPT_20260501_005", force=True)
+
+        assert result.success is False
+        assert result.inactive_ref_ids == ["2026_03_053"]
+        assert result.requires_confirmation is False
+
+        loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_053")
+        assert loan.is_active is False
+        assert loan.borrower_name == "borrower"  # unchanged, never "renamed borrower"
+        assert int(loan.amount) == 10000
+
+        report = _make_uow(db_session).reports.get_by_report_id("RPT_20260501_005")
+        assert report.status == ReportStatus.PENDING  # never marked Approved
+
+    def test_approve_update_stores_lowercase(self, db_session):
+        """Review cycle 1, MAJOR-1 (defence in depth): even if a proposed
+        UPDATE record somehow carried mixed-case names, approve_report.py's
+        UPDATE branch normalises before writing -- the same guarantee
+        LoanCreateDTO/LoanUpdateDTO.to_lowercase gives every other write
+        path."""
+        uow = _make_uow(db_session)
+        _seed_loan(
+            uow, ref_id="2026_03_052",
+            giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        )
+        now = datetime.now()
+        report_id_str = "RPT_20260501_004"
+        record = ReportRecord(
+            id=None,
+            report_id=report_id_str,
+            reference_id="2026_03_052",
+            borrower_name="Lakshmi Iyer-Rao",
+            depositor_name="Arjun Rao",
+            depositor_group="dg1",
+            amount=210000,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            extension_period=0,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("0"),
+            commission_rate=Decimal("0"),
+            tds_flag=False,
+            interest_amount=None,
+            commission_amount=None,
+            tds_amount=None,
+            chq_amount=None,
+            post_extension_giving_date=None,
+            post_extension_due_date=None,
+            paidoff_date=None,
+        )
+        report = Report(
+            id=None,
+            report_id=ReportId(report_id_str),
+            report_mode=CalculationMode.UPDATE,
+            status=ReportStatus.PENDING,
+            records=[record],
+            created_at=now,
+            updated_at=now,
+        )
+        uow.reports.save(report)
+        uow.commit()
+
+        recovery = RecoveryService()
+        recovery.write = lambda op, data: None
+        recovery.clear = lambda: None
+        backup = BackupService()
+        backup.create_backup = lambda: None
+        event_bus = EventBus()
+
+        def uow_factory():
+            return _make_uow(db_session)
+
+        approver = ApproveReport(uow_factory, recovery, backup, event_bus)
+        result = approver.execute(report_id_str)
+
+        assert result.success is True
+        loan = _make_uow(db_session).loans.get_by_reference_id("2026_03_052")
+        assert loan.borrower_name == "lakshmi iyer-rao"
+        assert loan.depositor_name == "arjun rao"
+
+
 class TestDeclineReport:
     def test_decline_leaves_loan_unchanged(self, db_session):
         uow = _make_uow(db_session)

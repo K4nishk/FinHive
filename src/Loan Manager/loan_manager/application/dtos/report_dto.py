@@ -70,12 +70,27 @@ class ReportRecordUpdateDTO(BaseModel):
 class GenerateReportDTO(BaseModel):
     mode: CalculationMode
     records: list[ReportRecordDTO]
+    # Required, no default (KCH-243, mirrors ReportDTO.actor above): every
+    # caller -- the FORM tab and every PROPOSE tool -- must say who is
+    # generating this report; a defaulted FORM here is the same silent
+    # mislabelling risk the KCH-242 review closed on ReportDTO itself.
+    actor: ReportActor
+    user_request: Optional[str] = None
+    turn_id: Optional[str] = None
 
 
 class ApprovalResultDTO(BaseModel):
     success: bool
     duplicate_ref_ids: list[str] = []
     deleted_ref_ids: list[str] = []
+    # Review cycle 2, MAJOR-1 (ORCHESTRATOR RULING): an UPDATE-mode ref
+    # whose loan is inactive (paid off/archived) since the proposal was
+    # made -- deliberately kept OUT of `deleted_ref_ids` (the loan still
+    # exists, it just isn't live) and refused regardless of `force`, so the
+    # UI's "records have been deleted -- proceed anyway?" prompt never
+    # covers it, and a future message for this field can say "paid off"
+    # rather than "deleted".
+    inactive_ref_ids: list[str] = []
     requires_confirmation: bool = False
 
 
