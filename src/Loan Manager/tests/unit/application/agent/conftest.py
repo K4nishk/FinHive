@@ -105,7 +105,11 @@ class FakeLoanRepo:
         return loans
 
     def get_unique_values(self, field: str, active_only: bool = True) -> list[str]:
-        values = {getattr(loan, field, None) for loan in self._loans}
+        values = {
+            getattr(loan, field, None)
+            for loan in self._loans
+            if loan.is_active or not active_only
+        }
         return sorted(v for v in values if v)
 
     def get_by_reference_id(self, ref_id: str) -> Loan | None:
