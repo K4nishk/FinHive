@@ -113,7 +113,10 @@ RupeesWhole = Annotated[
         strict=True,
         ge=1,
         le=10**10,
-        description="Whole INR rupees, e.g. 150000 for 1.5 lakh; no paise, no lakh/crore units",
+        description=(
+            "Whole INR rupees. Pass the AMOUNT_n token string of an amount from "
+            'the conversation (e.g. "AMOUNT_2"); never a number you typed yourself'
+        ),
     ),
 ]
 
@@ -181,7 +184,11 @@ class FormatInr(ToolArgs):
                 "type": "number",
                 "minimum": 0,
                 "maximum": 1e12,
-                "description": "INR rupees, paise allowed",
+                "description": (
+                    "INR rupees, paise allowed. Pass the AMOUNT_n token string of an "
+                    'amount from the conversation (e.g. "AMOUNT_2"); never a number '
+                    "you typed yourself"
+                ),
             }
         ),
     ]

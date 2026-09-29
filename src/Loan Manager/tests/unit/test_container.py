@@ -42,3 +42,54 @@ class TestEventBus:
         bus.publish(MyEvent())
         assert len(received_a) == 1
         assert len(received_b) == 1
+
+
+class TestAgentWiring:
+    """KCH-239: construct only -- nothing here opens a database or a socket."""
+
+    def test_injected_llm_and_null_recorder(self):
+        from loan_manager.application.agent.tool_registry import ToolRegistry
+        from loan_manager.application.interfaces.turn_recorder import NullTurnRecorder
+        from loan_manager.application.use_cases.agent.run_agent_turn import RunAgentTurn
+        from loan_manager.container import Container
+
+        class FakeLLM:
+            def complete(self, messages, tools=None):  # pragma: no cover - never called
+                raise AssertionError("construction must not call the model")
+
+        container = Container()
+        llm = FakeLLM()
+
+        turn = container.get_run_agent_turn(llm=llm)
+
+        assert isinstance(turn, RunAgentTurn)
+        assert isinstance(container.turn_recorder, NullTurnRecorder)
+        assert turn._recorder is container.turn_recorder
+        assert turn._llm is llm
+        registry = turn._propose_registry_for(user_request="lend", turn_id="t-1")
+        assert isinstance(registry, ToolRegistry)
+        assert registry.mode("create_loan").value == "propose"
+
+    def test_default_llm_is_the_openrouter_client_built_from_settings(self, monkeypatch):
+        from loan_manager.container import Container
+        from loan_manager.infrastructure.llm import settings as llm_settings
+        from loan_manager.infrastructure.llm.openai_compat_client import OpenAICompatClient
+
+        fake_settings = llm_settings.LLMSettings(
+            base_url="https://openrouter.ai/api/v1", model="m", api_key_env="KCH239_TEST_KEY",
+            temperature=0.1, max_steps=6, timeout_s=60,
+        )
+        monkeypatch.setattr(llm_settings, "load_llm_settings", lambda: fake_settings)
+        monkeypatch.setenv("KCH239_TEST_KEY", "not-a-real-key")
+
+        turn = Container().get_run_agent_turn()
+
+        assert isinstance(turn._llm, OpenAICompatClient)
+
+    def test_start_agent_conversation_is_wired(self):
+        from loan_manager.application.use_cases.agent.start_agent_conversation import (
+            StartAgentConversation,
+        )
+        from loan_manager.container import Container
+
+        assert isinstance(Container().get_start_agent_conversation(), StartAgentConversation)
