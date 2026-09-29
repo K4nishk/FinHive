@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 from loan_manager.infrastructure.database.session import DatabaseSession
 from loan_manager.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from loan_manager.infrastructure.recovery.recovery_service import RecoveryService
+from loan_manager.infrastructure.repositories.sqlalchemy_turn_recorder import (
+    SqlAlchemyTurnRecorder,
+)
 from loan_manager.infrastructure.recovery.backup_service import BackupService
 from loan_manager.infrastructure.security.key_provider import (
     load_keys,
@@ -19,10 +22,7 @@ from loan_manager.application.agent.llm_port import LLMPort
 from loan_manager.application.agent.tools.propose_tools import build_propose_registry
 from loan_manager.application.agent.tools.read_tools import build_read_registry
 from loan_manager.application.interfaces.clock import Clock, SystemClock
-from loan_manager.application.interfaces.turn_recorder import (
-    NullTurnRecorder,
-    TurnRecorder,
-)
+from loan_manager.application.interfaces.turn_recorder import TurnRecorder
 from loan_manager.application.use_cases.agent.run_agent_turn import RunAgentTurn
 from loan_manager.application.use_cases.agent.start_agent_conversation import (
     StartAgentConversation,
@@ -48,7 +48,7 @@ class Container:
         self.backup_service = BackupService()
         self.event_bus = EventBus()
         self.clock: Clock = SystemClock()
-        self.turn_recorder: TurnRecorder = NullTurnRecorder()
+        self.turn_recorder: TurnRecorder = SqlAlchemyTurnRecorder(DatabaseSession.get_session)
         self._key_ring: KeyRing | None = None
 
     def get_uow(self) -> SqlAlchemyUnitOfWork:

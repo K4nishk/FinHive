@@ -1,7 +1,11 @@
 """KCH-239: where a finished agent turn is handed for the audit/replay trail.
 
-`NullTurnRecorder` is the only implementation today (the Container wires it);
-a persisting recorder is a later issue (KCH-240). `TurnRecord.user_text` is
+`infrastructure/repositories/sqlalchemy_turn_recorder.py`'s
+`SqlAlchemyTurnRecorder` is the wired implementation (KCH-240);
+`NullTurnRecorder` remains for tests and construction without a database.
+`record()` MUST NEVER RAISE: a lost audit row must not fail the user's
+answer, so an implementation swallows and counts its own failures.
+`TurnRecord.user_text` is
 what the user TYPED, and the text of the FINAL event in `events` is the
 answer REHYDRATED (real names, rupee amounts): both are NPI, so any
 implementation that persists them must encrypt them at rest (ARB D-15) -- the
@@ -27,9 +31,12 @@ class TurnRecord:
     step_count: int
     events: tuple[TraceEvent, ...]
     completions: tuple[Completion, ...]
+    latency_ms: int | None = None
 
 
 class TurnRecorder(Protocol):
+    """`record()` must never raise (see the module docstring)."""
+
     def record(self, record: TurnRecord) -> None: ...
 
 

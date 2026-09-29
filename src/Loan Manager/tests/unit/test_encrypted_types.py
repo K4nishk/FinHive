@@ -20,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from loan_manager.infrastructure.database.encrypted_types import (
     EncryptedDecimal,
+    EncryptedJSON,
     EncryptedRupees,
     EncryptedString,
 )
@@ -343,3 +344,39 @@ class TestNoActiveKey:
         set_active_key_ring(None)
         with pytest.raises(KeyConfigurationError):
             EncryptedDecimal().process_bind_param(Decimal("1.00"), None)
+
+
+class TestEncryptedJSON:
+    """KCH-240: whole-blob JSON encryption for `agent_turns`."""
+
+    def test_none_passes_through_both_ways(self):
+        assert EncryptedJSON().process_bind_param(None, None) is None
+        assert EncryptedJSON().process_result_value(None, None) is None
+
+    def test_nested_value_round_trips(self):
+        value = {"events": [{"kind": "final", "text": "Anil Kumar", "payload": None}], "n": 3}
+        blob = EncryptedJSON().process_bind_param(value, None)
+        assert isinstance(blob, bytes) and b"Anil" not in blob
+        assert EncryptedJSON().process_result_value(blob, None) == value
+
+    def test_same_value_encrypted_twice_yields_different_ciphertext(self):
+        first = EncryptedJSON().process_bind_param({"a": 1}, None)
+        second = EncryptedJSON().process_bind_param({"a": 1}, None)
+        assert first != second
+
+    def test_float_is_rejected(self):
+        with pytest.raises(TypeError):
+            EncryptedJSON().process_bind_param({"cost": 0.1}, None)
+
+    def test_tampered_blob_raises_decryption_error(self):
+        blob = bytearray(EncryptedJSON().process_bind_param({"a": 1}, None))
+        blob[-1] ^= 0xFF
+        with pytest.raises(DecryptionError):
+            EncryptedJSON().process_result_value(bytes(blob), None)
+
+    def test_reads_a_row_written_under_an_older_key(self):
+        old = KeyRing(current_version=1, masters={1: b"\x99" * 32})
+        set_active_key_ring(old)
+        blob = EncryptedJSON().process_bind_param({"a": 1}, None)
+        set_active_key_ring(KeyRing(current_version=2, masters={1: b"\x99" * 32, 2: b"\x11" * 32}))
+        assert EncryptedJSON().process_result_value(blob, None) == {"a": 1}

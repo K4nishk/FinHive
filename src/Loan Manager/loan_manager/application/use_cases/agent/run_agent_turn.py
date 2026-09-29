@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -231,12 +232,14 @@ class RunAgentTurn:
         *,
         recorder: TurnRecorder | None = None,
         new_id: Callable[[], str] = _default_new_id,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._llm = llm
         self._read_registry = read_registry
         self._propose_registry_for = propose_registry_for
         self._recorder: TurnRecorder = recorder or NullTurnRecorder()
         self._new_id = new_id
+        self._monotonic = monotonic
         self._tools = tool_schemas()
 
     def execute(
@@ -245,6 +248,7 @@ class RunAgentTurn:
         user_text: str,
         emit: Callable[[TraceEvent], None] = _noop,
     ) -> TurnResult:
+        t0 = self._monotonic()
         turn = _Turn(turn_id=self._new_id(), user_text=user_text)
 
         def emit_event(event: TraceEvent) -> None:
@@ -278,6 +282,7 @@ class RunAgentTurn:
                 step_count=turn.step,
                 events=tuple(turn.events),
                 completions=tuple(turn.completions),
+                latency_ms=int((self._monotonic() - t0) * 1000),
             )
         )
         return TurnResult(outcome, text, turn.turn_id, turn.step)
