@@ -5,6 +5,7 @@ from loan_manager.presentation.tabs.view_tab import ViewTab
 from loan_manager.presentation.tabs.calculator_tab import CalculatorTab
 from loan_manager.presentation.tabs.pending_approval_tab import PendingApprovalTab
 from loan_manager.presentation.tabs.settings_tab import SettingsTab
+from loan_manager.presentation.tabs.ask_finhive_tab import AskFinHiveTab
 from loan_manager.presentation.themes.theme_manager import ThemeManager
 
 
@@ -22,15 +23,26 @@ class MainWindow(QMainWindow):
         self._calc_tab = CalculatorTab(container, self)
         self._approval_tab = PendingApprovalTab(container, self)
         self._settings_tab = SettingsTab(container, theme_manager, self)
+        self._ask_tab = AskFinHiveTab(container, theme_manager, self)
 
         self._tabs.addTab(self._entry_tab, "Entry")
         self._tabs.addTab(self._view_tab, "View")
         self._tabs.addTab(self._calc_tab, "Calculator")
         self._tabs.addTab(self._approval_tab, "Pending Approval")
+        self._tabs.addTab(self._ask_tab, "Ask FinHive")
         self._tabs.addTab(self._settings_tab, "Settings")
+        self._ask_tab.proposals_queued.connect(self._on_proposals_queued)
 
         self.setCentralWidget(self._tabs)
         self.setStatusBar(QStatusBar())
 
     def show_status(self, message: str, timeout: int = 5000) -> None:
         self.statusBar().showMessage(message, timeout)
+
+    def _on_proposals_queued(self, count: int) -> None:
+        self._approval_tab.refresh()
+        self.show_status(f"Ask FinHive queued {count} draft proposal(s) in Pending Approval")
+
+    def closeEvent(self, event) -> None:
+        self._ask_tab.shutdown()
+        super().closeEvent(event)
