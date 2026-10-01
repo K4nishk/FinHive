@@ -13,5 +13,10 @@
     "proposal": "#e2b04a",
     "final": "#ffffff",
     "error": "#e26a6a"
+  },
+  "badge_colours": {
+    "AGENT":    {"background": "#5b2a86", "text": "#FFFFFF", "bold": true},
+    "FORM":     {"background": "#1f4e5f", "text": "#FFFFFF", "bold": true},
+    "CONFLICT": {"background": "#8a5300", "text": "#FFFFFF", "bold": true}
   }
 }

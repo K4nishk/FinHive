@@ -38,5 +38,15 @@ class ThemeManager:
         return colour if colour.isValid() else None
 
     @classmethod
+    def get_badge_colour(cls, key: str) -> dict:
+        """KCH-245: colours for the approvals tab's AGENT/FORM/CONFLICT
+        badges. Falls back to `get_status_colour("")`'s own unknown-key
+        default (grey) rather than a second literal here, so there is one
+        place that defines "no colour configured for this key"."""
+        return cls._current_config.get("badge_colours", {}).get(
+            key, cls.get_status_colour("")
+        )
+
+    @classmethod
     def available_themes(cls) -> list[str]:
         return ["dark", "light"]
