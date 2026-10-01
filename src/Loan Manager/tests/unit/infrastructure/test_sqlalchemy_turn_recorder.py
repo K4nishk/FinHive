@@ -7,6 +7,7 @@ database). The on-disk / WAL scan lives in
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -153,6 +154,55 @@ def test_raw_columns_are_ciphertext_bytes(recorder, engine) -> None:
             assert needle not in blob
 
 
+def test_eval_scores_persisted_encrypted_with_grounding_shape(recorder, factory, engine) -> None:
+    recorder.record(_record())
+    row = _row(factory)
+    assert row.eval_scores == {
+        "grounding_version": "1", "faithfulness_proxy": "1.0000", "facts_total": 0,
+        "facts_unsupported": 0, "unsupported_kinds": [], "raw_money_leak": False,
+        "context_precision_proxy": None, "trace_relevancy_proxy": None,
+    }
+    with engine.connect() as conn:
+        raw = conn.exec_driver_sql("SELECT eval_scores_ct FROM agent_turns").scalar_one()
+    assert isinstance(raw, bytes) and b"faithfulness" not in raw
+
+
+def test_eval_scores_count_unsupported_facts_from_this_turn(recorder, factory) -> None:
+    done = _completion(content="2 loans: 2026_03_004 and 2026_03_099", finish="stop")
+    recorder.record(_record(completions=(done,)))
+    scores = _row(factory).eval_scores
+    assert (scores["facts_total"], scores["facts_unsupported"]) == (3, 2)
+    assert scores["faithfulness_proxy"] == "0.3333"
+    assert scores["unsupported_kinds"] == ["count", "ref_id"]
+
+
+def test_scoring_bug_leaves_eval_scores_none_but_writes_the_row(
+    recorder, factory, monkeypatch, caplog
+) -> None:
+    import loan_manager.infrastructure.repositories.sqlalchemy_turn_recorder as mod
+
+    def boom(events, completions):
+        raise KeyError("Anil Kumar")
+
+    monkeypatch.setattr(mod, "production_scores", boom)
+    with caplog.at_level(logging.WARNING):
+        recorder.record(_record())
+    row = _row(factory)
+    assert row.eval_scores is None and row.user_message == USER_TEXT
+    assert recorder.failure_count == 0
+    assert "KeyError" in caplog.text and "Anil" not in caplog.text
+
+
+def test_blocked_plaintext_turn_records_raw_money_leak(recorder, factory) -> None:
+    leaked = _completion(content="Anil Kumar owes ₹1,50,000", finish="stop")
+    base = _record(completions=(leaked,))
+    recorder.record(TurnRecord(**{**base.__dict__, "outcome": TurnOutcome.BLOCKED_PLAINTEXT}))
+    row = _row(factory)
+    assert row.outcome == "blocked_plaintext"
+    assert row.eval_scores["raw_money_leak"] is True
+    assert "150000" not in json.dumps(row.eval_scores)
+
+
 def test_recorder_failure_is_swallowed_counted_and_logged_without_npi(caplog, factory) -> None:
     def broken():
         raise OperationalError("INSERT ...", {}, Exception("disk I/O error near Anil Kumar"))
@@ -288,3 +338,28 @@ def test_create_all_adds_agent_turns_to_a_pre_240_db_without_touching_loans(tmp_
     with eng.connect() as conn:
         assert conn.execute(text("SELECT last_order FROM report_meta")).scalar_one() == 7
     eng.dispose()
+
+
+def test_a_resolve_entity_turn_is_recorded_despite_its_float_score(recorder, factory) -> None:
+    """Regression (found by KCH-248): resolve_entity returns `score` as a
+    float, encrypt_json rejects floats, so every turn that resolved a name was
+    silently dropped (failure_count += 1). Scores are not money; they are
+    stored as their repr text."""
+    resolve = TraceEvent(
+        TraceKind.OBSERVATION, 1, 6, tool="resolve_entity",
+        payload={"ok": True, "status": "resolved",
+                 "candidates": [{"field": "borrower_group", "value": "G001", "rank": 1,
+                                 "score": 0.912}]},
+    )
+    base = _record()
+    record = TurnRecord(
+        conversation_id=base.conversation_id, turn_id=base.turn_id,
+        prompt_version=base.prompt_version, user_text=base.user_text,
+        outcome=base.outcome, step_count=base.step_count,
+        events=(resolve, *base.events), completions=base.completions,
+        latency_ms=base.latency_ms,
+    )
+    recorder.record(record)
+    assert recorder.failure_count == 0
+    stored = _row(factory).react_trace["events"][0]["payload"]["candidates"][0]["score"]
+    assert stored == "0.912"

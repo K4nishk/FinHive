@@ -13,6 +13,12 @@ not fail the user's answer. Failures are counted in `failure_count` and
 logged as the exception CLASS NAME only -- `str(exc)` and the record can
 carry names.
 
+`eval_scores_ct` (KCH-250) holds the grounding proxies of `application/agent/
+grounding.py`: `faithfulness_proxy` and `raw_money_leak` only; the two proxies
+that need ground truth are None in production. Scoring is best-effort and
+caught on its own: a scoring bug yields `eval_scores=None`, the row is still
+written and `failure_count` is untouched.
+
 Deliberately its own session, not `SqlAlchemyUnitOfWork`: a turn row is not
 part of any loan/report transaction.
 """
@@ -27,6 +33,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from loan_manager.application.agent.grounding import production_scores
 from loan_manager.application.agent.llm_port import Completion
 from loan_manager.application.agent.trace import TraceEvent
 from loan_manager.application.interfaces.turn_recorder import TurnRecord
@@ -36,6 +43,18 @@ from loan_manager.infrastructure.security.key_provider import active_key_version
 logger = logging.getLogger(__name__)
 
 
+def _no_floats(value: Any) -> Any:
+    # encrypt_json rejects floats. Money is Decimal end to end, so a float in a
+    # payload is a score or ratio (resolve_entity's `score`); keep its text.
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _no_floats(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_no_floats(v) for v in value]
+    return value
+
+
 def _event_json(event: TraceEvent) -> dict[str, Any]:
     return {
         "kind": event.kind.value,
@@ -43,7 +62,7 @@ def _event_json(event: TraceEvent) -> dict[str, Any]:
         "max_steps": event.max_steps,
         "text": event.text,
         "tool": event.tool,
-        "payload": event.payload,
+        "payload": _no_floats(event.payload),
         "outcome": event.outcome.value if event.outcome is not None else None,
     }
 
@@ -115,6 +134,14 @@ class SqlAlchemyTurnRecorder:
                 with contextlib.suppress(Exception):
                     session.close()
 
+    @staticmethod
+    def _eval_scores(record: TurnRecord) -> dict[str, Any] | None:
+        try:
+            return production_scores(record.events, record.completions)
+        except Exception as exc:  # noqa: BLE001 - scoring must never lose the row
+            logger.warning("agent turn not scored: %s", type(exc).__name__)
+            return None
+
     def _row(self, record: TurnRecord) -> AgentTurnModel:
         completions = record.completions
         last = completions[-1] if completions else None
@@ -136,4 +163,5 @@ class SqlAlchemyTurnRecorder:
             outcome=record.outcome.value,
             step_count=record.step_count,
             finish_reason=last.finish_reason if last else None,
+            eval_scores=self._eval_scores(record),
         )
