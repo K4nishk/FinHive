@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
@@ -25,6 +27,15 @@ class ThemeManager:
         return cls._current_config.get("status_colours", {}).get(
             status, {"background": "#888888", "text": "#ffffff", "bold": False}
         )
+
+    @classmethod
+    def get_trace_colour(cls, kind: str) -> QColor | None:
+        """Ask FinHive trace-row colour from the theme config; None if unset."""
+        value = cls._current_config.get("trace_colours", {}).get(kind)
+        if not value:
+            return None
+        colour = QColor(value)
+        return colour if colour.isValid() else None
 
     @classmethod
     def get_badge_colour(cls, key: str) -> dict:

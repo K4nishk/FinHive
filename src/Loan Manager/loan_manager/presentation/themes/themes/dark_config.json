@@ -6,6 +6,14 @@
     "Pending": {"background": "#804001", "text": "#FFFFFF", "bold": true},
     "Paidoff": {"background": "#022a52", "text": "#FFFFFF", "bold": true}
   },
+  "trace_colours": {
+    "thought": "#bbbbbb",
+    "action": "#4a90e2",
+    "observation": "#7fc8a9",
+    "proposal": "#e2b04a",
+    "final": "#ffffff",
+    "error": "#e26a6a"
+  },
   "badge_colours": {
     "AGENT":    {"background": "#5b2a86", "text": "#FFFFFF", "bold": true},
     "FORM":     {"background": "#1f4e5f", "text": "#FFFFFF", "bold": true},

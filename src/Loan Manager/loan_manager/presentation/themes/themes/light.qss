@@ -358,3 +358,49 @@ QTreeWidget::item:selected {
 QFormLayout {
     background-color: transparent;
 }
+
+/* KCH-241 Ask FinHive */
+QTreeView {
+    background-color: #ffffff;
+    color: #333333;
+    border: 1px solid #cccccc;
+}
+
+QTreeView::item:selected {
+    background-color: #2196f3;
+    color: #ffffff;
+}
+
+QTextBrowser, QPlainTextEdit {
+    background-color: #ffffff;
+    color: #333333;
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+}
+
+QSplitter::handle {
+    background-color: #cccccc;
+}
+
+QProgressBar {
+    background-color: #f0f0f0;
+    color: #333333;
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background-color: #2196f3;
+}
+
+QLabel#askFinhiveNote {
+    color: #666666;
+    font-size: 12px;
+}
+
+QLabel#askFinhiveAnswer {
+    color: #333333;
+    font-size: 14px;
+    font-weight: bold;
+}

@@ -77,3 +77,46 @@ def test_initialize_honours_db_path(tmp_path: Path, _reset_database_session) -> 
         assert mode == "wal"
     finally:
         session.close()
+
+
+def test_worker_thread_reads_while_main_thread_holds_write(tmp_path: Path) -> None:
+    """KCH-241: Ask FinHive reads the ledger from a QThread while the UI thread
+    may be mid-write. In WAL a reader never blocks on the writer; in a rollback
+    journal the read would raise `database is locked` (or hang to the timeout).
+    """
+    import threading
+
+    from sqlalchemy import text
+
+    engine = create_sqlite_engine(tmp_path / "wal_threads.db")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)"))
+            conn.execute(text("INSERT INTO t (v) VALUES ('committed')"))
+
+        outcome: dict[str, object] = {}
+
+        def reader() -> None:
+            try:
+                with engine.connect() as conn:
+                    outcome["rows"] = conn.execute(text("SELECT v FROM t")).scalars().all()
+            except Exception as exc:  # noqa: BLE001 - reported through the assert below
+                outcome["error"] = type(exc).__name__
+
+        writer = engine.connect()
+        try:
+            # EXCLUSIVE is the strongest write lock: in a rollback journal it shuts
+            # every reader out; in WAL it degrades to a plain write lock.
+            writer.exec_driver_sql("BEGIN EXCLUSIVE")
+            writer.execute(text("INSERT INTO t (v) VALUES ('uncommitted')"))
+            thread = threading.Thread(target=reader)
+            thread.start()
+            thread.join(timeout=3)
+            assert not thread.is_alive(), "reader blocked behind the open write transaction"
+        finally:
+            writer.rollback()
+            writer.close()
+
+        assert outcome == {"rows": ["committed"]}
+    finally:
+        engine.dispose()
