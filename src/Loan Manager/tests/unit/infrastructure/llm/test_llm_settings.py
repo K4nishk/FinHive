@@ -32,3 +32,23 @@ def test_out_of_range_temperature_rejected() -> None:
             max_steps=6,
             timeout_s=60,
         )
+
+
+def test_missing_llm_block_is_a_config_error_not_a_key_error(tmp_path) -> None:
+    """An MVP1 settings.json kept through a local theme edit has no "llm"
+    block. That must surface as LLMConfigError (the tab's "not configured"
+    text), not a KeyError the worker can only report as "something went wrong"."""
+    from loan_manager.application.agent.llm_port import LLMConfigError
+
+    path = tmp_path / "settings.json"
+    path.write_text('{"theme": "dark", "custom_colours": {}}')
+
+    with pytest.raises(LLMConfigError, match="llm"):
+        load_llm_settings(path)
+
+
+def test_missing_settings_file_is_a_config_error(tmp_path) -> None:
+    from loan_manager.application.agent.llm_port import LLMConfigError
+
+    with pytest.raises(LLMConfigError, match="settings"):
+        load_llm_settings(tmp_path / "absent.json")

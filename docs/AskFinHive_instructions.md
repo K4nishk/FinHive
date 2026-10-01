@@ -317,7 +317,7 @@ startup and stops, leaving your ledger as it was.
 | "Cannot start Loan Manager … created before encryption at rest" | Your real ledger has not been migrated yet — follow §8, or launch with `FINHIVE_DB_PATH` set to the demo (§4). |
 | A message about the **master key** at startup | `FINHIVE_KEY_VERSION` / `FINHIVE_MASTER_KEY_V1` are not visible to the app. Windows: `setx` only reaches *new* windows — open a fresh one. Also check the key matches the one the database was encrypted with. |
 | "The AI service is not configured… OPENROUTER_API_KEY…" | Set `OPENROUTER_API_KEY` (§3), then **restart** the app. |
-| Every question ends in "Something went wrong" straight away | Your `data/settings.json` is missing the `"llm"` block — usually a local theme edit kept the old file. Run the `git stash` / `git pull` / `git stash pop` from §0. |
+| "Not configured" even though `OPENROUTER_API_KEY` is set | Your `data/settings.json` is missing the `"llm"` block — usually a local theme edit kept the old file. Run the `git stash` / `git pull` / `git stash pop` from §0, then restart. |
 | The demo opened your real ledger | `FINHIVE_DB_PATH` was not set in the window you launched from (or you double-clicked the launcher). Use §5 from the same window as §4. |
 | A question takes a long time | Each model call can take up to 60 s. There is no cancel button yet; wait, or close the app. |
 | "I stopped before sending the next request…" | The privacy check found a name or amount it could not mask. Rephrase without the unusual spelling. |
