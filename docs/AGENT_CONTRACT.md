@@ -14,10 +14,13 @@ implementing a `KCH-*` Linear issue in this repository.
 > deleted. The CLI gate had already stopped working when the free tier ended.
 > **A gate that did not run is a failure, never a pass.**
 >
-> The review gate is now the `reviewer` subagent plus the human, against the
-> checklist in the **`build-issue` skill** (`.claude/skills/build-issue/SKILL.md`).
-> Everything else in this contract — branch, implement with tests, bounded fix
-> cycles, escalate rather than loop, never merge — still stands.
+> The review gate is now the **`verify-change` skill** (self-review checklist plus
+> CI-parity gates) and the human. An **Opus reviewer** is added only for
+> security-critical changes, with **one** fix cycle before escalating to the owner —
+> see *Agent and model policy* in `CLAUDE.md` (owner decision 2026-10-01). Everything
+> else in this contract — branch, implement with tests, escalate rather than loop,
+> never merge — still stands; the two-cycle limit below applies to the historical
+> CodeRabbit loop only.
 >
 > The unattended orchestrator (`ops/orchestrator.sh`) and its CLI gate
 > (`ops/pr_gate.sh`), whose loop is described below, used CodeRabbit as the gate. Both
