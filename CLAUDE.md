@@ -6,14 +6,14 @@
 - **Active product**: Loan Manager **MVP1.1 — `Ask FinHive`**: a conversational agent
   tab added to the existing single-user PySide6 desktop app, as an extension of MVP1.
   Governed by `/docs/MVP1_1_ASK_FINHIVE.md`. MVP2 (web/Postgres) is **paused after
-  KCH-109**.
-- **Building a `KCH-*` issue? Invoke the `build-issue` skill first** — orchestrator
-  loop, role-to-model mapping, review gate, stacking and blocking rules, debt policy.
+  KCH-109**. Demo and onboarding: `/docs/AskFinHive_instructions.md`.
+- **Building a `KCH-*` issue? Invoke the `build-issue` skill first** — per-issue
+  workflow, when to plan or review with Opus, stacking and blocking rules, debt policy.
+- **Before any commit: run the `verify-change` skill** — CI-parity test commands,
+  see-it-fail-first, staging and secret scan, PR stacking.
 - **Writing, moving or reviewing Loan Manager code, touching the UI, or filing a Linear
   issue? Load the `loan-manager-conventions` skill** — layers in detail, DI, UI rules,
-  coding conventions, library constraints, repo map, Linear specifics. Kept out of
-  this file because it is injected into every task and every subagent, and most of
-  them need none of that.
+  coding conventions, library constraints, repo map, Linear specifics.
 - **Decisions**: `/output/Loan Manager/mvp2/ARB_DECISIONS.md` is LIVE and
   authoritative. Read the M1.1 block before any architectural choice — several
   decisions are conditional and one (D-17) is deliberately unresolved. The run_8
@@ -22,42 +22,43 @@
   `input/REQUIREMENTS.md` still says otherwise in places; run_8 superseded it (WIKI §16,
   CHG-001). Specify against `src/`, never against `input/`.
 - **Branch**: `development`. A PR is required; direct pushes are rejected.
-- **Agent contract**: `/docs/AGENT_CONTRACT.md`. CodeRabbit was removed (2026-09-25),
-  so the review gate is the `reviewer` subagent plus the human — see the `build-issue`
-  skill. The unattended loop that used it as a gate (`ops/orchestrator.sh`) was deleted
-  the same day. A gate that did not run is a failure, never a pass.
+- **Agent contract**: `/docs/AGENT_CONTRACT.md`. CodeRabbit was removed (2026-09-25).
+  A gate that did not run is a failure, never a pass — say so in the PR.
+
+## Agent and model policy (enforced — owner decision 2026-10-01)
+
+Token budget is shared across all of the owner's projects. MVP1.1 spent most of its
+budget on agent ceremony (≈1M tokens for one tab), not on code. Default to the
+cheapest path that ships correct code.
+
+1. **One Sonnet session per issue.** The same session reads the issue, plans, writes
+   code and tests, runs the gates, commits and opens the PR. No orchestrator fleet; no
+   separate tester or scribe agents; no parallel agents unless the owner asks.
+2. **Opus planner only when the plan is unclear** — the premise looks wrong, the change
+   crosses layers with more than one sane design, or ARB decisions conflict. A plan the
+   issue text already implies needs no planner.
+3. **Opus review only for security-critical changes**: encryption, keys or `_ct`
+   columns; the tokeniser or anything that sends data to an LLM; agent tool
+   permissions (the READ/PROPOSE gate, new PROPOSE tools); raw SQL or migrations;
+   anything touching the real `data/loans.db`. Everything else: self-review against
+   the `verify-change` checklist, CI, and the human.
+4. **At most one fix cycle** after an Opus review. Still failing → stop and ask the
+   owner; never a third cycle.
+5. **Timebox.** A component that has not converged after two attempts ships with its
+   limits written in the PR body as DEBT, or the owner cuts it.
+6. **Build the thinnest slice a user can see first.** Evals, telemetry, nightly CI and
+   spikes come after the owner has seen it working.
 
 ## Doctrines
 
-Three, always in force. Full application and measured figures: the `build-issue` skill.
-
-- **Ponytail** — stop at the first rung that holds: YAGNI → reuse → stdlib → native
-  → existing deps → minimal → necessary. **Rung 2 (reuse) is the default answer here.**
-  The data layer, `ReferenceIdService`, `StatusEngine`, `InterestCalculator`, the
-  `reports`/`report_records` batch and `finhive/db/` already exist; the original
-  MVP1.1 plan budgeted 14.5 days rebuilding them because it was written from
-  `input/REQUIREMENTS.md` instead of from `src/`.
-- **Caveman** — dense prose, exact identifiers. Compress the wording, never the code,
-  commands, paths or error strings. Report honest measurements, including ones that
-  cut against the thesis.
-- **RTK** — compress before it reaches a context. `rtk` is installed: `rtk test`,
-  `rtk err`, `rtk git diff`, `rtk read`. Never pipe raw output into a subagent prompt:
-  the failing lines, not the log; `file:line`, not the module. M0 measured a **122:1
-  context re-read ratio** — half the bill was agents re-reading this file. Never quote
-  a fixed RTK percentage; it is tree-dependent.
-
-## Model Tiers (cost-optimised)
-
-**Claude Code is the orchestrator: it delegates and does not implement.** Pick the
-cheapest model that can do the job. A reasoning model on a mechanical edit burns budget;
-Sonnet adjudicating a rule conflict returns a confident wrong answer.
-
-| Tier | Model | Use when |
-|---|---|---|
-| **Orchestration** | `claude-opus-5` | The interactive session: select, decompose, spawn, adjudicate, gate |
-| **Reasoning** | `claude-opus-4-6` | Planning, review, root-cause analysis, rule adjudication, mediation |
-| **Implementation** | `claude-sonnet-4-6` | Writing code, fixing bugs, test authoring, refactoring |
-| **Generation** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries |
+- **Ponytail** — stop at the first rung that holds: YAGNI → reuse → stdlib → native →
+  existing deps → minimal → necessary. **Rung 2 (reuse) is the default here**: the
+  data layer, `ReferenceIdService`, `StatusEngine`, `InterestCalculator`, the
+  `reports`/`report_records` batch and `finhive/db/` already exist.
+- **Caveman** — dense prose, exact identifiers. Never compress code, commands, paths
+  or error strings. Report honest measurements, including unflattering ones.
+- **RTK** — compress before it reaches a context (`rtk test`, `rtk err`,
+  `rtk git diff`). Pass failing lines, not logs; `file:line`, not modules.
 
 ## Architecture
 
@@ -94,8 +95,8 @@ These override any conflicting implementation. If code disagrees with these, the
   **and the derived financial values** `interest_amount`, `commission_amount`,
   `tds_amount`, `chq_amount`.
   Encryption happens at the **repository boundary only** — the domain entity and
-  every use case work in plaintext. Three repositories touch encrypted tables:
-  loan, history and report.
+  every use case work in plaintext. Repositories touching encrypted tables: loan,
+  history, report, and the agent turn recorder (`agent_turns`).
 - **The derived amounts are not optional.** `interest_rate` and `extension_period`
   stay plaintext (Decisions 13, 14), so a plaintext `interest_amount` solves for the
   principal: `amount = interest × 1200 / (rate × months)`. Leaving any one of the
@@ -109,37 +110,21 @@ These override any conflicting implementation. If code disagrees with these, the
   (ADR-2.4). Identity columns only.
 - **Names and amounts are tokenised before any LLM call** — ingress (the user's typed
   prompt) as well as egress. Data at rest is local, so inference is the only path
-  that leaves the machine (OQ-01 as amended).
+  that leaves the machine (OQ-01 as amended). Never send a raw amount or entity name.
 - Every repository query is **org-scoped**. `loans.org_id` is NOT NULL and UNIQUE is
   `(org_id, reference_id)`.
 
 ---
 
-## Testing Requirements
+## Testing (procedure: the `verify-change` skill)
 
 - **See it fail first.** A new or changed test counts only once you have watched it
-  fail *for the reason its name states*: break the property it guards (in a scratch
-  copy, never the real tree), run it, and read the failure message. Failing on a
-  `NameError`, `KeyError`, `ImportError` or config error is not that — neither is a
-  test that has only ever passed or skipped. KCH-230 found seven tests in this repo
-  that passed for the wrong reason or had never run anywhere, and three migrations
-  shipped unrunnable behind them.
-- **A skip is not a pass.** Say what ran. Run tests the way CI does — `pytest tests/unit`
-  with `lint-imports` on `PATH` (`PATH="$PWD/.venv_pg/bin:$PATH"`, absolute: the tests
-  run it from a temp dir, so a relative entry fails 8 of them) — or the tests that skip locally are
-  exactly the ones that fail in CI.
-- **Coverage target**: 85% minimum. Domain services: 100%.
-- Run: `cd "src/Loan Manager" && python -m pytest tests/ -v --cov=loan_manager`
-- **Unit** tests use in-memory SQLite (`sqlite:///:memory:`). **Integration** tests
-  (repository, migration, encryption) run against real Postgres and must SKIP — never
-  fail — when `TEST_DATABASE_URL` is unset, because CI runs whole test directories.
-- Point `TEST_DATABASE_URL` at a **dedicated, disposable** database — never the dev
-  database. The lane drops and recreates schemas; the dev ledger lives in `public`.
-- Do not assume CI blocks a merge: required checks live in the repo ruleset — verify
-  them there before relying on a red check to stop anything.
-- Every new use case has a test file. Every bug fix has a regression test that would
-  have caught it. No UI tests in prototype scope — verify UI changes manually or in
-  review. Run the full suite before any commit; never commit with failing tests.
+  fail for the reason its name states. A `NameError`/`ImportError` failure, or a test
+  that has only ever passed or skipped, does not count.
+- **A skip is not a pass.** Run tests the way CI does and say what ran.
+- **Coverage**: 85% minimum; domain services 100%. Every bug fix has a regression test.
+- Unit tests use in-memory SQLite. Integration tests use a **disposable** Postgres via
+  `TEST_DATABASE_URL` and must SKIP, never fail, when it is unset.
 
 ---
 
@@ -165,14 +150,9 @@ These override any conflicting implementation. If code disagrees with these, the
 - **Do not** make assumptions without evidence. Mark uncertain decisions as `[REVIEW REQUIRED]`.
 - **Do not** skip the stage-gate approval process. Every stage must STOP and await `PROCEED` or `PROCEED WITH MODIFICATIONS`.
 - **Do not** commit `.DS_Store`, `__pycache__/`, `.coverage`, `*.pyc`, or `data/loans.db` to git.
-- **Do not** `git add -A` / `git add .`. Stage named paths. `.DS_Store` is tracked, so a
-  blanket add sweeps it in. (`loans.db` was untracked and `*.db` ignored on 2026-09-25 —
-  this repo is public.) Review `git diff --cached --name-only` and scan the staged diff
-  for secrets before committing.
-- **Do not** send a raw amount or a raw entity name to an LLM. Tokenise first.
+- **Do not** `git add -A` / `git add .`. Stage named paths (see `verify-change`).
 - **Do not** read `loans.status` in agent tools — derive via `StatusEngine` at read;
   the persisted column is stale after a batch approve.
-- **Do not** add a blind index to any amount column.
 - **Do not** write a `_ct` column from anywhere but the repository layer.
 - **Do not** seed or fixture data with raw SQL `INSERT`s — go through the encrypting
   repository, or you produce a database the app cannot read.

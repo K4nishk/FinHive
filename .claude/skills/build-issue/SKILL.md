@@ -1,11 +1,12 @@
 ---
 name: build-issue
-description: Orchestrate one FinHive KCH-* Linear issue end to end — select, plan, implement, test, review, commit, stack a PR, comment on Linear and report RTK gain. Use when asked to build, implement, start or work an issue, to pick up the next issue, or when running the M1.1 Ask FinHive queue. Also use when deciding which model an agent should run on, whether an issue is blocked, or how to handle work found outside an issue's scope.
+description: Build one FinHive KCH-* Linear issue end to end in a single session — select, plan, implement, test, review, commit, stack a PR, comment on Linear and report RTK gain. Use when asked to build, implement, start or work an issue, to pick up the next issue, or when running the M1.1 Ask FinHive queue. Also use when deciding which model an agent should run on, whether an issue is blocked, or how to handle work found outside an issue's scope.
 ---
 
-# Build one issue — FinHive orchestrator contract
+# Build one issue — FinHive per-issue workflow
 
-**The interactive session is the orchestrator. It delegates and does not implement.**
+**One Sonnet session per issue builds it end to end** (CLAUDE.md, Agent and model
+policy). Opus is called in only for an unclear plan or a security-critical review.
 
 Scope: `docs/MVP1_1_ASK_FINHIVE.md`. Issues:
 `output/Loan Manager/mvp1.1/linear_import.csv`, row order = build order.
@@ -23,25 +24,19 @@ ruleset on `development` and `main`.
 
 ## Roles and models
 
-Pick the cheapest model that can do the job. Spawning a reasoning model for a
-mechanical edit burns budget for nothing; spawning Sonnet to adjudicate a rule
-conflict buys a confident wrong answer.
+Measured on MVP1.1: a planner + implementer + tester + reviewer + scribe fleet spent
+≈1M tokens on one UI tab, mostly agents cold-reading the same code. The policy below
+replaces it (owner decision 2026-10-01).
 
-| Role | Model | Does | Never |
-|---|---|---|---|
-| **Orchestrator** | `claude-opus-5` | Selects, decomposes, spawns, adjudicates, gates, writes the Linear comment | Writes product code |
-| **planner** | `claude-opus-4-6` | Reads the issue and the real files; produces the change list with `file:line` | Edits anything |
-| **reviewer** | `claude-opus-4-6` | Adversarial review against the gate below | Fixes what it finds |
-| **implementer** | `claude-sonnet-4-6` | Writes code and tests to the planner's list | Re-plans, widens scope |
-| **tester** | `claude-sonnet-4-6` | Runs suites, writes regressions, pastes real output | Marks a failing suite green |
-| **scribe** | `claude-haiku-4-5-20251001` | Commit messages, PR bodies, Linear comments, doc summaries | Decides anything |
+| Role | Model | When |
+|---|---|---|
+| **Builder** — reads, plans, codes, tests, commits, writes the PR and Linear note | Sonnet (the session itself) | Every issue |
+| **Planner** — change list with `file:line` | Opus | **Only** when the plan is unclear: suspect premise, more than one sane cross-layer design, or conflicting ARB decisions |
+| **Reviewer** — adversarial review | Opus | **Only** for security-critical changes: encryption/keys/`_ct`, tokeniser or anything sent to an LLM, agent tool permissions (READ/PROPOSE), raw SQL/migrations, real `data/loans.db` |
 
-One planner and one reviewer per issue. Implementers may run in parallel **only**
-across files that do not import each other.
-
-**Skip the planner** on a genuinely mechanical issue (a rename, a config line, a
-one-file fix) where the change list is obvious from the issue text. Spawning one to
-restate the ticket is the waste Ponytail rejects.
+- No separate tester or scribe agents; no parallel agents unless the owner asks.
+- After an Opus review: **at most one** fix cycle, then stop and ask the owner.
+- Brief any Opus agent with `file:line` and the diff, never the repo.
 
 ---
 
@@ -112,12 +107,12 @@ already did exactly that, with 21 tests. The real gap was an integration blocker
 issue covered. **If the premise is wrong, stop and say so.** Do not improvise, and
 do not build the thing anyway.
 
-### 3. Plan — `planner`
+### 3. Plan — yourself; Opus planner only if unclear
 
 Ordered change list with `file:line`, the Ponytail rung, what is reused, and the
-acceptance test. If the issue's premise is wrong it says so and stops.
+acceptance test. If the issue's premise is wrong, say so and stop.
 
-### 4. Implement — `implementer`
+### 4. Implement
 
 On `feature/kch-NNN` branched from the stack tip.
 
@@ -125,32 +120,25 @@ On `feature/kch-NNN` branched from the stack tip.
 checkout that half-switches the tree is recoverable but costs a turn. Verify
 `git status` is clean before switching.
 
-### 5. Test — `tester`
+### 5. Verify — the `verify-change` skill, steps 1–4
 
-Full MVP1 suite plus the issue's own tests. **Real output pasted, never a summary of
-intent.** A suite that skips everything is not a passing suite — say what ran.
+Fail-first proof, CI-parity gates, self-review checklist. **Real output pasted, never
+a summary of intent.** A suite that skips everything is not a passing suite.
 
-### 6. Review — `reviewer`
+### 6. Review — Opus only if security-critical
 
-Adversarially, against the gate below. Findings return to the implementer for at
-most **two** cycles. A third means the issue is under-specified: stop, comment on
-Linear, escalate to the human.
+Brief the reviewer with what changed and what to attack, not the repo; tell it to
+verify the central claim independently. One fix cycle at most, then the owner decides.
+Not security-critical: your step-5 self-review is the review; the human reviews the PR.
 
-Brief the reviewer with what changed and what to attack, not with the whole repo.
-Tell it to verify the central claim independently — reviewers have caught claims
-that were true-sounding and wrong, including an acceptance criterion that was never
-implemented.
+### 7. Commit and stack — `verify-change` steps 5–6
 
-### 7. Commit and stack
-
-Scribe writes the message. **Stage explicitly — never `git add -A`**, which sweeps
-up the tracked `.DS_Store`. Scan the staged diff for secrets before
-committing. Open the PR against the branch below it, never `development` directly
-(it is protected; direct pushes are rejected).
+Stage named paths, scan, commit, open the PR **ready for review** against the branch
+below it (lowest open PR → `development`).
 
 ### 8. Comment on Linear
 
-Scribe posts, verbatim:
+Post (or write to `ops/linear/YYYYMMDD/kch-NNN.md`), verbatim:
 
 > Development and testing completed, awaiting PR review and merge.
 
@@ -173,33 +161,10 @@ say so rather than dressing it up.**
 
 ## Review gate
 
-A PR may open only when all of these hold, each proven by pasted output:
-
-- Full MVP1 suite green — `cd "src/Loan Manager" && rtk test python -m pytest tests/`
-  Postgres/crypto tests must **skip** cleanly when their dependency is absent, never
-  fail: CI runs whole test directories. Since 2026-09-25 the repo ruleset requires
-  `Fast gates`, `MVP1 regression` and `Postgres integration` on `development` and
-  `main`, so a red check blocks the merge. That is a backstop, not the gate: run
-  the suites here first
-- Run the lane the way CI does: `pytest tests/unit` needs `lint-imports` on `PATH`
-  (`PATH="$PWD/.venv_pg/bin:$PATH"` — absolute; the tests run it from a temp dir, so a
-  relative entry fails 8 of them), or `test_import_boundaries` silently skips. A test
-  that only ever skips locally has never been checked by anyone
-- `TEST_DATABASE_URL` points at a disposable database, never the dev one
-- `rtk err ruff check <changed files>` clean
-- The issue's own acceptance test exists and **fails without the change**
-- No layer violation: `domain/` imports no `infrastructure`/`presentation`/PySide6/
-  sqlalchemy; `application/agent/` imports no PySide6, sqlalchemy, sqlite3 or
-  mutating use case
-- No raw SQL outside `migrations/` (ARB D-1a keeps D-1's parameterised-only rule)
-- No `float` for money; no `datetime.utcnow()`; no hardcoded hex in `presentation/`;
-  no `QTableWidget` for new data tables
-- **No plaintext NPI** — a direct `SELECT` over changed tables shows no borrower or
-  depositor name, group, or amount (principal *or* derived) in clear (ARB D-15)
-- **No blind index on any amount column** — amounts cluster on round numbers, so a
-  deterministic index over them is reversible by frequency analysis without the key
-  (ADR-2.4, KCH-99)
-- No secret, key or token added to a tracked file
+A PR may open only when every step of the `verify-change` skill has passed with
+pasted evidence, and the issue's own acceptance test exists and **fails without the
+change**. The checklist (layers, raw SQL, money, NPI at rest, amount blind index,
+secrets) lives there, once.
 
 ---
 
