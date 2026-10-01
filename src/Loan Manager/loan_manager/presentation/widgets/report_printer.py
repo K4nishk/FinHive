@@ -5,7 +5,7 @@ Contains:
 - ApprovalReportPrinter: prints borrower-centric grouped approval reports
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -36,6 +36,15 @@ def _make_font(size: int, bold: bool = False) -> QFont:
     f = QFont("Arial", size)
     f.setBold(bold)
     return f
+
+
+def _optional_date_text(value) -> str:
+    """KCH-245 review cycle 1, m5: pure cell-text helper for an optional
+    date (`date | None`), pulled out of `_paint` so its "N/A" fallback --
+    for a CREATE-mode record's `giving_date=None` (KCH-242), same as
+    `due_date`/`post_extension_*` -- is testable directly, not only through
+    a full `_paint()` run against a real QPrinter."""
+    return str(value) if value else "N/A"
 
 
 def _setup_printer(printer: QPrinter, landscape: bool = False) -> None:
@@ -481,7 +490,12 @@ class ApprovalReportPrinter:
         sorted_borrowers = sorted(borrower_groups.keys(), key=str.lower)
 
         for name in sorted_borrowers:
-            borrower_groups[name].sort(key=lambda r: r.giving_date)
+            # KCH-245: a CREATE-mode record (KCH-242) has giving_date=None
+            # until approval mints a loan -- sorting by the bare field
+            # crashes (TypeError: NoneType < date) the moment any CREATE
+            # record reaches this printer. date.min sorts it first, same
+            # convention the rest of this module uses for "no date yet".
+            borrower_groups[name].sort(key=lambda r: r.giving_date or date.min)
 
         tp.total_pages = None
 
@@ -576,16 +590,10 @@ class ApprovalReportPrinter:
                 cells = [
                     _truncate(str(rec.amount), 0),
                     _truncate(rec.depositor_name or "Unknown", 1),
-                    _truncate(str(rec.giving_date), 2),
-                    _truncate(str(rec.due_date) if rec.due_date else "N/A", 3),
-                    _truncate(
-                        str(rec.post_extension_giving_date)
-                        if rec.post_extension_giving_date else "N/A", 4
-                    ),
-                    _truncate(
-                        str(rec.post_extension_due_date)
-                        if rec.post_extension_due_date else "N/A", 5
-                    ),
+                    _truncate(_optional_date_text(rec.giving_date), 2),
+                    _truncate(_optional_date_text(rec.due_date), 3),
+                    _truncate(_optional_date_text(rec.post_extension_giving_date), 4),
+                    _truncate(_optional_date_text(rec.post_extension_due_date), 5),
                     _truncate(str(rec.extension_period), 6),
                     _truncate(rec.extension_period_unit.value, 7),
                     _truncate(str(rec.interest_amount or 0), 8),

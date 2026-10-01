@@ -12,6 +12,9 @@ class IReportRepository(ABC):
     def get_all_pending(self) -> list[Report]: ...
 
     @abstractmethod
+    def get_recent_approved(self, limit: int) -> list[Report]: ...
+
+    @abstractmethod
     def save(self, report: Report) -> Report: ...
 
     @abstractmethod

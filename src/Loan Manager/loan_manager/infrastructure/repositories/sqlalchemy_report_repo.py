@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from loan_manager.domain.entities.report import Report, ReportRecord
 from loan_manager.domain.repositories.report_repository import IReportRepository
@@ -122,6 +122,24 @@ class SqlAlchemyReportRepository(IReportRepository):
                 seen.add(m.id)
                 unique.append(m)
         return [report_model_to_entity(m) for m in unique]
+
+    def get_recent_approved(self, limit: int) -> list[Report]:
+        """KCH-245: the Recently Approved list for the approvals tab's undo
+        panel. `selectinload`, not `joinedload` -- `joinedload` on a
+        one-to-many alongside `LIMIT` multiplies/truncates rows at the SQL
+        level (the classic collection+limit trap); `selectinload` issues a
+        second, separate `WHERE report_id IN (...)` query for `records`
+        after the limited `reports` query has already run, so `limit`
+        applies to REPORTS, not to the join's row count."""
+        models = (
+            self._session.query(ReportModel)
+            .options(selectinload(ReportModel.records))
+            .filter(ReportModel.status == ReportStatus.APPROVED.value)
+            .order_by(ReportModel.updated_at.desc(), ReportModel.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [report_model_to_entity(m) for m in models]
 
     def save(self, report: Report) -> Report:
         """Insert new report with its records."""

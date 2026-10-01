@@ -5,5 +5,10 @@
     "Overdue": {"background": "#f8d7da", "text": "#721c24", "bold": true},
     "Pending": {"background": "#fff3cd", "text": "#856404", "bold": true},
     "Paidoff": {"background": "#d6d8db", "text": "#383d41", "bold": true}
+  },
+  "badge_colours": {
+    "AGENT":    {"background": "#e2d6f5", "text": "#3a1d5c", "bold": true},
+    "FORM":     {"background": "#d3e8ee", "text": "#0f3a45", "bold": true},
+    "CONFLICT": {"background": "#ffe5b4", "text": "#7a4a00", "bold": true}
   }
 }
