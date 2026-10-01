@@ -280,7 +280,7 @@ ambiguous[]}, expected_facts, focus{}, must_not_call`; `fixture.py` (15 existing
 rows + undated-with-giving≤today, future-giving, `iyer chem` / `meera iyer`,
 `bg10`); `gen_expected.py`; `metrics.py`; `baseline.json`; markers `eval / llm /
 judge` in `pytest.ini`. **CI:** PR lane = recorded traces, zero network, must
-auto-skip when `GROQ_API_KEY` is unset because `mvp1-regression` runs all of
+auto-skip when `OPENROUTER_API_KEY` is unset because `mvp1-regression` runs all of
 `src/Loan Manager/tests/` as a required check; nightly = live 8b + optional judge.
 Assert faithfulness on raw tokenised output; assert task completion on the
 rehydrated render (ARD v2.0.0:971 `answer_contains: ['1,85,000']` predates

@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "source": "hand",
+    "prompt_version": "hand",
+    "model": "hand/eval",
+    "recorded_on": "2026-09-29"
+  },
+  "completions": [
+    {
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "name": "resolve_entity",
+          "arguments": "{\"text\": \"Q001\"}"
+        }
+      ],
+      "finish_reason": "tool_calls",
+      "model": "hand/eval",
+      "usage": {
+        "prompt_tokens": 500,
+        "completion_tokens": 20,
+        "latency_ms": 0.0,
+        "cost_usd": null,
+        "price_version": null
+      }
+    },
+    {
+      "content": "Q001 could mean B001 or B002. Which one do you mean?",
+      "tool_calls": [],
+      "finish_reason": "stop",
+      "model": "hand/eval",
+      "usage": {
+        "prompt_tokens": 700,
+        "completion_tokens": 15,
+        "latency_ms": 0.0,
+        "cost_usd": null,
+        "price_version": null
+      }
+    }
+  ]
+}

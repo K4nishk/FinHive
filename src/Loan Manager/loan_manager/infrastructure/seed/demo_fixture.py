@@ -209,6 +209,18 @@ def _build_demo_loans(raw: tuple[dict, ...]) -> tuple[FixtureLoan, ...]:
 
 DEMO_LOANS: tuple[FixtureLoan, ...] = _build_demo_loans(_RAW)
 
+
+def extend_fixture(extra_raw: tuple[dict, ...]) -> tuple[FixtureLoan, ...]:
+    """`DEMO_LOANS` plus `extra_raw` rows, refs continuing each year-month's
+    sequence after the demo rows (KCH-248: the eval fixture is the demo book
+    plus boundary rows, never a second copy of it). `DEMO_LOANS` itself is
+    left untouched -- `test_demo_fixture.py` pins its 27 rows."""
+    extended = _build_demo_loans(_RAW + tuple(extra_raw))
+    if extended[: len(DEMO_LOANS)] != DEMO_LOANS:
+        raise ValueError("extend_fixture must append: the demo rows' refs moved")
+    return extended
+
+
 # Active-loan counts (post-seed, via `ILoanRepository.get_all_active`) that
 # `test_demo_seed.py::checkpoints_reproduce` verifies against the seeded
 # database -- (field, filter_value, expected_count). Values were counted
