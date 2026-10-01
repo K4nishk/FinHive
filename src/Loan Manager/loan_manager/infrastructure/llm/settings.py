@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from loan_manager.application.agent.llm_port import LLMConfigError
 from loan_manager.config import SETTINGS_FILE
 
 
@@ -33,5 +34,13 @@ class LLMSettings(BaseModel):
 
 
 def load_llm_settings(path: Path = SETTINGS_FILE) -> LLMSettings:
-    data = json.loads(Path(path).read_text())
+    # A missing file or "llm" block (an MVP1 settings.json kept through a
+    # local edit) is a configuration gap, so it raises LLMConfigError and the
+    # tab shows its "not configured" text instead of a generic failure.
+    try:
+        data = json.loads(Path(path).read_text())
+    except FileNotFoundError as exc:
+        raise LLMConfigError(f"settings file not found: {path}") from exc
+    if "llm" not in data:
+        raise LLMConfigError(f'no "llm" block in {path}; update it from the repo copy')
     return LLMSettings(**data["llm"])
