@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
         self._entry_tab = EntryTab(container, self)
         self._view_tab = ViewTab(container, theme_manager, self)
         self._calc_tab = CalculatorTab(container, self)
-        self._approval_tab = PendingApprovalTab(container, self)
+        self._approval_tab = PendingApprovalTab(container, theme_manager, self)
         self._settings_tab = SettingsTab(container, theme_manager, self)
 
         self._tabs.addTab(self._entry_tab, "Entry")

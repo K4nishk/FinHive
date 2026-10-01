@@ -625,3 +625,118 @@ class TestGetPendingReports:
         pending = get_reports_uc.execute()
         assert len(pending) == 1
         assert pending[0].report_mode == CalculationMode.PAIDOFF
+
+    @staticmethod
+    def _monthly_record_dto(ref_id: str) -> ReportRecordDTO:
+        return ReportRecordDTO(
+            id=None,
+            report_id="placeholder",
+            reference_id=ref_id,
+            borrower_name="B1",
+            depositor_name="D1",
+            depositor_group=None,
+            amount=10000,
+            giving_date=date(2026, 1, 1),
+            due_date=date(2026, 4, 1),
+            extension_period=3,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("12"),
+            commission_rate=Decimal("6"),
+            tds_flag=False,
+            interest_amount=Decimal("300.00"),
+            commission_amount=Decimal("150.00"),
+            tds_amount=Decimal("0.00"),
+            chq_amount=Decimal("300.00"),
+            post_extension_giving_date=date(2026, 4, 1),
+            post_extension_due_date=date(2026, 7, 1),
+            paidoff_date=None,
+        )
+
+    def test_conflict_ref_ids_flags_a_reference_id_shared_by_two_pending_reports(
+        self, uow_factory, event_bus
+    ):
+        """KCH-245: two PENDING reports proposing the SAME loan must each
+        carry the other's shared reference_id in conflict_ref_ids -- the
+        approvals tab uses this to warn before either is approved. A third,
+        unrelated pending report must stay conflict-free."""
+        ref_service = ReferenceIdService()
+        create_uc = CreateLoan(uow_factory, ref_service, event_bus)
+        gen_uc = GenerateReport(uow_factory, event_bus)
+        get_reports_uc = GetPendingReports(uow_factory)
+
+        shared = create_uc.execute(LoanCreateDTO(
+            borrower_name="B1", borrower_group="G1", depositor_name="D1",
+            amount=10000, giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        ))
+        other = create_uc.execute(LoanCreateDTO(
+            borrower_name="B2", borrower_group="G2", depositor_name="D2",
+            amount=20000, giving_date=date(2026, 1, 1), due_date=date(2026, 4, 1),
+        ))
+
+        report_a = gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.MONTHLY,
+            records=[self._monthly_record_dto(shared.reference_id)],
+            actor=ReportActor.FORM,
+        ))
+        report_b = gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.MONTHLY,
+            records=[self._monthly_record_dto(shared.reference_id)],
+            actor=ReportActor.AGENT,
+            user_request="extend it again",
+            turn_id="turn-1",
+        ))
+        report_c = gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.MONTHLY,
+            records=[self._monthly_record_dto(other.reference_id)],
+            actor=ReportActor.FORM,
+        ))
+
+        pending = {r.report_id: r for r in get_reports_uc.execute()}
+
+        assert pending[report_a.report_id].conflict_ref_ids == [shared.reference_id]
+        assert pending[report_b.report_id].conflict_ref_ids == [shared.reference_id]
+        assert pending[report_c.report_id].conflict_ref_ids == []
+
+    def test_conflict_ref_ids_ignores_create_mode_none_references(self, uow_factory, event_bus):
+        """CREATE-mode records all carry reference_id=None until approval
+        (Report.__post_init__) -- two pending CREATE reports must never be
+        flagged as conflicting with each other over that shared None."""
+        gen_uc = GenerateReport(uow_factory, event_bus)
+        get_reports_uc = GetPendingReports(uow_factory)
+
+        create_record = ReportRecordDTO(
+            id=None,
+            report_id="placeholder",
+            reference_id=None,
+            borrower_name="new borrower",
+            depositor_name="depositor",
+            depositor_group=None,
+            amount=15000,
+            giving_date=None,
+            due_date=None,
+            extension_period=0,
+            extension_period_unit=ExtensionPeriodUnit.MONTHS,
+            interest_rate=Decimal("0"),
+            commission_rate=Decimal("0"),
+            tds_flag=False,
+            interest_amount=None,
+            commission_amount=None,
+            tds_amount=None,
+            chq_amount=None,
+            post_extension_giving_date=date(2026, 4, 10),
+            post_extension_due_date=date(2026, 7, 10),
+            paidoff_date=None,
+            borrower_group="new-group",
+            due_period=3,
+        )
+
+        gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.CREATE, records=[create_record], actor=ReportActor.FORM,
+        ))
+        gen_uc.execute(GenerateReportDTO(
+            mode=CalculationMode.CREATE, records=[create_record], actor=ReportActor.FORM,
+        ))
+
+        pending = get_reports_uc.execute()
+        assert len(pending) == 2
+        assert all(r.conflict_ref_ids == [] for r in pending)

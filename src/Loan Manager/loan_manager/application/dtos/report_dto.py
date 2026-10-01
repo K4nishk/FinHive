@@ -55,6 +55,12 @@ class ReportDTO(BaseModel):
     actor: ReportActor
     user_request: Optional[str] = None
     turn_id: Optional[str] = None
+    # KCH-245: reference_ids this report shares with ANOTHER pending report
+    # (computed by GetPendingReports, empty for GetRecentlyApprovedReports --
+    # a conflict is only meaningful while both reports are still PENDING).
+    # Defaulted, not required: every existing call site that builds a
+    # ReportDTO without this issue's conflict computation still works.
+    conflict_ref_ids: list[str] = []
 
     model_config = {"from_attributes": True}
 
