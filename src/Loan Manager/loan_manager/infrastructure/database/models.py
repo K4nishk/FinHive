@@ -4,13 +4,14 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary,
     Numeric, SmallInteger, String, UniqueConstraint, Index
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from loan_manager.infrastructure.database.encrypted_types import (
     EncryptedDecimal,
+    EncryptedJSON,
     EncryptedRupees,
     EncryptedString,
 )
@@ -124,8 +125,10 @@ class ReportModel(Base):
     # column. NULL for a FORM report, which has no such prompt.
     user_request: Mapped[Optional[str]] = mapped_column("user_request_ct", EncryptedString(), nullable=True)
     # Correlates an AGENT report back to the conversation turn that proposed
-    # it (KCH-240 wires the FK/index; this column alone carries no
-    # referential constraint yet -- see DEBT).
+    # it: joins `agent_turns.id`. Deliberately NO FK (KCH-240 decision): the
+    # report commits mid-turn, before the turn row exists, and the recorder
+    # may drop a row; and `create_all` cannot ALTER an existing table to add
+    # one. No index until KCH-253 queries by it.
     turn_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -195,6 +198,45 @@ class ReportMetaModel(Base):
 
     report_date: Mapped[str] = mapped_column(String(8), primary_key=True)
     last_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class AgentTurnModel(Base):
+    """One Ask FinHive turn (KCH-240). Written only by
+    `SqlAlchemyTurnRecorder`.
+
+    Names follow migrations/0005 `agent_turns` where the storage model
+    agrees, with these SQLite-path divergences (Postgres 0006 converges
+    later): `user_message` is the ENCRYPTED `user_message_ct` (the user's
+    typed words are NPI); no `org_id`/`user_id` (single-user app, D-16);
+    token/cost/model are nullable (a provider may report no usage). The
+    whole trace (events + completions) is ONE encrypted blob: it carries
+    ref_ids, dates and possibly model-echoed names. No `_bidx`, no FK.
+    `cost_usd` is a canonical Decimal string, never float money.
+    """
+
+    __tablename__ = "agent_turns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    user_message: Mapped[str] = mapped_column("user_message_ct", EncryptedString(), nullable=False)
+    react_trace: Mapped[dict] = mapped_column("react_trace_ct", EncryptedJSON(), nullable=False)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    feedback: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    finish_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    eval_scores: Mapped[Optional[dict]] = mapped_column("eval_scores_ct", EncryptedJSON(), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("feedback IN ('up','down')", name="agent_turns_feedback_ck"),
+    )
 
 
 # Registers the before_insert/before_update mapper events that keep every

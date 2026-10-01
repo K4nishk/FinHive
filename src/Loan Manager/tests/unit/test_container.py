@@ -47,11 +47,13 @@ class TestEventBus:
 class TestAgentWiring:
     """KCH-239: construct only -- nothing here opens a database or a socket."""
 
-    def test_injected_llm_and_null_recorder(self):
+    def test_injected_llm_and_sql_recorder(self):
         from loan_manager.application.agent.tool_registry import ToolRegistry
-        from loan_manager.application.interfaces.turn_recorder import NullTurnRecorder
         from loan_manager.application.use_cases.agent.run_agent_turn import RunAgentTurn
         from loan_manager.container import Container
+        from loan_manager.infrastructure.repositories.sqlalchemy_turn_recorder import (
+            SqlAlchemyTurnRecorder,
+        )
 
         class FakeLLM:
             def complete(self, messages, tools=None):  # pragma: no cover - never called
@@ -63,7 +65,7 @@ class TestAgentWiring:
         turn = container.get_run_agent_turn(llm=llm)
 
         assert isinstance(turn, RunAgentTurn)
-        assert isinstance(container.turn_recorder, NullTurnRecorder)
+        assert isinstance(container.turn_recorder, SqlAlchemyTurnRecorder)
         assert turn._recorder is container.turn_recorder
         assert turn._llm is llm
         registry = turn._propose_registry_for(user_request="lend", turn_id="t-1")

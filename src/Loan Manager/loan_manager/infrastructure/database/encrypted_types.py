@@ -29,8 +29,10 @@ from finhive.db.encryption import (
     DecryptionError,
     decrypt_amount,
     decrypt_field,
+    decrypt_json,
     encrypt_amount,
     encrypt_field,
+    encrypt_json,
 )
 from loan_manager.infrastructure.security.key_provider import (
     active_key_data,
@@ -169,3 +171,29 @@ class EncryptedDecimal(TypeDecorator):
         if value is None:
             return None
         return _decrypt_with_any(decrypt_amount, value)
+
+
+class EncryptedJSON(TypeDecorator):
+    """Transparent whole-blob encryption for a variable-shape JSON value
+    (KCH-240: `agent_turns.react_trace_ct`, `eval_scores_ct`).
+
+    The whole structure is one AES-256-GCM blob via `encrypt_json`; nothing
+    inside it is ever a queryable column. `None` passes through untouched.
+
+    `float` anywhere in the value raises `TypeError` (money is never float);
+    a `Decimal` is quantised to two places by `encrypt_json`, so a value that
+    needs more precision (a per-token USD cost) must be passed as `str`.
+    """
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> bytes | None:
+        if value is None:
+            return None
+        return encrypt_json(value, active_key_data())
+
+    def process_result_value(self, value: bytes | None, dialect: Any) -> Any:
+        if value is None:
+            return None
+        return _decrypt_with_any(decrypt_json, value)

@@ -788,3 +788,38 @@ def test_completion_objects_are_recorded_unchanged() -> None:
     assert isinstance(completion, Completion)
     assert isinstance(completion.usage, Usage)
     assert completion.content == "Hello."
+
+
+# -- KCH-240: persistence hooks ---------------------------------------------
+
+
+def test_a_failing_persisting_recorder_never_fails_the_turn() -> None:
+    from loan_manager.infrastructure.repositories.sqlalchemy_turn_recorder import (
+        SqlAlchemyTurnRecorder,
+    )
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    rig = make_rig([_rec("Hello.")])
+    recorder = SqlAlchemyTurnRecorder(broken)
+    uc = RunAgentTurn(rig.llm, ToolRegistry({}), _no_propose, recorder=recorder)
+
+    result = uc.execute(rig.conv, "What is the date today?")
+
+    assert result.outcome is TurnOutcome.ANSWERED
+    assert result.text == "Hello."
+    assert recorder.failure_count == 1
+
+
+def test_latency_ms_comes_from_the_injected_monotonic_clock() -> None:
+    ticks = iter([0.0, 1.5])
+    rig = make_rig([_rec("Hello.")])
+    uc = RunAgentTurn(
+        rig.llm, ToolRegistry({}), _no_propose, recorder=rig.recorder,
+        monotonic=lambda: next(ticks),
+    )
+
+    uc.execute(rig.conv, "What is the date today?")
+
+    assert rig.recorder.records[0].latency_ms == 1500
