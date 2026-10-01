@@ -587,6 +587,10 @@ def _propose_sweep():
     observations.append(("synthetic", {}, error(
         ErrorCode.UNKNOWN_TOKEN, "the model used a token this conversation never issued",
         "ask the user to restate the name")))
+    # KCH-239: the loop's own scrubbed validation error (field + rule names only).
+    observations.append(("synthetic", {}, error(
+        ErrorCode.INVALID_ARGS, "argument 'amount' failed rule 'greater_than_equal'",
+        "fix the named arguments and call the tool again")))
     return resolver, observations
 
 

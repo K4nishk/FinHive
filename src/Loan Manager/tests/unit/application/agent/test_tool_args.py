@@ -189,6 +189,18 @@ def test_rupees_whole_strict_int_rejects_bool_str_float(bad: object) -> None:
         )
 
 
+def test_rupees_whole_description_asks_for_the_amount_token_not_a_number() -> None:
+    """KCH-239: the model never sees a raw amount, so the schema must not
+    invite one ("e.g. 150000 for 1.5 lakh" made it type numbers)."""
+    for tool_name in ("create_loan", "update_loan"):
+        schema = next(s for s in tool_schemas() if s["function"]["name"] == tool_name)
+        description = schema["function"]["parameters"]["properties"]["amount"]["description"]
+        assert "AMOUNT_n token" in description
+        assert "never a number you typed" in description
+        assert "lakh" not in description
+        assert "150000" not in description
+
+
 @pytest.mark.parametrize("bad", [True, "5"])
 def test_portfolio_limit_strict_int_rejects_bool_and_str(bad: object) -> None:
     with pytest.raises(ValidationError):

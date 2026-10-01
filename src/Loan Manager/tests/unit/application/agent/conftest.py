@@ -235,3 +235,26 @@ def assert_no_npi_leak(observation: dict, *forbidden_strings: str) -> None:
         if not s:
             continue
         assert s.lower() not in blob, f"observation leaked NPI string {s!r}: {observation!r}"
+
+
+_DEMO_LOANS_CACHE: list | None = None
+
+
+def demo_loans() -> list[Loan]:
+    """The active DEMO ledger as `Loan`s (KCH-239 loop tests, prompt tests).
+    Built once per process: `make_loan` numbers reference ids from a global
+    counter, so a second build would shift every ref id."""
+    global _DEMO_LOANS_CACHE
+    if _DEMO_LOANS_CACHE is None:
+        from loan_manager.infrastructure.seed.demo_fixture import DEMO_LOANS
+
+        _DEMO_LOANS_CACHE = [
+            make_loan(
+                borrower_name=f.borrower_name, borrower_group=f.borrower_group,
+                depositor_name=f.depositor_name, depositor_group=f.depositor_group,
+                amount=f.amount, giving_date=f.giving_date, due_date=f.due_date,
+            )
+            for f in DEMO_LOANS
+            if f.paidoff_date is None
+        ]
+    return _DEMO_LOANS_CACHE

@@ -44,6 +44,10 @@ class ErrorCode(str, Enum):
     # undated, all already pending) or every proposed field already matches
     # the loan's current value. No report is generated.
     NOTHING_TO_PROPOSE = "NOTHING_TO_PROPOSE"
+    # KCH-239: the model's tool call failed argument validation (bad JSON,
+    # unknown tool, a field rule). The message is scrubbed to field names and
+    # rule names -- never the value the model sent.
+    INVALID_ARGS = "INVALID_ARGS"
 
 
 def _jsonable(value: Any) -> Any:
