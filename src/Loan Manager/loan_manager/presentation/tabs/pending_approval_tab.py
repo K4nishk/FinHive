@@ -1,83 +1,181 @@
-from decimal import Decimal
+"""Approvals tab (KCH-245): agent- and form-authored batches, side by side.
 
+Presentation only -- every mutation goes through a use case constructed with
+`self._container`'s own factories/services, exactly like the rest of this
+tab's siblings. `ReportRecordModel`'s `on_edit` callback is the one place a
+model-driven edit reaches a use case, and even that call lives here in the
+tab (`_on_edit_record`), never inside the model itself.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTableWidget, QTableWidgetItem, QPushButton, QLabel,
-    QMessageBox, QHeaderView,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
-from loan_manager.application.dtos.report_dto import (
-    ReportDTO, ReportRecordUpdateDTO,
-)
-from loan_manager.application.use_cases.reports.get_reports import (
-    GetPendingReports, UpdateReportRecord,
-)
+from loan_manager.application.dtos.report_dto import ReportDTO, ReportRecordUpdateDTO
+from loan_manager.application.use_cases.loans.get_loans import GetAllLoans
 from loan_manager.application.use_cases.reports.approve_report import ApproveReport
 from loan_manager.application.use_cases.reports.decline_report import DeclineReport
-from loan_manager.domain.value_objects.status import CalculationMode, ExtensionPeriodUnit
+from loan_manager.application.use_cases.reports.get_recent_approved_reports import (
+    GetRecentlyApprovedReports,
+)
+from loan_manager.application.use_cases.reports.get_reports import (
+    GetPendingReports,
+    UpdateReportRecord,
+)
+from loan_manager.application.use_cases.reports.undo_approved_report import UndoApprovedReport
+from loan_manager.domain.value_objects.status import CalculationMode
+from loan_manager.presentation.errors import surfacing_storage_errors
+from loan_manager.presentation.view_models.approval_messages import (
+    approve_outcome,
+    undo_refusal_text,
+)
+from loan_manager.presentation.widgets.report_table_models import (
+    ReportListModel,
+    ReportRecordModel,
+)
 
-
-REPORT_COLUMNS = ["Report ID", "Mode", "Records", "Created", "Updated"]
-RECORD_COLUMNS = [
-    "Ref ID", "B Name", "D Name", "Amount",
-    "Orig G.Date", "Orig D.Date", "New G.Date", "New D.Date",
-    "Rate %", "Comm %", "Period", "Unit", "TDS",
-    "Interest", "Commission", "TDS Amt", "CHQ Amt",
-]
+RECENT_APPROVED_LIMIT = 20
 
 
 class PendingApprovalTab(QWidget):
-    def __init__(self, container, parent=None):
+    def __init__(self, container, theme_manager, parent=None):
         super().__init__(parent)
         self._container = container
+        self._theme = theme_manager
         self._main_window = parent
-        self._reports: list[ReportDTO] = []
         self._selected_report: ReportDTO | None = None
+        self._selected_approved: ReportDTO | None = None
         self._setup_ui()
         self.refresh()
 
+    # -- UI construction ---------------------------------------------------
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-
         splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Report list
-        report_widget = QWidget()
-        report_layout = QVBoxLayout(report_widget)
-        report_layout.setContentsMargins(0, 0, 0, 0)
-        report_layout.addWidget(QLabel("Pending Reports"))
-        self._report_table = QTableWidget(0, len(REPORT_COLUMNS))
-        self._report_table.setHorizontalHeaderLabels(REPORT_COLUMNS)
-        self._report_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._report_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._report_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        splitter.addWidget(self._build_pending_section())
+        splitter.addWidget(self._build_detail_section())
+        splitter.addWidget(self._build_recently_approved_section())
+
+        layout.addWidget(splitter)
+        layout.addLayout(self._build_button_row())
+
+    def _build_pending_section(self) -> QWidget:
+        widget = QWidget()
+        section_layout = QVBoxLayout(widget)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.addWidget(QLabel("Pending Reports"))
+
+        self._report_model = ReportListModel(self._theme)
+        self._report_proxy = QSortFilterProxyModel()
+        self._report_proxy.setSourceModel(self._report_model)
+
+        self._report_table = QTableView()
+        self._report_table.setModel(self._report_proxy)
+        self._report_table.setAccessibleName("Pending reports")
+        self._report_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self._report_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self._report_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         self._report_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
-        self._report_table.currentCellChanged.connect(self._on_report_selected)
-        report_layout.addWidget(self._report_table)
-        splitter.addWidget(report_widget)
+        self._report_table.selectionModel().currentRowChanged.connect(
+            self._on_report_selected
+        )
+        section_layout.addWidget(self._report_table)
+        return widget
 
-        # Record detail
-        detail_widget = QWidget()
-        detail_layout = QVBoxLayout(detail_widget)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.addWidget(QLabel("Report Records"))
-        self._record_table = QTableWidget(0, len(RECORD_COLUMNS))
-        self._record_table.setHorizontalHeaderLabels(RECORD_COLUMNS)
+    def _build_detail_section(self) -> QWidget:
+        widget = QWidget()
+        section_layout = QVBoxLayout(widget)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+
+        strip = QHBoxLayout()
+        self._actor_badge = QLabel("")
+        self._actor_badge.setAccessibleName("Report author")
+        strip.addWidget(self._actor_badge)
+
+        # PlainText, never logged (ARB D-15/D-16, this tab's own contract):
+        # the agent's own words can name a borrower or an amount, so this
+        # label shows them verbatim to the user and nowhere near a logger.
+        self._user_request_label = QLabel("")
+        self._user_request_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._user_request_label.setWordWrap(True)
+        self._user_request_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._user_request_label.setAccessibleName("Agent user request")
+        strip.addWidget(self._user_request_label, 1)
+
+        self._conflict_label = QLabel("")
+        self._conflict_label.setAccessibleName("Conflict warning")
+        self._conflict_label.setVisible(False)
+        strip.addWidget(self._conflict_label)
+
+        section_layout.addLayout(strip)
+
+        section_layout.addWidget(QLabel("Report Records"))
+        self._record_model = ReportRecordModel(self._theme, on_edit=self._on_edit_record)
+        self._record_proxy = QSortFilterProxyModel()
+        self._record_proxy.setSourceModel(self._record_model)
+
+        self._record_table = QTableView()
+        self._record_table.setModel(self._record_proxy)
+        self._record_table.setAccessibleName("Report records")
         self._record_table.setAlternatingRowColors(True)
         self._record_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
-        self._record_table.cellChanged.connect(self._on_record_edited)
-        detail_layout.addWidget(self._record_table)
-        splitter.addWidget(detail_widget)
+        section_layout.addWidget(self._record_table)
+        return widget
 
-        layout.addWidget(splitter)
+    def _build_recently_approved_section(self) -> QWidget:
+        widget = QWidget()
+        section_layout = QVBoxLayout(widget)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.addWidget(QLabel("Recently Approved"))
 
-        # Buttons
+        self._approved_model = ReportListModel(self._theme, time_header="Approved")
+        self._approved_proxy = QSortFilterProxyModel()
+        self._approved_proxy.setSourceModel(self._approved_model)
+
+        self._approved_table = QTableView()
+        self._approved_table.setModel(self._approved_proxy)
+        self._approved_table.setAccessibleName("Recently approved reports")
+        self._approved_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self._approved_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self._approved_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self._approved_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self._approved_table.selectionModel().currentRowChanged.connect(
+            self._on_approved_selected
+        )
+        section_layout.addWidget(self._approved_table)
+
+        undo_row = QHBoxLayout()
+        undo_row.addStretch()
+        self._undo_btn = QPushButton("Undo")
+        self._undo_btn.setAccessibleName("Undo selected report")
+        self._undo_btn.clicked.connect(self._on_undo)
+        self._undo_btn.setEnabled(False)
+        undo_row.addWidget(self._undo_btn)
+        section_layout.addLayout(undo_row)
+        return widget
+
+    def _build_button_row(self) -> QHBoxLayout:
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -99,219 +197,197 @@ class PendingApprovalTab(QWidget):
         self._approve_btn.setEnabled(False)
         btn_layout.addWidget(self._approve_btn)
 
-        layout.addLayout(btn_layout)
+        return btn_layout
+
+    # -- data loading --------------------------------------------------
 
     def refresh(self) -> None:
-        try:
-            get_reports = GetPendingReports(self._container.get_uow)
-            self._reports = get_reports.execute()
-            self._populate_report_table()
+        pending: list[ReportDTO] = []
+        with surfacing_storage_errors(self, "loading pending reports"):
+            pending = GetPendingReports(self._container.get_uow).execute()
+        self._report_model.load(pending)
+
+        approved: list[ReportDTO] = []
+        with surfacing_storage_errors(self, "loading recently approved reports"):
+            approved = GetRecentlyApprovedReports(self._container.get_uow).execute(
+                limit=RECENT_APPROVED_LIMIT
+            )
+        self._approved_model.load(approved)
+
+        self._selected_report = None
+        self._selected_approved = None
+        self._record_model.load([], None)
+        self._clear_detail_strip()
+        self._print_btn.setEnabled(False)
+        self._decline_btn.setEnabled(False)
+        self._approve_btn.setEnabled(False)
+        self._undo_btn.setEnabled(False)
+
+    def _apply_badge_colour(self, label: QLabel, colour: dict) -> None:
+        # KCH-245 review cycle 1, M1: the app-wide QSS (themes/*.qss) sets
+        # `QLabel { color: ...; background-color: transparent; }` -- a
+        # stylesheet always wins over QPalette (Qt's own precedence rule),
+        # so setPalette()/setAutoFillBackground() here were a silent no-op:
+        # only the bold survived, because that comes from QFont, not the
+        # palette. setStyleSheet built from ThemeManager's own colours is
+        # the established pattern (settings_tab.py:231's `_update_colour_button`).
+        weight = "bold" if colour.get("bold", False) else "normal"
+        label.setStyleSheet(
+            f"background-color: {colour['background']}; color: {colour['text']};"
+            f" font-weight: {weight}; padding: 2px 6px;"
+        )
+
+    def _clear_detail_strip(self) -> None:
+        self._actor_badge.setText("")
+        self._actor_badge.setStyleSheet("")
+        self._user_request_label.setText("")
+        self._conflict_label.setText("")
+        self._conflict_label.setStyleSheet("")
+        self._conflict_label.setVisible(False)
+
+    def _populate_detail_strip(self, report: ReportDTO) -> None:
+        self._actor_badge.setText(report.actor.value)
+        self._apply_badge_colour(
+            self._actor_badge, self._theme.get_badge_colour(report.actor.value)
+        )
+
+        self._user_request_label.setText(report.user_request or "")
+
+        if report.conflict_ref_ids:
+            self._conflict_label.setText(
+                "Conflicts with: " + ", ".join(report.conflict_ref_ids)
+            )
+            self._apply_badge_colour(self._conflict_label, self._theme.get_badge_colour("CONFLICT"))
+            self._conflict_label.setVisible(True)
+        else:
+            self._conflict_label.setText("")
+            self._conflict_label.setVisible(False)
+
+    # -- selection handlers ----------------------------------------------
+
+    def _on_report_selected(self, current: QModelIndex, previous: QModelIndex) -> None:
+        if not current.isValid():
             self._selected_report = None
-            self._record_table.setRowCount(0)
+            self._record_model.load([], None)
+            self._clear_detail_strip()
             self._print_btn.setEnabled(False)
             self._decline_btn.setEnabled(False)
             self._approve_btn.setEnabled(False)
-        except Exception as e:
-            if self._main_window:
-                self._main_window.show_status(f"Error loading reports: {e}")
-
-    def _populate_report_table(self) -> None:
-        self._report_table.setRowCount(len(self._reports))
-        for row, report in enumerate(self._reports):
-            self._report_table.setItem(row, 0, QTableWidgetItem(report.report_id))
-            self._report_table.setItem(row, 1, QTableWidgetItem(report.report_mode.value))
-            self._report_table.setItem(row, 2, QTableWidgetItem(str(len(report.records))))
-            self._report_table.setItem(
-                row, 3, QTableWidgetItem(report.created_at.strftime("%Y-%m-%d %H:%M"))
-            )
-            self._report_table.setItem(
-                row, 4, QTableWidgetItem(report.updated_at.strftime("%Y-%m-%d %H:%M"))
-            )
-
-    def _on_report_selected(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
-        if row < 0 or row >= len(self._reports):
             return
-        self._selected_report = self._reports[row]
-        self._populate_record_table()
+
+        source_index = self._report_proxy.mapToSource(current)
+        report = self._report_model.report_at(source_index.row())
+        if report is None:
+            return
+
+        self._selected_report = report
+        self._populate_detail_strip(report)
+
+        # KCH-245 plan: GetAllLoans is only ever called when an UPDATE
+        # report is the one selected -- every other mode's "Current"
+        # columns are N/A and need no live loan lookup.
+        current_loans = {}
+        if report.report_mode == CalculationMode.UPDATE:
+            loans = []
+            with surfacing_storage_errors(self, "loading current loan values"):
+                loans = GetAllLoans(self._container.get_uow).execute()
+            current_loans = {loan.reference_id: loan for loan in loans}
+
+        self._record_model.load(
+            report.records, report.report_mode, report.conflict_ref_ids, current_loans
+        )
         self._print_btn.setEnabled(True)
         self._decline_btn.setEnabled(True)
         self._approve_btn.setEnabled(True)
 
-    def _populate_record_table(self) -> None:
+    def _on_approved_selected(self, current: QModelIndex, previous: QModelIndex) -> None:
+        if not current.isValid():
+            self._selected_approved = None
+            self._undo_btn.setEnabled(False)
+            return
+        source_index = self._approved_proxy.mapToSource(current)
+        report = self._approved_model.report_at(source_index.row())
+        self._selected_approved = report
+        self._undo_btn.setEnabled(report is not None)
+
+    # -- record editing ----------------------------------------------------
+
+    def _on_edit_record(self, record_id: int, field: str, value):
         if self._selected_report is None:
-            return
-        records = self._selected_report.records
-        self._record_table.blockSignals(True)
-        self._record_table.setRowCount(len(records))
-
-        for row, rec in enumerate(records):
-            self._set_readonly(row, 0, rec.reference_id)
-            self._set_readonly(row, 1, rec.borrower_name)
-            self._set_readonly(row, 2, rec.depositor_name)
-            self._set_readonly(row, 3, str(rec.amount))
-            self._set_readonly(row, 4, str(rec.giving_date))
-            self._set_readonly(row, 5, str(rec.due_date) if rec.due_date else "N/A")
-            self._set_readonly(
-                row, 6,
-                str(rec.post_extension_giving_date) if rec.post_extension_giving_date else "N/A",
-            )
-            self._set_readonly(
-                row, 7,
-                str(rec.post_extension_due_date) if rec.post_extension_due_date else "N/A",
-            )
-
-            # Editable fields (columns 8-12)
-            self._record_table.setItem(row, 8, QTableWidgetItem(str(rec.interest_rate)))
-            self._record_table.setItem(row, 9, QTableWidgetItem(str(rec.commission_rate)))
-            self._record_table.setItem(row, 10, QTableWidgetItem(str(rec.extension_period)))
-            self._record_table.setItem(
-                row, 11, QTableWidgetItem(rec.extension_period_unit.value)
-            )
-            self._record_table.setItem(
-                row, 12, QTableWidgetItem("Yes" if rec.tds_flag else "No")
-            )
-
-            self._set_readonly(row, 13, str(rec.interest_amount or 0))
-            self._set_readonly(row, 14, str(rec.commission_amount or 0))
-            self._set_readonly(row, 15, str(rec.tds_amount or 0))
-            self._set_readonly(row, 16, str(rec.chq_amount or 0))
-
-        self._record_table.blockSignals(False)
-
-    def _set_readonly(self, row: int, col: int, text: str) -> None:
-        item = QTableWidgetItem(text)
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        self._record_table.setItem(row, col, item)
-
-    def _on_record_edited(self, row: int, col: int) -> None:
-        if col not in (8, 9, 10, 11, 12):
-            return
-        if self._selected_report is None:
-            return
-        if row >= len(self._selected_report.records):
-            return
-
-        rec = self._selected_report.records[row]
-        if rec.id is None:
-            return
-
+            return None
         try:
-            update = {}
-            if col == 8:
-                update["interest_rate"] = Decimal(self._record_table.item(row, 8).text())
-            elif col == 9:
-                update["commission_rate"] = Decimal(self._record_table.item(row, 9).text())
-            elif col == 10:
-                update["extension_period"] = int(self._record_table.item(row, 10).text())
-            elif col == 11:
-                update["extension_period_unit"] = ExtensionPeriodUnit(
-                    self._record_table.item(row, 11).text()
-                )
-            elif col == 12:
-                text = self._record_table.item(row, 12).text().lower()
-                update["tds_flag"] = text in ("yes", "true", "1")
-
-            dto = ReportRecordUpdateDTO(**update)
+            dto = ReportRecordUpdateDTO(**{field: value})
             update_uc = UpdateReportRecord(self._container.get_uow)
-            updated_rec = update_uc.execute(
-                self._selected_report.report_id, rec.id, dto
-            )
-
-            # Update computed display columns
-            self._record_table.blockSignals(True)
-            # Update post-extension dates (recalculated by the use case)
-            self._set_readonly(
-                row, 6,
-                str(updated_rec.post_extension_giving_date)
-                if updated_rec.post_extension_giving_date else "N/A",
-            )
-            self._set_readonly(
-                row, 7,
-                str(updated_rec.post_extension_due_date)
-                if updated_rec.post_extension_due_date else "N/A",
-            )
-            self._record_table.item(row, 13).setText(str(updated_rec.interest_amount or 0))
-            self._record_table.item(row, 14).setText(str(updated_rec.commission_amount or 0))
-            self._record_table.item(row, 15).setText(str(updated_rec.tds_amount or 0))
-            self._record_table.item(row, 16).setText(str(updated_rec.chq_amount or 0))
-            self._record_table.blockSignals(False)
-
+            updated = update_uc.execute(self._selected_report.report_id, record_id, dto)
             if self._main_window:
                 self._main_window.show_status("Record recalculated.")
-
+            return updated
         except Exception as e:
             if self._main_window:
                 self._main_window.show_status(f"Update failed: {e}")
+            return None
+
+    # -- approve / decline / undo ------------------------------------------
 
     def _on_approve(self) -> None:
         if self._selected_report is None:
             return
-
         report_id = self._selected_report.report_id
         is_paidoff = self._selected_report.report_mode == CalculationMode.PAIDOFF
 
+        approve_uc = ApproveReport(
+            self._container.get_uow,
+            self._container.recovery_service,
+            self._container.backup_service,
+            self._container.event_bus,
+            clock=self._container.clock,
+        )
+
         try:
-            approve_uc = ApproveReport(
-                self._container.get_uow,
-                self._container.recovery_service,
-                self._container.backup_service,
-                self._container.event_bus,
-                clock=self._container.clock,
-            )
-
             result = approve_uc.execute(report_id, force=False)
-
-            if result.requires_confirmation:
-                messages = []
-                if result.duplicate_ref_ids:
-                    messages.append(
-                        "This report shares loan records with another pending report. "
-                        "Approving may overwrite previous updates."
-                    )
-                if result.deleted_ref_ids:
-                    messages.append(
-                        f"Records in this report have been deleted: "
-                        f"{', '.join(result.deleted_ref_ids)}"
-                    )
-                if is_paidoff:
-                    messages.append(
-                        "This report was generated for a Paidoff loan. "
-                        "The loan will be moved to history. No extension will be applied."
-                    )
-
-                msg = "\n\n".join(messages) + "\n\nProceed anyway?"
-                reply = QMessageBox.warning(
-                    self,
-                    "Confirmation Required",
-                    msg,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    result = approve_uc.execute(report_id, force=True)
-                else:
-                    return
-            else:
-                if is_paidoff:
-                    reply = QMessageBox.information(
-                        self,
-                        "Paidoff Report",
-                        "This report was generated for a Paidoff loan. "
-                        "The loan will be moved to history. No extension will be applied.\n\n"
-                        "Report approved successfully.",
-                        QMessageBox.StandardButton.Ok,
-                    )
-
-            if result.success:
-                if self._main_window:
-                    self._main_window.show_status(
-                        f"Report {report_id} approved."
-                    )
-                    if hasattr(self._main_window, '_view_tab'):
-                        self._main_window._view_tab.refresh()
-                self.refresh()
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Approval failed: {e}")
+            return
+
+        kind, text = approve_outcome(result, is_paidoff)
+
+        if kind == "confirm":
+            reply = QMessageBox.warning(
+                self, "Confirmation Required", text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                result = approve_uc.execute(report_id, force=True)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Approval failed: {e}")
+                return
+            kind, text = approve_outcome(result, is_paidoff)
+
+        if kind == "refused":
+            QMessageBox.warning(self, "Cannot approve", text)
+            return
+
+        if kind == "not_pending":
+            QMessageBox.information(self, "No longer pending", text)
+            self.refresh()
+            return
+
+        # kind == "done"
+        if self._main_window:
+            self._main_window.show_status(f"Report {report_id} approved.")
+            if hasattr(self._main_window, "_view_tab"):
+                self._main_window._view_tab.refresh()
+        # KCH-245 review cycle 1, m4: `text` can note skipped-deleted
+        # records (approve_outcome's "done" branch) -- the status bar
+        # message above is a fixed one-liner that drops it, so the plan's
+        # "done notes skipped deleted" never reached the user. An info box
+        # only when there is something extra to say; a plain approval stays
+        # silent-but-not-hidden (status bar alone), same as before.
+        if result.deleted_ref_ids:
+            QMessageBox.information(self, "Report approved", text)
+        self.refresh()
 
     def _on_decline(self) -> None:
         if self._selected_report is None:
@@ -319,28 +395,64 @@ class PendingApprovalTab(QWidget):
         report_id = self._selected_report.report_id
 
         reply = QMessageBox.question(
-            self,
-            "Confirm Decline",
+            self, "Confirm Decline",
             f"Are you sure you want to decline report {report_id}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                decline_uc = DeclineReport(
-                    self._container.get_uow,
-                    self._container.event_bus,
-                )
-                decline_uc.execute(report_id)
-                if self._main_window:
-                    self._main_window.show_status(f"Report {report_id} declined.")
-                self.refresh()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Decline failed: {e}")
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            decline_uc = DeclineReport(self._container.get_uow, self._container.event_bus)
+            decline_uc.execute(report_id)
+            if self._main_window:
+                self._main_window.show_status(f"Report {report_id} declined.")
+            self.refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Decline failed: {e}")
+
+    def _on_undo(self) -> None:
+        if self._selected_approved is None:
+            return
+        report_id = self._selected_approved.report_id
+        report_mode = self._selected_approved.report_mode
+
+        # KCH-245 review cycle 1, m3: PAIDOFF and UPDATE are refused by
+        # UndoApprovedReport UNCONDITIONALLY (never depend on what changed
+        # since approval), so asking "Are you sure?" first and refusing
+        # right after is a pointless extra click -- go straight to the use
+        # case and show ITS refusal (never a presentation-side rule that
+        # would duplicate/drift from UndoApprovedReport's own decision).
+        if report_mode not in (CalculationMode.PAIDOFF, CalculationMode.UPDATE):
+            reply = QMessageBox.question(
+                self, "Confirm Undo",
+                f"Are you sure you want to undo report {report_id}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        undo_uc = UndoApprovedReport(
+            self._container.get_uow, self._container.event_bus, clock=self._container.clock
+        )
+        try:
+            result = undo_uc.execute(report_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Undo failed: {e}")
+            return
+
+        if not result.success:
+            QMessageBox.warning(self, "Cannot undo", undo_refusal_text(result, report_mode))
+            return
+
+        if self._main_window:
+            self._main_window.show_status(f"Report {report_id} undone.")
+            if hasattr(self._main_window, "_view_tab"):
+                self._main_window._view_tab.refresh()
+        self.refresh()
 
     def _on_print(self) -> None:
         if self._selected_report is None:
             return
-
         from loan_manager.presentation.widgets.report_printer import ApprovalReportPrinter
 
         printer = ApprovalReportPrinter()
