@@ -77,6 +77,9 @@ OUTCOME_TEXT: dict[TurnOutcome, str] = {
         "Codes such as B001 or AMOUNT_1 cannot be typed. Please rewrite the "
         "question without them."
     ),
+    TurnOutcome.PROMPT_TOO_LONG: (
+        "That question is too long (limit 2,000 characters). Please shorten it."
+    ),
     TurnOutcome.CONVERSATION_FULL: (
         "This conversation has reached its limit. Press New conversation to continue."
     ),

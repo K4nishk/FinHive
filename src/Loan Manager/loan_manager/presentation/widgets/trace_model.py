@@ -38,6 +38,7 @@ OUTCOME_LABEL = {
     TurnOutcome.INCOMPLETE_ANSWER: "Stopped: incomplete answer",
     TurnOutcome.BLOCKED_PLAINTEXT: "Stopped: private data blocked",
     TurnOutcome.UNKNOWN_TOKEN: "Stopped: unknown code typed",
+    TurnOutcome.PROMPT_TOO_LONG: "Stopped: question too long",
     TurnOutcome.CONVERSATION_FULL: "Stopped: conversation full",
     TurnOutcome.LLM_ERROR: "Stopped: assistant unavailable",
     TurnOutcome.INTERNAL_ERROR: "Stopped: internal error",

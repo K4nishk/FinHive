@@ -591,6 +591,10 @@ def _propose_sweep():
     observations.append(("synthetic", {}, error(
         ErrorCode.INVALID_ARGS, "argument 'amount' failed rule 'greater_than_equal'",
         "fix the named arguments and call the tool again")))
+    # KCH-246: the loop's own refusal of a PROPOSE call on a READ turn.
+    observations.append(("synthetic", {}, error(
+        ErrorCode.CHANGE_NOT_REQUESTED, "the user did not ask for a change in this question",
+        "answer from reads; tell the user to ask for the change explicitly")))
     return resolver, observations
 
 

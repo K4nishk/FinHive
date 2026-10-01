@@ -133,7 +133,7 @@ def test_use_case_exception_ends_busy_with_fixed_text_and_no_leak(qapp, wait_unt
 @pytest.mark.parametrize(
     "outcome",
     [TurnOutcome.INTERNAL_ERROR, TurnOutcome.LLM_ERROR, TurnOutcome.BLOCKED_PLAINTEXT,
-     TurnOutcome.BUDGET_EXHAUSTED],
+     TurnOutcome.BUDGET_EXHAUSTED, TurnOutcome.PROMPT_TOO_LONG],
 )
 def test_failed_outcome_renders_fixed_text_and_never_the_turns_own_words(
     qapp, wait_until, outcome
@@ -144,6 +144,17 @@ def test_failed_outcome_renders_fixed_text_and_never_the_turns_own_words(
 
     assert tab._answer.text() == OUTCOME_TEXT[outcome]
     assert "LEAK" not in all_text(tab)
+
+
+def test_prompt_too_long_renders_the_fixed_limit_text(qapp, wait_until) -> None:
+    """KCH-246 T9: the tab shows the fixed sentence naming the 2,000 limit."""
+    tab = _tab(StubContainer(run_turn=failing_turn(TurnOutcome.PROMPT_TOO_LONG, leak="LEAK")))
+
+    _ask(tab, wait_until)
+
+    assert tab._answer.text() == (
+        "That question is too long (limit 2,000 characters). Please shorten it."
+    )
 
 
 def test_missing_key_renders_the_not_configured_text(qapp, wait_until) -> None:

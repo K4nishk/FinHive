@@ -37,7 +37,18 @@ def test_prompt_version_is_the_content_hash_and_pinned() -> None:
     assert SYSTEM_MESSAGE == {"role": "system", "content": SYSTEM_PROMPT}
     # Changing the prompt is a decision, not an accident: update this literal
     # (and say so in the PR) whenever the text changes.
-    assert PROMPT_VERSION == "d2e75a0422c1"
+    assert PROMPT_VERSION == "5c83cfe6e59d"
+
+
+def test_prompt_states_the_loan_only_scope_and_change_on_request_rules() -> None:
+    """KCH-246 T8. Pins the wording; whether a model obeys it is measured by
+    the E4 eval (KCH-249), not provable here."""
+    assert (
+        "You only help with this loan ledger: loans, borrowers, groups, dues, "
+        "interest and drafting loan changes. For anything else, call no tool and "
+        "reply in one sentence that you can only help with loan questions."
+    ) in SYSTEM_PROMPT
+    assert "Draft a change only when the user asks for one" in SYSTEM_PROMPT
 
 
 def test_system_message_is_read_only() -> None:

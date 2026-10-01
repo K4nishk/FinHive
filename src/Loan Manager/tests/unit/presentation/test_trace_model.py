@@ -131,3 +131,11 @@ def test_a_later_final_replaces_the_earlier_answer_row(qapp) -> None:
 
     assert _texts(model) == ["Step 1 / 6", "Answer"]
     assert model.data(model.index(1, 2), DISPLAY) == "Stopped: internal error"
+
+
+def test_prompt_too_long_final_row_has_its_own_label(qapp) -> None:
+    """KCH-246: not the generic "Stopped" fallback."""
+    model = _model(qapp)
+    model.append(_ev(TraceKind.FINAL, 0, outcome=TurnOutcome.PROMPT_TOO_LONG))
+
+    assert model.data(model.index(0, 2), DISPLAY) == "Stopped: question too long"
