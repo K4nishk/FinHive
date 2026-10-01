@@ -15,7 +15,7 @@ import argparse
 import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, time
 from pathlib import Path
 
@@ -33,7 +33,11 @@ from loan_manager.infrastructure.database.session import create_sqlite_engine
 from loan_manager.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from loan_manager.infrastructure.logging.logger import get_logger
 from loan_manager.infrastructure.security.key_provider import KeyConfigurationError
-from loan_manager.infrastructure.seed.demo_fixture import DEMO_LOANS, FIXTURE_TODAY
+from loan_manager.infrastructure.seed.demo_fixture import (
+    DEMO_LOANS,
+    FIXTURE_TODAY,
+    FixtureLoan,
+)
 
 logger = get_logger(__name__)
 
@@ -167,9 +171,14 @@ def assert_seed_target(
                 sidecar.unlink()
 
 
-def seed(session_factory: Callable[[], Session], *, today: date) -> int:
-    """Write every `DEMO_LOANS` row through the encrypting repository, in
-    one `SqlAlchemyUnitOfWork` / one commit.
+def seed(
+    session_factory: Callable[[], Session],
+    *,
+    today: date,
+    loans: Sequence[FixtureLoan] = DEMO_LOANS,
+) -> int:
+    """Write every row of `loans` (default `DEMO_LOANS`) through the encrypting
+    repository, in one `SqlAlchemyUnitOfWork` / one commit.
 
     `today` pins `StatusEngine.compute` and `created_at` -- never
     `date.today()`, so the seeded statuses are reproducible regardless of
@@ -189,7 +198,7 @@ def seed(session_factory: Callable[[], Session], *, today: date) -> int:
     count = 0
 
     try:
-        for fixture in DEMO_LOANS:
+        for fixture in loans:
             year, month, order = ReferenceIdService.parse(fixture.ref)
             year_month = ReferenceIdService.year_month_key(year, month)
             last_order_by_year_month[year_month] = max(
