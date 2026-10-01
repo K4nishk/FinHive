@@ -24,6 +24,7 @@ class ErrorCode(str, Enum):
     UNRESOLVED_ENTITY = "UNRESOLVED_ENTITY"
     UNSUPPORTED_STATUS = "UNSUPPORTED_STATUS"
     REF_ID_NOT_FOUND = "REF_ID_NOT_FOUND"
+    UNKNOWN_TOKEN = "UNKNOWN_TOKEN"  # noqa: S105 - an error code, not a secret
     # KCH-243, PROPOSE tools only, below.
     # A group value resolved to a candidate, but not exactly (ambiguous, or
     # only a fuzzy match) -- the caller must ask the user before acting.
