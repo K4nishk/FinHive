@@ -48,6 +48,9 @@ class ErrorCode(str, Enum):
     # unknown tool, a field rule). The message is scrubbed to field names and
     # rule names -- never the value the model sent.
     INVALID_ARGS = "INVALID_ARGS"
+    # KCH-246: a PROPOSE tool was called on a turn whose typed text named no
+    # change verb (application/agent/turn_mode.py). Nothing was persisted.
+    CHANGE_NOT_REQUESTED = "CHANGE_NOT_REQUESTED"
 
 
 def _jsonable(value: Any) -> Any:

@@ -28,6 +28,7 @@ class TurnOutcome(str, Enum):
     INCOMPLETE_ANSWER = "incomplete_answer"
     BLOCKED_PLAINTEXT = "blocked_plaintext"
     UNKNOWN_TOKEN = "unknown_token"  # noqa: S105 - an outcome name, not a secret
+    PROMPT_TOO_LONG = "prompt_too_long"
     CONVERSATION_FULL = "conversation_full"
     LLM_ERROR = "llm_error"
     INTERNAL_ERROR = "internal_error"

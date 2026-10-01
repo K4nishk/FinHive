@@ -67,6 +67,7 @@ from loan_manager.application.agent.tool_registry import (
 )
 from loan_manager.application.agent.tools.observations import ErrorCode, error
 from loan_manager.application.agent.trace import TraceEvent, TraceKind, TurnOutcome
+from loan_manager.application.agent.turn_mode import turn_mode
 from loan_manager.application.interfaces.turn_recorder import (
     NullTurnRecorder,
     TurnRecord,
@@ -77,6 +78,10 @@ MAX_STEPS = 6
 MAX_VALIDATION_RETRIES = 2
 # [REVIEW REQUIRED] how many earlier answered turns the model is shown.
 HISTORY_TURNS = 3
+# KCH-246 (owner decision D2): longest typed question accepted, in characters.
+# Checked in `_guarded` before the tokeniser and before any model call; the
+# use case is the only guard (no QLineEdit.setMaxLength: it truncates silently).
+MAX_PROMPT_CHARS = 2000
 
 _OUTCOME_TEXT: Mapping[TurnOutcome, str] = {
     TurnOutcome.BUDGET_EXHAUSTED: (
@@ -96,6 +101,10 @@ _OUTCOME_TEXT: Mapping[TurnOutcome, str] = {
         "Codes such as B001 or AMOUNT_1 cannot be typed. Please rewrite the "
         "question without them."
     ),
+    TurnOutcome.PROMPT_TOO_LONG: (
+        f"That question is too long (limit {MAX_PROMPT_CHARS:,} characters). "
+        "Please shorten it."
+    ),
     TurnOutcome.CONVERSATION_FULL: (
         "This conversation has reached its limit. Please start a new one."
     ),
@@ -103,7 +112,7 @@ _OUTCOME_TEXT: Mapping[TurnOutcome, str] = {
     TurnOutcome.INTERNAL_ERROR: "Something went wrong while answering. Please try again.",
 }
 
-_REJECTED_CODES = frozenset({"INVALID_ARGS", "UNKNOWN_TOKEN"})
+_REJECTED_CODES = frozenset({"INVALID_ARGS", "UNKNOWN_TOKEN", "CHANGE_NOT_REQUESTED"})
 
 
 @dataclass
@@ -137,6 +146,7 @@ class _Turn:
     rejections: int = 0
     proposals: int = 0
     propose_registry: ToolRegistry | None = None
+    mode: ToolMode = ToolMode.READ
 
 
 def _noop(event: TraceEvent) -> None:
@@ -240,7 +250,12 @@ class RunAgentTurn:
         self._recorder: TurnRecorder = recorder or NullTurnRecorder()
         self._new_id = new_id
         self._monotonic = monotonic
-        self._tools = tool_schemas()
+        # KCH-246: schemas per turn mode. A READ turn is never offered a
+        # PROPOSE tool (structural, not a prompt request).
+        self._tools_by_mode = {
+            ToolMode.READ: tool_schemas(frozenset({ToolMode.READ})),
+            ToolMode.PROPOSE: tool_schemas(),
+        }
 
     def execute(
         self,
@@ -277,7 +292,8 @@ class RunAgentTurn:
                 conversation_id=conversation.conversation_id,
                 turn_id=turn.turn_id,
                 prompt_version=PROMPT_VERSION,
-                user_text=user_text,
+                # R1: an oversized prompt is never stored.
+                user_text="" if outcome is TurnOutcome.PROMPT_TOO_LONG else user_text,
                 outcome=outcome,
                 step_count=turn.step,
                 events=tuple(turn.events),
@@ -295,6 +311,8 @@ class RunAgentTurn:
     ) -> tuple[TurnOutcome, str]:
         if conversation.closed:
             return self._failed(TurnOutcome.CONVERSATION_FULL)
+        if len(turn.user_text) > MAX_PROMPT_CHARS:
+            return self._failed(TurnOutcome.PROMPT_TOO_LONG)
         try:
             return self._run(conversation, turn, emit)
         # Order matters: TokenBudgetExceededError IS a PlaintextLeakError.
@@ -322,6 +340,9 @@ class RunAgentTurn:
         emit: Callable[[TraceEvent], None],
     ) -> tuple[TurnOutcome, str]:
         tm = conversation.token_map
+        # Latched once from the user's typed text only (KCH-246 D1).
+        turn.mode = turn_mode(turn.user_text)
+        tools = self._tools_by_mode[turn.mode]
         # Ingress: a typed token-shaped literal raises UnknownTokenError here,
         # before any model call.
         turn.messages.append({"role": "user", "content": tm.tokenise_prompt(turn.user_text)})
@@ -332,7 +353,7 @@ class RunAgentTurn:
             # The infrastructure body builder is off limits here (AST guard),
             # so guard the messages themselves: the same leaves it would send.
             assert_no_plaintext({"messages": messages}, tm)
-            completion = self._llm.complete(messages, self._tools)
+            completion = self._llm.complete(messages, tools)
             turn.step = step
             turn.completions.append(completion)
             assistant = _assistant_message(completion)
@@ -407,6 +428,15 @@ class RunAgentTurn:
         echoed back."""
         try:
             mode = self._read_registry.mode(name)
+            if mode is ToolMode.PROPOSE and turn.mode is not ToolMode.PROPOSE:
+                return (
+                    error(
+                        ErrorCode.CHANGE_NOT_REQUESTED,
+                        "the user did not ask for a change in this question",
+                        "answer from reads; tell the user to ask for the change explicitly",
+                    ),
+                    False,
+                )
             if _amount_arg_is_not_a_token(raw_arguments):
                 return (
                     error(
