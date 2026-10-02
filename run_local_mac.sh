@@ -21,7 +21,13 @@ for arg in "$@"; do
     fi
 done
 
-echo "=== FinHive — macOS/Linux Local Setup ==="
+echo "=== FinHive — macOS/Linux Local Setup (MVP2 web app, paused) ==="
+echo
+echo "NOTE: this starts the FinHive WEB app, which is not runnable yet."
+echo "      For the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive) run:"
+echo "          src/Loan Manager/run_mac.sh"
+echo "      Guide: docs/AskFinHive_instructions.md"
+echo
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
@@ -121,6 +127,9 @@ if [ "${#MISSING_STAGES[@]}" -gt 0 ]; then
         echo "This is a partial environment, not a working local app."
         echo "Re-run once those land, or pass --allow-partial (or"
         echo "ALLOW_PARTIAL_SETUP=1) to launch the SPA-only subset."
+        echo
+        echo "Testing the Loan Manager desktop app (MVP1 / MVP1.1)? Run"
+        echo "    src/Loan Manager/run_mac.sh"
         exit 1
     fi
     echo "WARNING: PARTIAL SETUP — proceeding without:"

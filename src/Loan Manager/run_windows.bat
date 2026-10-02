@@ -56,12 +56,12 @@ python -m pip install --quiet -e "%~dp0..\.."
 REM Encryption master key (ARB D-15). ops\.env.local is written in POSIX `export`
 REM syntax for the mac launcher; parsing it reliably in batch is more trouble than
 REM it earns, so Windows sets the variables directly. The app fails at startup with
-REM instructions if they are absent -- see docs\LOCAL_SETUP_WINDOWS.md.
+REM instructions if they are absent -- see docs\AskFinHive_instructions.md.
 if not defined FINHIVE_KEY_VERSION (
     echo.
     echo WARNING: FINHIVE_KEY_VERSION is not set. Encryption at rest is mandatory,
     echo          so Loan Manager will refuse to start. Set it and the matching
-    echo          FINHIVE_MASTER_KEY_V^<n^> first - see docs\LOCAL_SETUP_WINDOWS.md.
+    echo          FINHIVE_MASTER_KEY_V^<n^> first - see docs\AskFinHive_instructions.md.
     echo.
 )
 

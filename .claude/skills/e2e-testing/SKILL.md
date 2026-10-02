@@ -1,6 +1,6 @@
 ---
 name: e2e-testing
-description: Persona-driven end-to-end testing for FinHive Loan Manager. Invoke to run as a simulated user against the app — MVP1 parity sweep, new-user signup/onboarding, or a Bot Readiness crawler sweep for security, accessibility, and best-practice defects. Also use when the user reports a bug from manual testing, when converting testing feedback into permanent regression tests, or when asked to review user-journey coverage.
+description: Persona-driven end-to-end testing for FinHive Loan Manager. Invoke to run as a simulated user against the app — first-launch startup sweep on Windows and macOS, MVP1 parity sweep, new-user signup/onboarding, or a Bot Readiness crawler sweep for security, accessibility, and best-practice defects. Also use when the user reports a bug from manual testing, when converting testing feedback into permanent regression tests, or when asked to review user-journey coverage.
 ---
 
 # E2E Testing — FinHive Loan Manager
@@ -27,7 +27,8 @@ Run a persona → find something → log it → write the regression test
 | `/e2e mvp1` | **Persona A** — MVP1 continuity sweep (§A) |
 | `/e2e newuser` | **Persona B** — signup, onboarding, first value (§B) |
 | `/e2e bot` | **Persona C** — Bot Readiness crawler sweep (§C) |
-| `/e2e full` | All three, in order, one consolidated report |
+| `/e2e startup` | **Persona D** — first launch on a clean machine, Windows **and** macOS (§D) |
+| `/e2e full` | All four, startup (§D) first, one consolidated report |
 | `triage F-NNN` | Diagnose a logged finding and write its regression test |
 | `/e2e cover <journey>` | Add automated coverage for a journey |
 
@@ -485,6 +486,49 @@ Specific to the agent. A crawler that can spend money is a real problem.
 
 ---
 
+## §D · Persona D — First launch (startup)
+
+**Who:** someone with the repo and a README, on **Windows (PowerShell / double-click)**
+and on **macOS (Terminal)** — run both; behaviour differs. They have never started the
+app before, or are an MVP1 user upgrading. They follow the docs literally and click
+the most obvious file.
+
+The question this persona answers: *can a person go from `git clone` to the app's first
+screen without asking anyone?* Every dead end, misleading message or wrong launcher is
+a finding — a startup failure is S1 for that user, however correct the code behind it.
+
+### D1 · Find the right launcher
+| Check | Pass when |
+|---|---|
+| List every launcher in the repo (`*.bat`, `*.sh`, `python -m …main`) | Each one says, **in its first screen of output**, which app it starts and whether that app is runnable today |
+| Run the repo-root `run_local_windows.bat` / `run_local_mac.sh` (MVP2 web, paused) | It names the desktop launcher `src/Loan Manager/run_*` **before** installing anything, and again in its refusal (F-001) |
+| Run `src/Loan Manager/run_windows.bat` (double-click **and** from PowerShell) and `run_mac.sh` | Reaches the app or a message that names the exact fix |
+| Every doc path a launcher prints | Exists, and documents *that* app (not the other one) |
+
+### D2 · Missing prerequisites, one at a time
+Run each with exactly one thing missing; the message must name the fix, never a traceback.
+- No Python 3.10+ · no venv · `finhive` package not installed
+- No `FINHIVE_KEY_VERSION` / `FINHIVE_MASTER_KEY_V1` (Windows: set with `setx`, launched from an **old** window — `setx` does not reach it)
+- No `OPENROUTER_API_KEY` → app opens; Ask FinHive shows the "not configured" text
+- `data/settings.json` without the `"llm"` block (MVP1 file kept through a local edit) → same "not configured" text, not "Something went wrong"
+- PowerShell execution policy blocks `Activate.ps1`
+
+### D3 · MVP1 upgrade path
+- MVP1 `data/loans.db` (plaintext) → app refuses, prints numbered steps, ledger unchanged (hash before/after)
+- Follow those steps verbatim on **both** OSes (`cp` vs `Copy-Item`, `/` vs `\`) → app opens, every MVP1 loan present and correct in View
+- `git pull` with a locally edited `data/settings.json` → the documented stash/pull/pop works
+
+### D4 · Demo ledger isolation
+- `FINHIVE_DB_PATH` set in the shell → demo opens; a **double-clicked** launcher does not see it and opens the real ledger (expected — the docs must say so)
+- Seeder refuses `data/loans.db` and refuses to overwrite without `--replace`
+
+### D5 · Reporting Persona D
+One row per launcher × OS: reached first screen (✅/❌), minutes taken, every message that
+did not name its own fix. Each ❌ becomes a finding with a test that fails without the fix
+(static: the script/doc text; runtime: a subprocess launch with the prerequisite removed).
+
+---
+
 ## Severity
 
 | Level | Definition | Response |
@@ -536,7 +580,7 @@ Then say **`triage F-NNN`**.
 
 | ID | Title | Persona | Sev | Status | Test |
 |---|---|---|---|---|---|
-| — | *No findings logged yet* | — | — | — | — |
+| F-001 | Windows user ran repo-root `run_local_windows.bat` (MVP2 web, paused) to test MVP1.1; it installed the frontend then failed on KCH-90 with no pointer to `src\Loan Manager\run_windows.bat`. Desktop launcher also pointed key setup to the MVP2 web guide | D | S1 | 🟡 | `tests/unit/test_launcher_signposting.py` |
 
 ---
 

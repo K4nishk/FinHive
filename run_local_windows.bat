@@ -19,7 +19,13 @@ set ALLOW_PARTIAL=%ALLOW_PARTIAL_SETUP%
 if "%ALLOW_PARTIAL%"=="" set ALLOW_PARTIAL=0
 if "%~1"=="--allow-partial" set ALLOW_PARTIAL=1
 
-echo === FinHive -- Windows Local Setup ===
+echo === FinHive -- Windows Local Setup ^(MVP2 web app, paused^) ===
+echo.
+echo NOTE: this starts the FinHive WEB app, which is not runnable yet.
+echo       For the Loan Manager desktop app ^(MVP1 / MVP1.1 Ask FinHive^) run:
+echo           src\Loan Manager\run_windows.bat
+echo       Guide: docs\AskFinHive_instructions.md
+echo.
 
 set ROOT_DIR=%~dp0
 cd /d "%ROOT_DIR%"
@@ -140,6 +146,9 @@ if not "!MISSING_STAGES!"=="" (
         echo This is a partial environment, not a working local app.
         echo Re-run once those land, or pass --allow-partial
         echo ^(or set ALLOW_PARTIAL_SETUP=1^) to launch SPA-only.
+        echo.
+        echo Testing the Loan Manager desktop app ^(MVP1 / MVP1.1^)? Run
+        echo     src\Loan Manager\run_windows.bat
         pause
         exit /b 1
     )
