@@ -631,9 +631,20 @@ def test_cli_seeds_with_a_non_default_today_flag(tmp_path: Path, monkeypatch) ->
         engine.dispose()
 
 
-def test_cli_exits_1_without_key_and_creates_no_file(tmp_path: Path, monkeypatch) -> None:
+def _damaged_key_file() -> Path:
+    """No key in the environment and an unusable key file: the one way left
+    (F-006) for the key check to fail on a first seed."""
+    from loan_manager import config
+
+    config.KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    config.KEY_FILE.write_text("FINHIVE_KEY_VERSION=1\nFINHIVE_MASTER_KEY_V1=damaged\n")
+    return config.KEY_FILE
+
+
+def test_cli_exits_1_with_an_unusable_key_and_creates_no_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("FINHIVE_KEY_VERSION", raising=False)
     monkeypatch.delenv("FINHIVE_MASTER_KEY_V1", raising=False)
+    _damaged_key_file()
     db_path = tmp_path / "no_key_demo.db"
 
     exit_code = demo_seed.main(["--db", str(db_path)])
@@ -655,6 +666,7 @@ def test_cli_with_replace_checks_the_key_before_deleting_an_existing_file(
     """
     monkeypatch.delenv("FINHIVE_KEY_VERSION", raising=False)
     monkeypatch.delenv("FINHIVE_MASTER_KEY_V1", raising=False)
+    _damaged_key_file()
     db_path = tmp_path / "existing_demo.db"
     db_path.write_bytes(b"stale-demo-data")
 
@@ -664,6 +676,46 @@ def test_cli_with_replace_checks_the_key_before_deleting_an_existing_file(
     assert db_path.read_bytes() == b"stale-demo-data", (
         "the existing file was deleted before the key check ran"
     )
+
+
+def test_first_demo_seed_without_any_key_creates_the_key_file_and_seeds(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """F-006: a first-time user runs `demo` with nothing configured. The
+    seed must not block on a missing key; it creates one and says where."""
+    from loan_manager import config
+
+    monkeypatch.delenv("FINHIVE_KEY_VERSION", raising=False)
+    monkeypatch.delenv("FINHIVE_MASTER_KEY_V1", raising=False)
+    db_path = tmp_path / "first_demo.db"
+
+    assert demo_seed.main(["--db", str(db_path)]) == 0
+
+    assert config.KEY_FILE.is_file()
+    assert db_path.stat().st_size > 0
+    assert str(config.KEY_FILE) in capsys.readouterr().err
+
+
+def test_kept_demo_ledger_under_a_lost_key_is_refused_not_rekeyed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The Windows report behind F-006: the demo ledger was encrypted under a
+    key that lived in one closed PowerShell window. A plain `demo` run keeps
+    that ledger, so it must refuse (and point at demo-reset), never mint a
+    new key that cannot read it."""
+    from loan_manager import config
+
+    db_path = tmp_path / "kept_demo.db"
+    _test_key_env(monkeypatch)
+    assert demo_seed.main(["--db", str(db_path)]) == 0
+    monkeypatch.delenv("FINHIVE_KEY_VERSION", raising=False)
+    monkeypatch.delenv("FINHIVE_MASTER_KEY_V1", raising=False)
+    before = db_path.read_bytes()
+
+    assert demo_seed.main(["--db", str(db_path)]) == 1
+
+    assert not config.KEY_FILE.exists()
+    assert db_path.read_bytes() == before
 
 
 def test_cli_refuses_the_protected_default_db_path(tmp_path: Path, monkeypatch, capsys) -> None:

@@ -14,7 +14,7 @@ from loan_manager.infrastructure.repositories.sqlalchemy_turn_recorder import (
 )
 from loan_manager.infrastructure.recovery.backup_service import BackupService
 from loan_manager.infrastructure.security.key_provider import (
-    load_keys,
+    load_or_create_keys,
     set_active_key_ring,
 )
 from loan_manager.application.event_bus import EventBus
@@ -39,6 +39,9 @@ from loan_manager.application.use_cases.loans.get_protected_names import (
 from loan_manager.application.use_cases.reports.get_reports import GetPendingReports
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Sequence
+    from pathlib import Path
+
     from finhive.db.keys import KeyRing
 
 
@@ -55,16 +58,24 @@ class Container:
         session = DatabaseSession.get_session()
         return SqlAlchemyUnitOfWork(session)
 
-    def get_key_ring(self) -> KeyRing:
+    def get_key_ring(self, also_protect: Sequence[Path] = ()) -> KeyRing:
         """The master key ring, loaded once per process.
 
         Lazy rather than loaded in `__init__` so constructing a Container in a
         test that never touches encryption does not require a configured key.
         Callers that write NPI must go through here -- repositories never read
         the environment themselves.
+
+        With no key configured, a key file is created on first use (F-006)
+        unless `DB_PATH` -- or a database in `also_protect`, e.g. the demo
+        seeder's target -- already holds encrypted data.
         """
         if self._key_ring is None:
-            self._key_ring = load_keys()
+            from loan_manager import config
+
+            self._key_ring = load_or_create_keys(
+                db_paths=[config.DB_PATH, *also_protect]
+            )
             # Wires up the encrypted-column TypeDecorators (KCH-227) -- they
             # cannot reach this Container, so this is the one call site that
             # makes the just-loaded ring the active key they read.

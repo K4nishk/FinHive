@@ -40,6 +40,7 @@ LOG_FILE = LOG_DIR / "app.log"
 RECOVERY_FILE = DATA_DIR / "approval_recovery.tmp"
 BACKUP_DIR = DATA_DIR / "backups"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+KEY_FILE = DATA_DIR / "encryption" / "master_key.key"
 EXPORT_DIR = DATA_DIR / "exports"
 
 # Derived from DB_PATH, not DEFAULT_DB_PATH, so this stays consistent with

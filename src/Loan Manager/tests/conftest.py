@@ -59,7 +59,10 @@ _REAL_LEDGER_FILES = tuple(_REAL_DATA_DIR / f"loans.db{suffix}" for suffix in ("
 # unpatched `SETTINGS_FILE` -- same tripwire reasoning as the ledger files
 # above, watched alongside them rather than in a fixture of its own.
 _REAL_SETTINGS_FILE = _REAL_DATA_DIR / "settings.json"
-_REAL_WATCHED_FILES = _REAL_LEDGER_FILES + (_REAL_SETTINGS_FILE,)
+# F-006: the app now creates its master key here on first launch. A test that
+# reached the real path would mint a key a real ledger could end up using.
+_REAL_KEY_FILE = _REAL_DATA_DIR / "encryption" / "master_key.key"
+_REAL_WATCHED_FILES = _REAL_LEDGER_FILES + (_REAL_SETTINGS_FILE, _REAL_KEY_FILE)
 
 
 def _ledger_fingerprint() -> dict[str, tuple[int, int] | None]:
@@ -132,6 +135,7 @@ def _redirect_data_paths(tmp_path, monkeypatch):
                 "EXPORT_DIR": fake_export_dir,
                 "RECOVERY_FILE": fake_recovery_file,
                 "SETTINGS_FILE": fake_settings_file,
+                "KEY_FILE": fake_data_dir / "encryption" / "master_key.key",
             },
         ),
         (

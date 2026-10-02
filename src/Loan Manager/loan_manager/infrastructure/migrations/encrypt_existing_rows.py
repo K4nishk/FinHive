@@ -115,6 +115,40 @@ def needs_migration(db_path: Path | str) -> bool:
         conn.close()
 
 
+def holds_encrypted_rows(db_path: Path | str) -> bool:
+    """True when any row in `db_path` carries ciphertext or a `key_version`.
+
+    Used before the app mints a NEW master key (F-006): a key cannot be
+    created for a database some other key already encrypted, because the new
+    key cannot read those rows and writing beside them under a second key is
+    indistinguishable from data loss. A plaintext MVP1 ledger has no `_ct`
+    or `key_version` columns at all, so it never counts.
+
+    Opened read-only: a missing file is never created, and nothing is
+    written to a file that exists. Table and column names come from the
+    file's own schema, quoted; no value from outside is interpolated.
+    """
+    path = Path(db_path)
+    if not path.is_file():
+        return False
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        for table in sorted(_tables(conn)):
+            marked = sorted(
+                c for c in _columns(conn, f'"{table}"')
+                if c.endswith("_ct") or c == "key_version"
+            )
+            if not marked:
+                continue
+            where = " OR ".join(f'"{c}" IS NOT NULL' for c in marked)
+            query = f'SELECT 1 FROM "{table}" WHERE {where} LIMIT 1'  # noqa: S608 -- names from the file's own schema
+            if conn.execute(query).fetchone():
+                return True
+        return False
+    finally:
+        conn.close()
+
+
 def _to_decimal(value: Any) -> Decimal:
     """Convert a stored NUMERIC to Decimal without ever passing through float.
 
@@ -323,7 +357,7 @@ def main() -> int:
     from loan_manager.config import DB_PATH
     from loan_manager.infrastructure.security.key_provider import (
         KeyConfigurationError,
-        load_keys,
+        load_or_create_keys,
     )
 
     if not needs_migration(DB_PATH):
@@ -331,7 +365,7 @@ def main() -> int:
         return 0
 
     try:
-        ring = load_keys()
+        ring = load_or_create_keys()
     except KeyConfigurationError as exc:
         print(f"Cannot migrate: the master key is not usable.\n\n{exc}", file=sys.stderr)
         return 1

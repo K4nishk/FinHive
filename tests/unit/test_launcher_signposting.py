@@ -86,3 +86,12 @@ def test_desktop_windows_launcher_points_to_the_mvp11_guide() -> None:
     text = (APP / "run_windows.bat").read_text(encoding="utf-8")
     assert "AskFinHive_instructions.md" in text
     assert "LOCAL_SETUP_WINDOWS.md" not in text
+
+
+@pytest.mark.parametrize("script", DESKTOP_LAUNCHERS, ids=lambda p: p.name)
+def test_desktop_launcher_names_the_key_file_instead_of_blocking(script: Path) -> None:
+    """F-006: the key is created by the app on first launch; the launcher
+    says where it lives instead of warning that the app will refuse."""
+    text = "\n".join(_executable_lines(script))
+    assert "master_key.key" in text.replace("\\", "/"), f"{script.name} must name the key file"
+    assert "will refuse to start" not in text

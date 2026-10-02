@@ -60,6 +60,12 @@ if [ -f "$REPO_ROOT/ops/.env.local" ]; then
     . "$REPO_ROOT/ops/.env.local"
     set +a
 fi
+# No key in the environment: the app creates data/encryption/master_key.key on
+# first launch and reuses it after that (F-006).
+if [ -z "${FINHIVE_KEY_VERSION:-}" ]; then
+    echo "Encryption key file: $APP_DIR/data/encryption/master_key.key"
+    echo "  Created on first launch if missing. Back it up - without it your data cannot be read."
+fi
 
 # Run the application
 cd "$APP_DIR"

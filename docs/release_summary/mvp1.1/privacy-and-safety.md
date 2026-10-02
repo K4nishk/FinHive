@@ -8,22 +8,36 @@
 
 **What changed:** borrower and depositor names, groups, amounts and the derived figures
 (interest, commission, TDS, CHQ) are stored **encrypted** in the database file. Opening
-the file with another tool shows unreadable bytes. The app needs your master key to
-start. Lose the key and the data cannot be recovered, so keep it in a password manager.
+the file with another tool shows unreadable bytes.
 
-### Test it: the app refuses to start without the key
-Close the app first.
+The key lives in `src/Loan Manager/data/encryption/master_key.key`. The first launch
+creates it and prints its path; every later launch reuses it. **Back that file up** (USB
+drive or password manager, apart from your database backups). Lose it and the data
+cannot be recovered. A key set in the environment (`FINHIVE_MASTER_KEY_V1`) takes
+priority over the file.
 
-**Windows (PowerShell)**: this removes the key for this window only.
+**What it protects against:** a copy of the database leaving your machine (a backup, a
+synced folder, a lost USB stick). It does **not** protect against someone who can read
+your user account's files, because the key sits on the same disk. That is a recorded
+limit of this release (ARB D-15).
+
+### Test it: the app will not make a new key over encrypted data
+Close the app first. This moves the key file aside for one run and puts it back.
+
+**Windows (PowerShell)**, from the `FinHive` folder:
 ```powershell
-Remove-Item Env:FINHIVE_MASTER_KEY_V1; .\run_local_windows.bat demo
+$k = "src\Loan Manager\data\encryption\master_key.key"
+Move-Item $k "$k.off"; .\run_local_windows.bat demo; Move-Item "$k.off" $k
 ```
-**macOS**: the launcher loads keys from `ops/.env.local`, so move that file aside for one run:
+**macOS**, from the `FinHive` folder:
 ```bash
-mv ops/.env.local ops/.env.local.off; ./run_local_mac.sh demo; mv ops/.env.local.off ops/.env.local
+k="src/Loan Manager/data/encryption/master_key.key"
+mv "$k" "$k.off"; ./run_local_mac.sh demo; mv "$k.off" "$k"
 ```
-**Expect:** a message explaining that the master key is required, with setup steps. The
-app does not open, and nothing is changed.
+**Expect:** "No master key was found, but this database already holds data encrypted
+with one", naming the demo ledger and where to restore the key. The app does not open,
+**no new key file is created**, and nothing is changed. (If you keep a key in
+`setx` / `ops/.env.local`, that key is used instead and this test does not apply.)
 
 ### Test it: names are not readable in the file
 Search the demo database file for a demo name. Neither command needs Python:
