@@ -159,6 +159,10 @@ class QueryLoans(ToolArgs):
     status: StatusLiteral
     borrower_group: Slug | None = None
     depositor_group: Slug | None = None
+    # F-004: a question about one named person needs a name filter; without
+    # it the model put the borrower's token under borrower_group and failed.
+    borrower_name: Slug | None = None
+    depositor_name: Slug | None = None
 
 
 class GetPortfolioSummary(ToolArgs):

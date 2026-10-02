@@ -52,12 +52,16 @@ the exact sentence.
 | `Is anything pending for verma textiles?` | **Yes**, pooja verma's loan. It starts in the future. |
 | `What is the interest on <ref id from the table> at 12% for 3 months?` | A `calculate_interest` step appears. The app does the arithmetic (`amount × rate × months / 1200`), not the AI. |
 
-> **Known issue (F-004): ask by group, not by person.** In this release the loan lookup
-> filters by **group** only. A question about one named person, such as
-> `Is deepak menon overdue?` or `Is pooja verma's loan active?`, can fail. You'll see
-> either "I could not form a valid request…" or a clarifying question. Nothing
-> wrong is shown and nothing is changed. Ask by the person's group instead, as in
-> the table above.
+### Ask about one person (F-004, fixed)
+
+| Type | Expect |
+|---|---|
+| `Is deepak menon overdue?` | **Yes**, one loan with no due date. The trace shows `query_loans` with `borrower_name` set to a code (`B00n`), not a group. |
+| `Is pooja verma's loan active?` | **No, it is pending**: it starts in the future. |
+| `How much has arjun rao deposited that is active?` | A count and total filtered by `depositor_name`. |
+
+Before this fix the lookup could only filter by group, so these questions failed with
+"I could not form a valid request…".
 
 ## 5. Failure messages are plain
 
