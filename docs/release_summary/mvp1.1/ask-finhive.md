@@ -48,9 +48,16 @@ the exact sentence.
 
 | Type | Expect |
 |---|---|
-| `Is deepak menon overdue?` | **Yes.** His loan has no due date, and the rules count that as overdue. It is left out of any "days overdue" figure. |
-| `Is pooja verma's loan active?` | **Pending.** It starts in the future. |
+| `Is anything overdue for menon traders?` | **Yes.** deepak menon's loan has no due date, and the rules count that as overdue. It is left out of any "days overdue" figure. |
+| `Is anything pending for verma textiles?` | **Yes**, pooja verma's loan. It starts in the future. |
 | `What is the interest on <ref id from the table> at 12% for 3 months?` | A `calculate_interest` step appears. The app does the arithmetic (`amount × rate × months / 1200`), not the AI. |
+
+> **Known issue (F-004): ask by group, not by person.** In this release the loan lookup
+> filters by **group** only. A question about one named person, such as
+> `Is deepak menon overdue?` or `Is pooja verma's loan active?`, can fail. You'll see
+> either "I could not form a valid request…" or a clarifying question. Nothing
+> wrong is shown and nothing is changed. Ask by the person's group instead, as in
+> the table above.
 
 ## 5. Failure messages are plain
 

@@ -13,6 +13,40 @@ Everything here runs on the **desktop app**. Nothing in MVP1 was removed.
 
 ---
 
+## Before you start: what to install
+
+For MVP1.1 you need **only three things**. You do **not** need Node.js, npm, nvm,
+Docker or Supabase. Those are only for the paused MVP2 web app (`--web`).
+
+| What | Why | macOS | Windows |
+|---|---|---|---|
+| **Python 3.10 or newer** (3.12 recommended) | Runs the app. The launcher creates the app's own environment from it. | [python.org/downloads](https://www.python.org/downloads/macos/). After installing, `python3 --version` should print 3.10+. There is no `python` command on macOS, and you don't need one. | [python.org/downloads](https://www.python.org/downloads/windows/). In the installer, **tick "Add python.exe to PATH"**. Check with `py --version` in a **new** PowerShell window. |
+| **Git** | Gets the code. | Run `xcode-select --install` in Terminal, or use [git-scm.com](https://git-scm.com/download/mac) | [git-scm.com/download/win](https://git-scm.com/download/win), with the default options |
+| **An OpenRouter API key** | The AI service behind Ask FinHive. About $0.0004 per model call; a full tour costs under $0.10. | [openrouter.ai/keys](https://openrouter.ai/keys). Add a few dollars of credit, then create a key. | same |
+
+Windows only:
+- If PowerShell says *"running scripts is disabled"*, run
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+- If typing `python` opens the Microsoft Store, turn off
+  **Settings → Apps → Advanced app settings → App execution aliases → python.exe / python3.exe**.
+
+Everything else (PySide6, SQLAlchemy, cryptography and the rest) is installed
+automatically by the launcher on its first run. That takes a few minutes and about 500 MB.
+
+<details><summary>Only if you want to try the paused MVP2 web app (<code>--web</code>)</summary>
+
+| What | Link |
+|---|---|
+| Node.js 20+ | [nodejs.org](https://nodejs.org/en/download). To manage versions, use nvm on macOS ([github.com/nvm-sh/nvm](https://github.com/nvm-sh/nvm)) or nvm-windows ([github.com/coreybutler/nvm-windows](https://github.com/coreybutler/nvm-windows)). |
+| Docker Desktop | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) |
+| Supabase CLI | [supabase.com/docs/guides/cli](https://supabase.com/docs/guides/cli) |
+
+Even with all of these, `--web` still stops with a KCH-90 message today, because the web
+backend is not built yet.
+</details>
+
+---
+
 ## What's new
 
 | # | Capability | In one line | Try it |
@@ -73,6 +107,10 @@ A double-click on Windows cannot pass `demo`, so it always opens your real ledge
 ---
 
 ## Known limits in this release
+
+- **Ask by group, not by person (F-004).** A question about one named borrower
+  (`Is deepak menon overdue?`) can fail with "could not form a valid request" or a
+  clarifying question. The loan lookup filters by group only. Ask about the group instead.
 
 - No **Stop** button while a question is being answered (each AI call can take up to 60 s).
 - Change requests must use English verbs (create, add, extend, renew, update, change,
