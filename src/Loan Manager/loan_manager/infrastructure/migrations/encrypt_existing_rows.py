@@ -115,6 +115,36 @@ def needs_migration(db_path: Path | str) -> bool:
         conn.close()
 
 
+def _quoted(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _open_read_only(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+
+
+def _first_ciphertext(conn: sqlite3.Connection) -> tuple[bool, bytes | None]:
+    """(any row carries ciphertext or a key_version, one `_ct` blob if any)."""
+    found = False
+    for table in sorted(_tables(conn)):
+        cols = _columns(conn, _quoted(table))
+        marked = sorted(c for c in cols if c.endswith("_ct") or c == "key_version")
+        if not marked:
+            continue
+        for col in (c for c in marked if c.endswith("_ct")):
+            row = conn.execute(
+                f"SELECT {_quoted(col)} FROM {_quoted(table)} "  # noqa: S608 -- names from the file's own schema, quoted
+                f"WHERE {_quoted(col)} IS NOT NULL LIMIT 1"
+            ).fetchone()
+            if row is not None and isinstance(row[0], bytes):
+                return True, row[0]
+        where = " OR ".join(f"{_quoted(c)} IS NOT NULL" for c in marked)
+        query = f"SELECT 1 FROM {_quoted(table)} WHERE {where} LIMIT 1"  # noqa: S608 -- as above
+        if conn.execute(query).fetchone():
+            found = True
+    return found, None
+
+
 def holds_encrypted_rows(db_path: Path | str) -> bool:
     """True when any row in `db_path` carries ciphertext or a `key_version`.
 
@@ -124,30 +154,36 @@ def holds_encrypted_rows(db_path: Path | str) -> bool:
     indistinguishable from data loss. A plaintext MVP1 ledger has no `_ct`
     or `key_version` columns at all, so it never counts.
 
-    Opened read-only: a missing file is never created, and nothing is
-    written to a file that exists. Table and column names come from the
-    file's own schema, quoted; no value from outside is interpolated.
+    Opened read-only: a missing file is never created and no row is written
+    (SQLite may still create a `-shm` sidecar for a WAL database). Table and
+    column names come from the file's own schema, quoted. A file that is not
+    a SQLite database raises `sqlite3.DatabaseError` -- the caller fails
+    closed on it.
     """
     path = Path(db_path)
     if not path.is_file():
         return False
-    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    conn = _open_read_only(path)
     try:
-        for table in sorted(_tables(conn)):
-            marked = sorted(
-                c for c in _columns(conn, f'"{table}"')
-                if c.endswith("_ct") or c == "key_version"
-            )
-            if not marked:
-                continue
-            where = " OR ".join(f'"{c}" IS NOT NULL' for c in marked)
-            query = f'SELECT 1 FROM "{table}" WHERE {where} LIMIT 1'  # noqa: S608 -- names from the file's own schema
-            if conn.execute(query).fetchone():
-                return True
-        return False
+        return _first_ciphertext(conn)[0]
     finally:
         conn.close()
 
+
+def sample_ciphertext(db_path: Path | str) -> bytes | None:
+    """One stored `_ct` blob from `db_path`, or None if it holds none.
+
+    Lets startup prove the loaded key can read this database (AES-GCM's tag
+    rejects a wrong key) instead of failing at the first decrypt.
+    """
+    path = Path(db_path)
+    if not path.is_file():
+        return None
+    conn = _open_read_only(path)
+    try:
+        return _first_ciphertext(conn)[1]
+    finally:
+        conn.close()
 
 def _to_decimal(value: Any) -> Decimal:
     """Convert a stored NUMERIC to Decimal without ever passing through float.

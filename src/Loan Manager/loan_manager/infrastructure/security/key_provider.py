@@ -36,6 +36,7 @@ from __future__ import annotations
 import base64
 import os
 import secrets
+import sqlite3
 import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -284,26 +285,104 @@ def _read_key_file(path: Path) -> dict[str, str]:
     return values
 
 
-def _create_key_file(path: Path) -> dict[str, str]:
+def _fsync_dir(directory: Path) -> None:
+    """Make the new directory entry durable (POSIX); a no-op where a
+    directory cannot be opened (Windows)."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _create_key_file(path: Path) -> tuple[dict[str, str], bool]:
+    """Write a new key file, or adopt the one a concurrent launch just wrote.
+
+    Returns (key variables, created). The new key goes to a unique temporary
+    file, is fsynced, and is then published with `os.link`, which fails if
+    `path` already exists -- so two first launches at once both end up
+    holding the ONE key on disk (Opus review of F-006, #1), and an existing
+    file is never overwritten. Where hard links are unsupported (e.g. FAT),
+    `O_EXCL` on the final path gives the same exclusivity.
+    """
+    import tempfile
+
     values = {
         _VERSION_NAME: "1",
         f"{_MASTER_PREFIX}1": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
     }
+    body = (_KEY_FILE_HEADER + "".join(f"{k}={v}\n" for k, v in values.items())).encode()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    body = _KEY_FILE_HEADER + "".join(f"{k}={v}\n" for k, v in values.items())
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(body)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    return values
 
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".master_key.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        os.write(fd, body)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return _read_key_file(path), False
+        except OSError:
+            try:
+                out = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                return _read_key_file(path), False
+            try:
+                os.write(out, body)
+                os.fsync(out)
+            finally:
+                os.close(out)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
+    _fsync_dir(path.parent)
+    return values, True
+
+
+def _verify_reads(ring: KeyRing, dbs: list[Path], source: str) -> KeyRing:
+    """Refuse a key that cannot decrypt a database it is about to serve
+    (Opus review of F-006, #3) -- at startup, not at the first decrypt."""
+    from finhive.db.encryption import DecryptionError, decrypt_field
+    from loan_manager.infrastructure.migrations.encrypt_existing_rows import (
+        sample_ciphertext,
+    )
+
+    for db in dbs:
+        try:
+            blob = sample_ciphertext(db)
+        except sqlite3.DatabaseError as exc:
+            raise KeyConfigurationError(f"{db} cannot be read as a database: {exc}") from exc
+        if blob is None:
+            continue
+        readable = False
+        for version in ring.masters:
+            try:
+                decrypt_field(blob, ring.key_data(version))
+            except DecryptionError:
+                continue
+            except UnicodeDecodeError:
+                pass  # the tag verified; only the text decoding differs
+            readable = True
+            break
+        if not readable:
+            raise KeyConfigurationError(
+                f"The master key from {source} cannot read\n    {db}\n"
+                "That database was encrypted with a different key. Nothing was "
+                "written. Restore the key it was encrypted with (your backed-up "
+                "master_key.key, or the FINHIVE_MASTER_KEY_V<n> you set), or point "
+                "FINHIVE_DB_PATH at the database this key belongs to. If this is the "
+                "synthetic demo ledger, start it over with demo-reset."
+            )
+    return ring
 
 def _announce_new_key(path: Path) -> None:
     from loan_manager.infrastructure.logging.logger import get_logger
@@ -333,9 +412,10 @@ def load_or_create_keys(
     app's `DB_PATH`). A new key is created only when none of them holds
     encrypted data; otherwise the person is told to restore their key.
 
-    Raises `KeyConfigurationError` when the environment and the key file give
-    different masters for one version -- rows written under one would be
-    unreadable under the other, so neither is picked silently.
+    Raises `KeyConfigurationError` when the key file holds a master the
+    environment does not match (rows written under one would be unreadable
+    under the other, so neither is picked silently), and when a loaded key
+    cannot decrypt a database in `db_paths` that holds ciphertext.
     """
     from loan_manager import config
     from loan_manager.infrastructure.migrations.encrypt_existing_rows import (
@@ -346,28 +426,31 @@ def load_or_create_keys(
     path = Path(config.KEY_FILE if key_file is None else key_file)
     dbs = [Path(p) for p in ((config.DB_PATH,) if db_paths is None else db_paths)]
     from_file = _read_key_file(path) if path.exists() else None
+    env_vars = _key_vars(env)
 
-    if env.get(_VERSION_NAME):
+    # Any FINHIVE_* key variable means "configured by environment": a master
+    # without its version stays the hard error it always was, rather than
+    # being skipped in favour of a new key file (review #4).
+    if env_vars:
         if from_file is not None:
-            env_vars, file_vars = _key_vars(env), _key_vars(from_file)
-            clash = sorted(
-                k for k in env_vars.keys() & file_vars.keys()
-                if k.startswith(_MASTER_PREFIX) and env_vars[k] != file_vars[k]
-            )
+            file_masters = {
+                k: v for k, v in _key_vars(from_file).items() if k.startswith(_MASTER_PREFIX)
+            }
+            clash = sorted(k for k, v in file_masters.items() if env_vars.get(k) != v)
             if clash:
                 raise KeyConfigurationError(
-                    f"There are two different master keys for {', '.join(clash)}: one "
-                    f"in the environment and one in {path}.\n\n"
+                    f"There are two different master keys for {', '.join(clash)}: "
+                    f"{path} holds one the environment does not match.\n\n"
                     "Data written under one cannot be read under the other, so the "
                     "app will not guess. Keep the one your ledger was encrypted with: "
                     "either remove the environment variables (setx / ops/.env.local) "
                     "or move the key file aside."
                 )
-        return load_keys(env)
+        return _verify_reads(load_keys(env), dbs, "the environment")
 
     if from_file is not None:
         try:
-            return load_keys(_key_vars(from_file))
+            ring = load_keys(_key_vars(from_file))
         except KeyConfigurationError as exc:
             first_line = str(exc).split("\n", 1)[0]
             raise KeyConfigurationError(
@@ -375,8 +458,15 @@ def load_or_create_keys(
                 "Restore it from your backup. Do not delete it: a new key "
                 "cannot read data the old one encrypted."
             ) from exc
+        return _verify_reads(ring, dbs, str(path))
 
-    locked = [db for db in dbs if holds_encrypted_rows(db)]
+    try:
+        locked = [db for db in dbs if holds_encrypted_rows(db)]
+    except sqlite3.DatabaseError as exc:
+        raise KeyConfigurationError(
+            f"No master key was found, and a database could not be checked for "
+            f"encrypted data ({exc}), so no key was created."
+        ) from exc
     if locked:
         listing = "\n".join(f"    {db}" for db in locked)
         raise KeyConfigurationError(
@@ -390,6 +480,7 @@ def load_or_create_keys(
             "    .\\run_local_windows.bat demo-reset (Windows)"
         )
 
-    created = _create_key_file(path)
-    _announce_new_key(path)
-    return load_keys(created)
+    values, created = _create_key_file(path)
+    if created:
+        _announce_new_key(path)
+    return load_keys(_key_vars(values))

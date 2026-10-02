@@ -256,3 +256,109 @@ def test_default_key_file_lives_under_data_encryption_and_is_git_ignored() -> No
     assert config.KEY_FILE == config.DATA_DIR / "encryption" / "master_key.key"
     gitignore = (Path(__file__).resolve().parents[4] / ".gitignore").read_text()
     assert "/src/Loan Manager/data/*" in gitignore
+
+
+# ── review fixes (Opus security review of F-006) ────────────────────────────
+
+
+def test_concurrent_first_launches_end_with_one_key_on_disk_that_every_caller_holds(
+    tmp_path: Path,
+) -> None:
+    """Review #1 (blocking): two first launches at once must never leave a
+    process holding a key that is not the one on disk -- rows it wrote would
+    be unreadable on every later launch."""
+    import threading
+
+    key_file = tmp_path / "encryption" / "master_key.key"
+    for _ in range(30):
+        if key_file.exists():
+            key_file.unlink()
+        barrier = threading.Barrier(4)
+        rings: list = []
+        errors: list = []
+
+        def launch(barrier=barrier, rings=rings, errors=errors) -> None:
+            barrier.wait()
+            try:
+                rings.append(load_or_create_keys(env={}, key_file=key_file, db_paths=[]))
+            except Exception as exc:  # noqa: BLE001 -- the assertion reports it
+                errors.append(exc)
+
+        threads = [threading.Thread(target=launch) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        on_disk = load_or_create_keys(env={}, key_file=key_file, db_paths=[]).key_data()
+        assert {r.key_data() for r in rings} == {on_disk}
+        assert sorted(p.name for p in key_file.parent.iterdir()) == ["master_key.key"]
+
+
+def test_a_key_that_cannot_decrypt_the_protected_database_is_refused(tmp_path: Path) -> None:
+    """Review #3: a key file minted for an empty database must not be
+    accepted later for a ledger another key encrypted -- refuse at startup,
+    not at the first decrypt."""
+    db = _encrypted_db(tmp_path / "ledger.db")  # written under the suite's 0x42 key
+    key_file = tmp_path / "master_key.key"
+    _write_key_file(key_file, _KEY_A)
+
+    with pytest.raises(KeyConfigurationError, match="cannot read"):
+        load_or_create_keys(env={}, key_file=key_file, db_paths=[db])
+    with pytest.raises(KeyConfigurationError, match="cannot read"):
+        load_or_create_keys(env=_env_key(_KEY_A), key_file=tmp_path / "x", db_paths=[db])
+
+
+def test_the_key_that_encrypted_the_database_is_accepted(tmp_path: Path) -> None:
+    db = _encrypted_db(tmp_path / "ledger.db")
+    right = base64.b64encode(b"\x42" * 32).decode()
+    ring = load_or_create_keys(env=_env_key(right), key_file=tmp_path / "x", db_paths=[db])
+    assert ring.current_version == 1
+
+
+def test_a_master_key_without_a_version_is_not_silently_ignored(tmp_path: Path) -> None:
+    """Review #4: FINHIVE_MASTER_KEY_V1 alone used to be a hard error; it
+    must not now be skipped in favour of minting a new key file."""
+    key_file = tmp_path / "master_key.key"
+    with pytest.raises(KeyConfigurationError):
+        load_or_create_keys(
+            env={"FINHIVE_MASTER_KEY_V1": _KEY_A}, key_file=key_file, db_paths=[]
+        )
+    assert not key_file.exists()
+
+
+def test_a_file_version_the_environment_lacks_is_refused(tmp_path: Path) -> None:
+    """Review #4: env V2 + file V1 would leave V1 rows unreadable."""
+    key_file = tmp_path / "master_key.key"
+    _write_key_file(key_file, _KEY_A)  # V1
+    env = {"FINHIVE_KEY_VERSION": "2", "FINHIVE_MASTER_KEY_V2": _KEY_B}
+    with pytest.raises(KeyConfigurationError, match="two different"):
+        load_or_create_keys(env=env, key_file=key_file, db_paths=[])
+
+
+def test_odd_table_names_and_non_sqlite_files_fail_closed_with_a_message(tmp_path: Path) -> None:
+    """Review #5: never a raw traceback, never a minted key."""
+    import sqlite3
+
+    odd = tmp_path / "odd.db"
+    conn = sqlite3.connect(odd)
+    conn.execute('CREATE TABLE "we""ird" (x_ct BLOB)')
+    conn.commit()
+    conn.close()
+    load_or_create_keys(env={}, key_file=tmp_path / "a.key", db_paths=[odd])  # no rows: fine
+
+    junk = tmp_path / "junk.db"
+    junk.write_bytes(b"this is not a database" * 100)
+    with pytest.raises(KeyConfigurationError):
+        load_or_create_keys(env={}, key_file=tmp_path / "b.key", db_paths=[junk])
+    assert not (tmp_path / "b.key").exists()
+
+
+def test_report_columns_migration_protects_its_db_target() -> None:
+    """Review #2: the migration CLI must pass its --db to the key check."""
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "loan_manager/infrastructure/migrations/add_report_proposal_columns.py"
+    ).read_text()
+    assert "get_key_ring(also_protect=(db_path,))" in source
