@@ -87,8 +87,6 @@ echo "Installing backend dependencies..."
 pip install --quiet --upgrade pip
 pip install --quiet -e ".[dev]"
 
-echo "Installing frontend dependencies..."
-(cd "$ROOT_DIR/web" && npm install --silent)
 
 # --- Detect which stages have landed (before touching the database) ---
 MISSING_STAGES=()
@@ -137,6 +135,11 @@ if [ "${#MISSING_STAGES[@]}" -gt 0 ]; then
         echo "  - $stage"
     done
 fi
+
+# Frontend install runs only once the KCH-90 gate has passed (F-002): a
+# refusal must not wait behind a slow npm install.
+echo "Installing frontend dependencies..."
+(cd "$ROOT_DIR/web" && npm install --silent)
 
 # --- Database: only required when a DB-dependent stage will run ---
 NEEDS_DB=0
