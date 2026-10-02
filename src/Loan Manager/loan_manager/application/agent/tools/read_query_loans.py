@@ -6,7 +6,8 @@ returned `ref_ids` itself, through its own use cases.
 
 Two guardrails ahead of any query:
 
-1. A `borrower_group`/`depositor_group` value must already be a value
+1. A `borrower_group`/`depositor_group`/`borrower_name`/`depositor_name`
+   value must already be a value
    `resolve_entity` would return for THAT field — checked with a per-field
    known-slug set (`GetAutocompleteValues`), never fuzzy and never across
    fields (a value that is a real `borrower_group` but was passed as
@@ -46,7 +47,8 @@ from loan_manager.domain.services import loan_ordering
 from loan_manager.domain.services.status_engine import StatusEngine
 from loan_manager.domain.value_objects.status import LoanStatus
 
-_GROUP_FIELDS = ("borrower_group", "depositor_group")
+# F-004: names are checked exactly like groups -- per field, never fuzzy.
+_FILTER_FIELDS = ("borrower_group", "depositor_group", "borrower_name", "depositor_name")
 
 
 def _normalize(value: str) -> str:
@@ -76,7 +78,7 @@ class QueryLoansTool:
                 "paid-off history, say that it is out of scope for this query",
             )
 
-        for field_name in _GROUP_FIELDS:
+        for field_name in _FILTER_FIELDS:
             value = getattr(args, field_name)
             if value is None:
                 continue
@@ -95,6 +97,8 @@ class QueryLoansTool:
             LoanFilterDTO(
                 borrower_group=args.borrower_group,
                 depositor_group=args.depositor_group,
+                borrower_name=args.borrower_name,
+                depositor_name=args.depositor_name,
             )
         )
 

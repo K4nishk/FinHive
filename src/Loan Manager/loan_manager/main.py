@@ -72,7 +72,7 @@ def main() -> None:
     # The migration is NOT run automatically: encryption is one-way, and
     # doing it to someone's only copy of their loan book without them asking
     # is not a decision this code gets to make.
-    from loan_manager.config import DB_PATH
+    from loan_manager.config import DB_PATH, KEY_FILE
     from loan_manager.infrastructure.migrations.encrypt_existing_rows import (
         needs_migration,
     )
@@ -107,10 +107,13 @@ STEP 1 — Take your own backup, somewhere outside the app folder.
 
 STEP 2 — Back up your master key, if you have not already.
 
-  It is in ops/.env.local as FINHIVE_KEY_VERSION and FINHIVE_MASTER_KEY_V1.
-  Store it somewhere separate from the database backup -- a password
-  manager, not the same folder. After Step 3 the two are useless apart:
-  losing the key loses the data, and there is no recovery path.
+  Unless you set FINHIVE_KEY_VERSION / FINHIVE_MASTER_KEY_V1 yourself
+  (e.g. in ops/.env.local), it is the file
+      {KEY_FILE}
+  which the app created on its first launch. Store a copy somewhere separate
+  from the database backup -- a USB drive or password manager, not the same
+  folder. After Step 3 the two are useless apart: losing the key loses the
+  data, and there is no recovery path.
 
 
 STEP 3 — Run the migration.

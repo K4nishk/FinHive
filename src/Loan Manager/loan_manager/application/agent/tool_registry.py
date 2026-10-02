@@ -89,7 +89,9 @@ TOOL_SPECS: Mapping[str, ToolSpec] = MappingProxyType(
             name="query_loans",
             description=(
                 "Filtered aggregate query over loans. Returns counts and totals, "
-                "never rows. Group filters must be values returned by resolve_entity."
+                "never rows. Filter by borrower_name/depositor_name for one person, "
+                "borrower_group/depositor_group for a group; every filter value "
+                "must be one returned by resolve_entity for that same field."
             ),
             mode=ToolMode.READ,
             args_model=QueryLoans,

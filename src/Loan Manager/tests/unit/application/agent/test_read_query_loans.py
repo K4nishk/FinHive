@@ -25,6 +25,8 @@ class _Args:
     status: str
     borrower_group: str | None = None
     depositor_group: str | None = None
+    borrower_name: str | None = None
+    depositor_name: str | None = None
 
 
 def _build(loans):
@@ -179,3 +181,85 @@ def test_normalize_parity_with_blind_index() -> None:
     ]
     for sample in samples:
         assert _normalize(sample) == blind_index.normalize(sample)
+
+
+# ── F-004: filter by a named person, not only a group ──────────────────────
+
+
+def test_borrower_name_filter_counts_only_that_borrower() -> None:
+    """F-004: `Is deepak menon overdue?` had no name filter to use, so the
+    model jammed the B-token into borrower_group and the turn failed."""
+    loans = [
+        _active_loan(borrower_name="deepak menon", borrower_group="menon traders", due_date=None),
+        _active_loan(borrower_name="anil menon", borrower_group="menon traders", due_date=None),
+    ]
+    tool = _build(loans)
+    result = tool.execute(_Args(status="overdue", borrower_name="Deepak Menon"))
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["ref_ids"] == [str(loans[0].reference_id)]
+
+
+def test_depositor_name_filter_counts_only_that_depositor() -> None:
+    loans = [
+        _active_loan(depositor_name="arjun rao"),
+        _active_loan(depositor_name="meera iyer"),
+    ]
+    tool = _build(loans)
+    result = tool.execute(_Args(status="active", depositor_name="arjun rao"))
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["ref_ids"] == [str(loans[0].reference_id)]
+
+
+def test_unknown_borrower_name_returns_resolve_first_error_not_zero() -> None:
+    loans = [_active_loan(borrower_name="deepak menon")]
+    tool = _build(loans)
+    result = tool.execute(_Args(status="overdue", borrower_name="deepak"))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "UNRESOLVED_ENTITY"
+    assert result["error"]["field"] == "borrower_name"
+    assert "count" not in result
+
+
+def test_name_from_wrong_field_rejected() -> None:
+    loans = [_active_loan(borrower_name="deepak menon", depositor_name="arjun rao")]
+    tool = _build(loans)
+    result = tool.execute(_Args(status="active", depositor_name="deepak menon"))
+    assert result["ok"] is False
+    assert result["error"]["field"] == "depositor_name"
+
+
+def test_query_loans_args_accept_name_filters() -> None:
+    from loan_manager.application.agent.tools.args import QueryLoans
+
+    args = QueryLoans.model_validate({"status": "overdue", "borrower_name": "deepak menon"})
+    assert args.borrower_name == "deepak menon"
+    args = QueryLoans.model_validate({"status": "active", "depositor_name": "arjun rao"})
+    assert args.depositor_name == "arjun rao"
+
+
+def test_borrower_token_under_borrower_name_round_trips_to_a_count() -> None:
+    """F-004 trace shape: the model names one person by their B-token. Under
+    `borrower_name` it now detokenises, validates and filters; before the
+    fix the only slot was `borrower_group`, where the B-token is rejected."""
+    from loan_manager.application.agent.tokeniser import TokenKind, TokenMap
+    from loan_manager.application.agent.tool_registry import parse_args
+    from loan_manager.domain.services.entity_resolver import EntityResolver
+
+    loans = [
+        _active_loan(borrower_name="deepak menon", borrower_group="menon traders", due_date=None),
+        _active_loan(borrower_name="anil menon", borrower_group="menon traders", due_date=None),
+    ]
+    tm = TokenMap(EntityResolver({"borrower_name": ["deepak menon", "anil menon"]}))
+    b_token = tm.token_for(TokenKind.BORROWER, "deepak menon")
+
+    args = parse_args(
+        "query_loans",
+        tm.detokenise_args(f'{{"status": "overdue", "borrower_name": "{b_token}"}}'),
+    )
+    result = _build(loans).execute(args)
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["overdue_undated"] == 1

@@ -53,16 +53,13 @@ REM from THIS SCRIPT's location (%~dp0), never a relative path inside
 REM requirements.txt -- pip resolves those against its own working directory.
 python -m pip install --quiet -e "%~dp0..\.."
 
-REM Encryption master key (ARB D-15). ops\.env.local is written in POSIX `export`
-REM syntax for the mac launcher; parsing it reliably in batch is more trouble than
-REM it earns, so Windows sets the variables directly. The app fails at startup with
-REM instructions if they are absent -- see docs\AskFinHive_instructions.md.
+REM Encryption master key (ARB D-15). Nothing to set: with no FINHIVE_KEY_VERSION
+REM in the environment, the app creates data\encryption\master_key.key on first
+REM launch and reuses it after that (F-006). A key that only lived in one
+REM PowerShell window was lost with the window. See docs\AskFinHive_instructions.md.
 if not defined FINHIVE_KEY_VERSION (
-    echo.
-    echo WARNING: FINHIVE_KEY_VERSION is not set. Encryption at rest is mandatory,
-    echo          so Loan Manager will refuse to start. Set it and the matching
-    echo          FINHIVE_MASTER_KEY_V^<n^> first - see docs\AskFinHive_instructions.md.
-    echo.
+    echo Encryption key file: %~dp0data\encryption\master_key.key
+    echo   Created on first launch if missing. Back it up - without it your data cannot be read.
 )
 
 :: Run application

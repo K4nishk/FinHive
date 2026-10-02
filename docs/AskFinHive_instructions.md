@@ -33,7 +33,7 @@ setup items:
 | | What you do | When |
 |---|---|---|
 | 1 | `git pull`, then run the launcher as usual — it installs the new packages itself | Once |
-| 2 | Set a **master key** (encryption at rest is now mandatory) and an **OpenRouter key** (for the AI) | Once — §3 |
+| 2 | Set an **OpenRouter key** (for the AI). The **master key** (encryption at rest) is created for you on first launch — just back it up | Once — §3 |
 | 3 | **Encrypt your existing `loans.db`** | Once, when you are ready — §8 |
 
 Until you do step 3, the app will not open your real ledger: it stops at startup and
@@ -91,35 +91,51 @@ There is no separate install step: the launcher installs everything on its first
 
 ## 3. Set your keys (once)
 
-The app encrypts names and amounts at rest and **will not start without a master key**.
-Generate one, and **keep it somewhere safe (a password manager)** — losing it makes the
-database unreadable, and there is no recovery.
+### 3.1 Master key (encryption): nothing to set up, but back it up
 
-**macOS** — generate a key:
-```bash
-openssl rand -base64 32
+The app encrypts names and amounts at rest. **On first launch it creates its master key
+for you** and prints where it is:
+
 ```
-Create `ops/.env.local` (inside the `FinHive` folder; it is git-ignored and the launcher
-loads it on every start) with these three lines:
+src/Loan Manager/data/encryption/master_key.key
+```
+
+Every later launch reuses that file; you never type the key. It is git-ignored and
+readable by your user only.
+
+**Back that file up once, today:** copy it to a USB drive or into a password manager,
+**not** next to your database backups. Without it your encrypted ledger can never be
+read again; there is no recovery.
+
+**macOS**
 ```bash
-export FINHIVE_KEY_VERSION=1
-export FINHIVE_MASTER_KEY_V1="<paste the generated value>"
+cp "src/Loan Manager/data/encryption/master_key.key" /Volumes/<your USB drive>/
+```
+**Windows (PowerShell)**
+```powershell
+Copy-Item "src\Loan Manager\data\encryption\master_key.key" E:\   # your USB drive letter
+```
+
+**Already set a key yourself** (`FINHIVE_KEY_VERSION` / `FINHIVE_MASTER_KEY_V1` in
+`ops/.env.local` or with `setx`)? Keep it: a key in the environment always wins, and no
+file is created. If the environment and the file ever hold *different* keys, the app
+stops and asks you to keep one rather than guessing.
+
+### 3.2 OpenRouter key (AI): set once
+
+**macOS**: create `ops/.env.local` (inside the `FinHive` folder; git-ignored, and the
+launcher loads it on every start) with:
+```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
 ```
 
-**Windows (PowerShell)** — generate a key:
+**Windows (PowerShell)**:
 ```powershell
-$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
-```
-Save the keys for your Windows user, so the launcher sees them from any **new** window
-or a double-click:
-```powershell
-setx FINHIVE_KEY_VERSION 1
-setx FINHIVE_MASTER_KEY_V1 "<paste the generated value>"
 setx OPENROUTER_API_KEY "<your OpenRouter key>"
 ```
-**Then close PowerShell and open a new window** — `setx` does not reach the window it
-ran in.
+**Then close PowerShell and open a new window.** `setx` saves it permanently for your
+Windows user, but only windows opened afterwards see it. Do **not** use
+`$env:OPENROUTER_API_KEY = ...` for this: that lasts only until the window closes.
 
 **Never commit a key** or paste it into an issue or chat.
 
@@ -146,8 +162,16 @@ From the `FinHive` folder:
 (A double-click cannot pass `demo`, so it always opens your real ledger. Use PowerShell
 for the demo.)
 
-Expected, before the window opens: `Seeded 27 demo loans into …demo.db` (first run
-only), then `Using the demo ledger: …demo.db`.
+Expected, before the window opens:
+- first run only: a framed notice **"A new encryption key was created for Loan
+  Manager"** with the key file's path. Back that file up now (§3.1);
+- first run only: `Seeded 27 demo loans into …demo.db`;
+- then `Using the demo ledger: …demo.db`.
+
+> **Tried an earlier build and set the key with `$env:` in a window you have since
+> closed?** That key is gone, so the demo it encrypted cannot be read. The launcher stops
+> with "this database already holds data encrypted with one" instead of making a new key.
+> Start the demo over with `.\run_local_windows.bat demo-reset` (it is synthetic data).
 
 Who is in the demo ledger:
 
@@ -249,11 +273,12 @@ This recreates the demo ledger, removing your approvals and undos, then opens th
 
 Do this when you are happy with the demo. **Close the app first.** These commands use
 the app's own Python (`.venv`, created by the launcher's first run), so nothing needs
-activating. Your master key from §3 must be set (macOS: `ops/.env.local` is loaded below;
-Windows: a window opened after `setx`).
+activating. Your master key is the file from §3.1 (the demo run created it; if you skipped
+the demo, step 2 creates it and prints where).
 
-**1. Back up your ledger somewhere outside the app folder, and back up your key** (a
-password manager, not the same folder). After this step the two are useless apart.
+**1. Back up your ledger somewhere outside the app folder, and back up your key file**
+(§3.1; a USB drive or password manager, not the same folder). After step 2 the two are
+useless apart.
 
 **2. Encrypt the existing records.** Every row is encrypted in one transaction, then
 decrypted and compared with the original before anything is committed; if one row does
@@ -265,7 +290,7 @@ first.
 
 **macOS** (from the `FinHive` folder)
 ```bash
-set -a; . ops/.env.local; set +a                                   # load your keys
+[ -f ops/.env.local ] && { set -a; . ops/.env.local; set +a; }     # only if you keep keys there
 cd "src/Loan Manager"
 unset FINHIVE_DB_PATH
 cp data/loans.db ~/Desktop/loans-backup-before-mvp1.1.db                                      # step 1
@@ -301,7 +326,9 @@ startup and stops, leaving your ledger as it was.
 | macOS: `python: command not found` | Expected — macOS only ships `python3`, and nothing here needs `python`. If you want the alias anyway: `echo 'alias python=python3' >> ~/.zshrc && source ~/.zshrc` |
 | Windows: `python` opens the Microsoft Store, or "Python was not found" | Install Python from python.org with **"Add python.exe to PATH"** ticked, then open a new window. Turn off the Store aliases under *Settings → Apps → Advanced app settings → App execution aliases*. |
 | "Cannot start Loan Manager … created before encryption at rest" | Your real ledger has not been migrated yet — follow §8, or start the demo instead (§4). |
-| A message about the **master key** at startup | The keys are not visible to the app. macOS: check `ops/.env.local`. Windows: `setx` only reaches *new* windows — open a fresh one. Also check the key matches the one the database was encrypted with. |
+| "No master key was found, but this database already holds data encrypted with one" | The key that encrypted it is gone (e.g. it was set with `$env:` in a window that has since closed). Copy your backed-up key file to `src/Loan Manager/data/encryption/master_key.key`. If it is only the demo ledger, start it over: `demo-reset` (§7). The app never makes a new key over encrypted data, because a new key cannot read it. |
+| "There are two different master keys for FINHIVE_MASTER_KEY_V1" | One key is in your environment (`setx` / `ops/.env.local`) and a different one in the key file. Keep the one your ledger was encrypted with and remove the other. |
+| "The key file … is damaged" | Restore `master_key.key` from your backup. Do not delete it: a new key cannot read your data. |
 | "The AI service is not configured… OPENROUTER_API_KEY…" | Set `OPENROUTER_API_KEY` (§3), then restart the app. |
 | "Not configured" even though `OPENROUTER_API_KEY` is set | Your `data/settings.json` is missing the `"llm"` block — usually a local theme edit kept the old file. Run the `git stash` / `git pull` / `git stash pop` from §0, then restart. |
 | The app opened your real ledger instead of the demo | The launcher was started without `demo` (a double-click cannot pass it). Use the §4 command. |

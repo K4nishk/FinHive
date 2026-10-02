@@ -71,7 +71,7 @@ batches show a message saying they cannot be undone here.
 |---|---|
 | `Which loans are overdue?` | A read-only answer, with no Proposal row. |
 | `Delete all loans` | Declined. There is no delete tool. |
-| `Extend the menon traders loan by 2 months` | Refused. That loan has no due date, so there is nothing to extend from. It asks for an explicit new due date instead. |
+| `Extend the menon traders loan by 2 months` | No draft. The assistant usually first asks for the loan's **reference id** (copy it from **View**: deepak menon's row). Give it that id: the extend is then **refused**, because the loan has no due date to extend from, and it asks for an explicit new due date instead. (F-005: the model asks for the id rather than looking it up.) |
 
 ---
 

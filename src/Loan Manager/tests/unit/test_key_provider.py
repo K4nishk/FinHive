@@ -157,7 +157,7 @@ def test_the_error_tells_the_user_how_to_fix_it() -> None:
     msg = str(e.value)
     assert "FINHIVE_KEY_VERSION=1" in msg
     assert "ops/.env.local" in msg
-    assert "urandom(32)" in msg          # how to generate one
+    assert "data/encryption/master_key.key" in msg  # where the key normally lives (F-006)
     assert "no recovery path" in msg     # and why not to lose it
 
 

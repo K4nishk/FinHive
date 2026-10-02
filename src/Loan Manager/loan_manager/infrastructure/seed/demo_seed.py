@@ -279,9 +279,13 @@ def main(argv: list | None = None) -> int:
     # encrypted under a key that turns out to be unusable is worse than no
     # file at all -- here that also means it must be worse than losing
     # whatever `--replace` was about to overwrite.
+    # F-006: with no key configured, this is where a first-time demo run
+    # creates the key file. The target counts as a database to protect unless
+    # `--replace` is about to recreate it: a kept demo ledger encrypted under
+    # a key that is now gone must not get a new key quietly minted beside it.
     container = Container()
     try:
-        container.get_key_ring()
+        container.get_key_ring(also_protect=() if args.replace else (db_path,))
     except KeyConfigurationError as exc:
         _log_cli_error(f"Cannot seed demo database.\n\n{exc}")
         return 1

@@ -16,15 +16,30 @@ No provider registry and no factory. There is one source today; ARB D-15 records
 the trigger for adding a second (a second user, a hosted deployment, or the
 database file leaving this machine).
 
+**Where the key comes from (F-006).** The environment first (macOS users who
+put it in `ops/.env.local`, which `run_mac.sh` sources), else the key file
+`data/encryption/master_key.key`, else a new key is created in that file on
+first launch -- never when a database already holds encrypted data, because
+a new key cannot read it. A key that lived only in one PowerShell window was
+lost with the window, and blocking a first-time user until they set up a
+password manager is a failure mode, not a safeguard.
+
 **The master key is INTERIM, and its limit is written down rather than implied.**
-It lives in `ops/.env.local` beside the database file, so it defends a stolen
-backup or a synced folder and NOT an attacker with read access to this home
-directory. That is a deliberate, recorded trade for a single-user prototype.
+It lives beside the database file (key file or `ops/.env.local`), so it defends
+a stolen database copy or a synced database file and NOT an attacker with read
+access to this home directory. That is a deliberate, recorded trade for a
+single-user prototype (ARB D-15).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Mapping
+import base64
+import os
+import secrets
+import sys
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from finhive.db.keys import KeyRing
@@ -41,23 +56,16 @@ class KeyConfigurationError(RuntimeError):
 
 _SETUP_HELP = (
     "Encryption at rest is mandatory (ARB D-15) and the app cannot start "
-    "without a master key.\n\n"
-    "Generate one:\n"
-    "    python3 -c \"import os,base64; "
-    'print(base64.b64encode(os.urandom(32)).decode())"\n\n'
-    "Then set BOTH variables. run_mac.sh sources ops/.env.local, so on macOS "
-    "putting them there and relaunching through it is enough:\n"
-    "    export FINHIVE_KEY_VERSION=1\n"
-    '    export FINHIVE_MASTER_KEY_V1="<the base64 value>"\n\n'
-    "On Windows, or when starting the app directly rather than through a "
-    "launcher, export them in the shell you launch from — nothing in the app "
-    "reads a dotenv file.\n\n"
-    "Keep the key. Losing it makes every encrypted row unreadable and there is "
-    "no recovery path.\n\n"
-    "Note on what this protects: the key sits beside the database file, so it "
-    "defends a stolen backup or a synced folder, NOT someone with read access "
-    "to this machine. That is a recorded interim trade for a single-user "
-    "prototype (ARB D-15)."
+    "without its master key.\n\n"
+    "Normally there is nothing to set up: on first launch the app creates the "
+    "key in src/Loan Manager/data/encryption/master_key.key and reuses it on "
+    "every launch after that. Keep a copy of that file somewhere else (a USB "
+    "drive or a password manager), apart from your database backups.\n\n"
+    "A key can also come from the environment, which takes priority over the "
+    "file: FINHIVE_KEY_VERSION=1 and FINHIVE_MASTER_KEY_V1=<base64 of 32 "
+    "random bytes>. run_mac.sh loads these from ops/.env.local.\n\n"
+    "Losing the key makes every encrypted row unreadable and there is no "
+    "recovery path."
 )
 
 
@@ -226,3 +234,162 @@ def candidate_key_index() -> list[bytes]:
     current = _active.current_version
     versions = [current] + sorted(v for v in _active.masters if v != current)
     return [_active.key_index(v) for v in versions]
+
+
+
+# --- The key file (F-006) ---------------------------------------------------
+
+_VERSION_NAME = "FINHIVE_KEY_VERSION"
+_MASTER_PREFIX = "FINHIVE_MASTER_KEY_V"
+
+_KEY_FILE_HEADER = """\
+# FinHive Loan Manager master encryption key.
+# Created automatically on first launch. The app reads it on every start.
+#
+# BACK THIS FILE UP somewhere other than this computer (USB drive, password
+# manager), separately from your database backups. Without it your encrypted
+# ledger can never be read again. Do not edit it and never share or commit it.
+"""
+
+
+def _key_vars(values: Mapping[str, str]) -> dict[str, str]:
+    return {
+        k: v for k, v in values.items()
+        if k == _VERSION_NAME or k.startswith(_MASTER_PREFIX)
+    }
+
+
+def _read_key_file(path: Path) -> dict[str, str]:
+    """`NAME=value` lines; `#` comments, blank lines, `export `, quotes, CRLF
+    and a Notepad BOM tolerated. Errors name the line, never its value."""
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise KeyConfigurationError(f"Cannot read the key file {path}: {exc}") from exc
+    values: dict[str, str] = {}
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        name, sep, value = line.partition("=")
+        if not sep:
+            raise KeyConfigurationError(
+                f"The key file {path} is damaged: line {number} is not NAME=value.\n\n"
+                "Restore it from your backup. Do not delete it: a new key "
+                "cannot read data the old one encrypted."
+            )
+        values[name.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _create_key_file(path: Path) -> dict[str, str]:
+    values = {
+        _VERSION_NAME: "1",
+        f"{_MASTER_PREFIX}1": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    body = _KEY_FILE_HEADER + "".join(f"{k}={v}\n" for k, v in values.items())
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return values
+
+
+def _announce_new_key(path: Path) -> None:
+    from loan_manager.infrastructure.logging.logger import get_logger
+
+    get_logger(__name__).warning("Created a new master encryption key at %s", path)
+    rule = "=" * 72
+    print(
+        f"\n{rule}\n"
+        "  A new encryption key was created for Loan Manager:\n\n"
+        f"      {path}\n\n"
+        "  BACK THIS FILE UP NOW (USB drive or password manager), apart from\n"
+        "  your database backups. Without it your encrypted ledger can never\n"
+        "  be read again. The app reuses this key on every launch.\n"
+        f"{rule}\n",
+        file=sys.stderr,
+    )
+
+
+def load_or_create_keys(
+    env: Mapping[str, str] | None = None,
+    key_file: Path | str | None = None,
+    db_paths: Iterable[Path | str] | None = None,
+) -> KeyRing:
+    """The app's key ring: environment, else key file, else a new key file.
+
+    `db_paths` are the databases this key will be used with (default: the
+    app's `DB_PATH`). A new key is created only when none of them holds
+    encrypted data; otherwise the person is told to restore their key.
+
+    Raises `KeyConfigurationError` when the environment and the key file give
+    different masters for one version -- rows written under one would be
+    unreadable under the other, so neither is picked silently.
+    """
+    from loan_manager import config
+    from loan_manager.infrastructure.migrations.encrypt_existing_rows import (
+        holds_encrypted_rows,
+    )
+
+    env = os.environ if env is None else env
+    path = Path(config.KEY_FILE if key_file is None else key_file)
+    dbs = [Path(p) for p in ((config.DB_PATH,) if db_paths is None else db_paths)]
+    from_file = _read_key_file(path) if path.exists() else None
+
+    if env.get(_VERSION_NAME):
+        if from_file is not None:
+            env_vars, file_vars = _key_vars(env), _key_vars(from_file)
+            clash = sorted(
+                k for k in env_vars.keys() & file_vars.keys()
+                if k.startswith(_MASTER_PREFIX) and env_vars[k] != file_vars[k]
+            )
+            if clash:
+                raise KeyConfigurationError(
+                    f"There are two different master keys for {', '.join(clash)}: one "
+                    f"in the environment and one in {path}.\n\n"
+                    "Data written under one cannot be read under the other, so the "
+                    "app will not guess. Keep the one your ledger was encrypted with: "
+                    "either remove the environment variables (setx / ops/.env.local) "
+                    "or move the key file aside."
+                )
+        return load_keys(env)
+
+    if from_file is not None:
+        try:
+            return load_keys(_key_vars(from_file))
+        except KeyConfigurationError as exc:
+            first_line = str(exc).split("\n", 1)[0]
+            raise KeyConfigurationError(
+                f"The key file {path} is damaged: {first_line}\n\n"
+                "Restore it from your backup. Do not delete it: a new key "
+                "cannot read data the old one encrypted."
+            ) from exc
+
+    locked = [db for db in dbs if holds_encrypted_rows(db)]
+    if locked:
+        listing = "\n".join(f"    {db}" for db in locked)
+        raise KeyConfigurationError(
+            "No master key was found, but this database already holds data "
+            f"encrypted with one:\n{listing}\n\n"
+            "A new key cannot read it, so none was created. Restore your key:\n"
+            f"  - copy your backed-up key file to\n    {path}\n"
+            "  - or set FINHIVE_KEY_VERSION and FINHIVE_MASTER_KEY_V1 as before.\n\n"
+            "If this is the synthetic demo ledger, start it over instead:\n"
+            "    ./run_local_mac.sh demo-reset      (macOS)\n"
+            "    .\\run_local_windows.bat demo-reset (Windows)"
+        )
+
+    created = _create_key_file(path)
+    _announce_new_key(path)
+    return load_keys(created)
