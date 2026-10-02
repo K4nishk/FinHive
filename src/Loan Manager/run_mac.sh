@@ -62,6 +62,27 @@ if [ -f "$REPO_ROOT/ops/.env.local" ]; then
 fi
 
 # Run the application
-echo "Starting Loan Manager..."
 cd "$APP_DIR"
+
+# Demo ledger (MVP1.1): `./run_mac.sh demo` seeds a synthetic 27-loan ledger
+# outside data/ on first use and launches on it; `demo-reset` reseeds it. Uses
+# this launcher's venv python, so nothing needs activating by hand and
+# `python` vs `python3` never matters (F-003). Override the location with
+# FINHIVE_DEMO_DB. Without an argument the app opens your real ledger.
+MODE="${1:-}"
+if [ "$MODE" = "demo" ] || [ "$MODE" = "demo-reset" ]; then
+    DEMO_DB="${FINHIVE_DEMO_DB:-$HOME/finhive-demo/demo.db}"
+    mkdir -p "$(dirname "$DEMO_DB")"
+    # Seed with FINHIVE_DB_PATH unset: the seeder refuses to overwrite the
+    # database the app is currently pointed at.
+    if [ "$MODE" = "demo-reset" ]; then
+        env -u FINHIVE_DB_PATH python -m loan_manager.infrastructure.seed --db "$DEMO_DB" --replace
+    elif [ ! -s "$DEMO_DB" ]; then
+        env -u FINHIVE_DB_PATH python -m loan_manager.infrastructure.seed --db "$DEMO_DB"
+    fi
+    export FINHIVE_DB_PATH="$DEMO_DB"
+    echo "Using the demo ledger: $FINHIVE_DB_PATH"
+fi
+
+echo "Starting Loan Manager..."
 python -m loan_manager.main

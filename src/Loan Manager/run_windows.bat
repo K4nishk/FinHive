@@ -66,7 +66,41 @@ if not defined FINHIVE_KEY_VERSION (
 )
 
 :: Run application
-echo Starting Loan Manager...
 cd /d "%~dp0"
+
+REM Demo ledger (MVP1.1): "run_windows.bat demo" seeds a synthetic 27-loan
+REM ledger outside data\ on first use and launches on it; "demo-reset" reseeds
+REM it. Uses this launcher's venv python, so nothing needs activating by hand
+REM and no FINHIVE_DB_PATH has to be set in the right window (F-003). Override
+REM the location with FINHIVE_DEMO_DB. Without an argument the app opens your
+REM real ledger.
+set "MODE=%~1"
+set DEMO=0
+if /i "!MODE!"=="demo" set DEMO=1
+if /i "!MODE!"=="demo-reset" set DEMO=1
+if "!DEMO!"=="1" (
+    if not defined FINHIVE_DEMO_DB set "FINHIVE_DEMO_DB=%USERPROFILE%\finhive-demo\demo.db"
+    for %%d in ("!FINHIVE_DEMO_DB!") do if not exist "%%~dpd" mkdir "%%~dpd"
+    REM Seed with FINHIVE_DB_PATH unset: the seeder refuses to overwrite the
+    REM database the app is currently pointed at.
+    set "FINHIVE_DB_PATH="
+    set SEED_RC=0
+    if /i "!MODE!"=="demo-reset" (
+        python -m loan_manager.infrastructure.seed --db "!FINHIVE_DEMO_DB!" --replace
+        set SEED_RC=!errorlevel!
+    ) else if not exist "!FINHIVE_DEMO_DB!" (
+        python -m loan_manager.infrastructure.seed --db "!FINHIVE_DEMO_DB!"
+        set SEED_RC=!errorlevel!
+    )
+    set "FINHIVE_DB_PATH=!FINHIVE_DEMO_DB!"
+    if not "!SEED_RC!"=="0" (
+        echo ERROR: could not create the demo ledger -- see the message above.
+        pause
+        exit /b 1
+    )
+    echo Using the demo ledger: !FINHIVE_DB_PATH!
+)
+
+echo Starting Loan Manager...
 python -m loan_manager.main
 pause

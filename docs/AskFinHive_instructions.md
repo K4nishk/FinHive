@@ -8,28 +8,38 @@ ledger until you approve it, and anything you approve can be undone.
 
 Release notes and per-capability test steps: [`docs/release_summary/mvp1.1/README.md`](release_summary/mvp1.1/README.md).
 
-Every command below is given for **macOS / Linux (bash or zsh)** and for **Windows
-(PowerShell)**. Run all of them from the `src/Loan Manager` folder unless a step says
-otherwise.
+**You never need to activate a Python environment or type `python`.** Everything runs
+through one launcher, from the **repo root** (the `FinHive` folder):
+
+| | macOS (Terminal) | Windows (PowerShell) |
+|---|---|---|
+| Your real ledger | `./run_local_mac.sh` | `.\run_local_windows.bat` (or double-click it) |
+| The demo ledger | `./run_local_mac.sh demo` | `.\run_local_windows.bat demo` |
+| Start the demo over | `./run_local_mac.sh demo-reset` | `.\run_local_windows.bat demo-reset` |
+
+The launcher checks Python, creates the app's own environment the first time, installs
+what it needs, and starts the app. `src/Loan Manager/run_mac.sh` and
+`src\Loan Manager\run_windows.bat` do the same thing and take the same arguments.
+(The paused MVP2 web app is now behind `--web`; you do not need it.)
 
 ---
 
 ## 0. Already using MVP1? Read this first
 
 Nothing you use today is removed or changed. The Entry, View, Calculator, Pending
-Approval and Settings tabs work as before, and your launcher (`run_mac.sh` /
-`run_windows.bat`) is the same file. MVP1.1 adds one tab and three one-time setup items:
+Approval and Settings tabs work as before. MVP1.1 adds one tab and three one-time
+setup items:
 
 | | What you do | When |
 |---|---|---|
-| 1 | `git pull`, then double-click your launcher as usual — it installs the new packages itself | Once |
+| 1 | `git pull`, then run the launcher as usual — it installs the new packages itself | Once |
 | 2 | Set a **master key** (encryption at rest is now mandatory) and an **OpenRouter key** (for the AI) | Once — §3 |
-| 3 | **Encrypt your existing `loans.db`** with two commands | Once, when you are ready — §8 |
+| 3 | **Encrypt your existing `loans.db`** | Once, when you are ready — §8 |
 
 Until you do step 3, the app will not open your real ledger: it stops at startup and
 prints the exact steps (it never encrypts your only copy without asking). So the
-recommended order is: **try the demo first on a throw-away ledger (§4–§6), then move
-your real ledger across (§8).** Your real `data/loans.db` is not touched by the demo.
+recommended order is: **try the demo first (§4–§6), then move your real ledger across
+(§8).** Your real `data/loans.db` is never touched by the demo.
 
 > **If `git pull` complains about `data/settings.json`** — that file holds your theme
 > choice and MVP1.1 adds the AI settings to it. Keep your change and take the new block:
@@ -47,30 +57,22 @@ your real ledger across (§8).** Your real `data/loans.db` is not touched by the
 
 | Requirement | Notes |
 |---|---|
-| Python **3.10+** | 3.11–3.13 recommended. Check: `python3 --version` (macOS) or `python --version` (Windows). |
+| Python **3.10+** | 3.11–3.13 recommended. **macOS:** check with `python3 --version` — macOS has no `python` command, and you do not need one. **Windows:** install from [python.org](https://www.python.org/downloads/) and tick **"Add python.exe to PATH"**; check with `py --version`. |
 | Git | To clone or update the repo. |
 | An **OpenRouter API key** | Sign up at openrouter.ai and create a key. The demo uses `qwen/qwen-2.5-72b-instruct` (paid tier): about **$0.0004 per model call**, and one question makes 3–6 calls. A full tour costs well under $0.10. |
-| ~500 MB disk | For the virtual environment (PySide6 is large). |
+| ~500 MB disk | For the app's environment (PySide6 is large). |
 
 ---
 
-## 2. Install
+## 2. Get the code
 
-**Existing MVP1 users:** skip this — `git pull`, then let your launcher install the new
-packages the next time you start it. The commands below are for a fresh machine, or
-if you prefer to drive the steps yourself.
+New machine:
 
-**macOS / Linux**
+**macOS**
 ```bash
 git clone https://github.com/K4nishk/FinHive.git
 cd FinHive
 git checkout development
-cd "src/Loan Manager"
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e ../..               # the finhive package: encryption at rest
 ```
 
 **Windows (PowerShell)**
@@ -78,16 +80,12 @@ pip install -e ../..               # the finhive package: encryption at rest
 git clone https://github.com/K4nishk/FinHive.git
 cd FinHive
 git checkout development
-cd "src\Loan Manager"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip install -e ..\..     # the finhive package: encryption at rest
 ```
 
-> PowerShell refuses to run `Activate.ps1`? Allow local scripts for your user once:
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+Existing MVP1 user: `cd` into your `FinHive` folder and `git pull` (see §0).
+
+There is no separate install step: the launcher installs everything on its first run
+(a few minutes the first time, seconds after that).
 
 ---
 
@@ -97,62 +95,59 @@ The app encrypts names and amounts at rest and **will not start without a master
 Generate one, and **keep it somewhere safe (a password manager)** — losing it makes the
 database unreadable, and there is no recovery.
 
-**macOS / Linux**
+**macOS** — generate a key:
 ```bash
-python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+openssl rand -base64 32
 ```
-Put these three lines in `ops/.env.local` at the repo root (git-ignored; `run_mac.sh`
-loads it on every launch), or `export` them in your shell:
+Create `ops/.env.local` (inside the `FinHive` folder; it is git-ignored and the launcher
+loads it on every start) with these three lines:
 ```bash
 export FINHIVE_KEY_VERSION=1
-export FINHIVE_MASTER_KEY_V1="<paste the base64 value>"
+export FINHIVE_MASTER_KEY_V1="<paste the generated value>"
 export OPENROUTER_API_KEY="<your OpenRouter key>"
 ```
 
-**Windows (PowerShell)**
+**Windows (PowerShell)** — generate a key:
 ```powershell
-python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
 ```
-Save them for your Windows user, so `run_windows.bat` (double-clicked or from any new
-window) sees them:
+Save the keys for your Windows user, so the launcher sees them from any **new** window
+or a double-click:
 ```powershell
 setx FINHIVE_KEY_VERSION 1
-setx FINHIVE_MASTER_KEY_V1 "<paste the base64 value>"
+setx FINHIVE_MASTER_KEY_V1 "<paste the generated value>"
 setx OPENROUTER_API_KEY "<your OpenRouter key>"
 ```
-`setx` only affects **new** windows. To use them in the window you are in now as well:
-```powershell
-$env:FINHIVE_KEY_VERSION = "1"
-$env:FINHIVE_MASTER_KEY_V1 = "<paste the base64 value>"
-$env:OPENROUTER_API_KEY = "<your OpenRouter key>"
-```
+**Then close PowerShell and open a new window** — `setx` does not reach the window it
+ran in.
 
 **Never commit a key** or paste it into an issue or chat.
 
 ---
 
-## 4. Create a demo ledger
+## 4. Start on the demo ledger
 
-The demo uses a separate, throw-away database **outside** `data/`, chosen with
-`FINHIVE_DB_PATH` for the current window only. Your real `data/loans.db` is untouched,
-and the seeder refuses to write to it.
+The demo is a synthetic 27-loan ledger kept **outside** the app folder
+(`~/finhive-demo/demo.db` on macOS, `%USERPROFILE%\finhive-demo\demo.db` on Windows).
+The first `demo` run creates it; later runs reuse it. Your real `data/loans.db` is
+never touched.
 
-**macOS / Linux**
+From the `FinHive` folder:
+
+**macOS**
 ```bash
-mkdir -p ~/finhive-demo
-export FINHIVE_DB_PATH="$HOME/finhive-demo/demo.db"
-python -m loan_manager.infrastructure.seed --db "$FINHIVE_DB_PATH"
+./run_local_mac.sh demo
 ```
 
 **Windows (PowerShell)**
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\finhive-demo" | Out-Null
-$env:FINHIVE_DB_PATH = "$HOME\finhive-demo\demo.db"
-python -m loan_manager.infrastructure.seed --db $env:FINHIVE_DB_PATH
+.\run_local_windows.bat demo
 ```
+(A double-click cannot pass `demo`, so it always opens your real ledger. Use PowerShell
+for the demo.)
 
-Expected: `Seeded 27 demo loans into …demo.db`. Do **not** use `setx` for
-`FINHIVE_DB_PATH` — that would make every launch open the demo instead of your ledger.
+Expected, before the window opens: `Seeded 27 demo loans into …demo.db` (first run
+only), then `Using the demo ledger: …demo.db`.
 
 Who is in the demo ledger:
 
@@ -167,21 +162,7 @@ Who is in the demo ledger:
 
 ---
 
-## 5. Launch the demo
-
-In the **same window** where you set `FINHIVE_DB_PATH` (venv active):
-
-**macOS / Linux**
-```bash
-python -m loan_manager.main          # or: ./run_mac.sh
-```
-
-**Windows (PowerShell)**
-```powershell
-python -m loan_manager.main
-```
-(`run_windows.bat` works too, started from this same window with `.\run_windows.bat`;
-a double-clicked launcher does not see `FINHIVE_DB_PATH` and opens your real ledger.)
+## 5. What you should see
 
 The window has six tabs: Entry, View, Calculator, Pending Approval, **Ask FinHive**,
 Settings. Statuses are recomputed from today's date at every launch.
@@ -250,25 +231,26 @@ Those patterns are not recognised as private and could be sent to the AI as type
 
 ## 7. Reset the demo
 
-**macOS / Linux**
+**macOS**
 ```bash
-python -m loan_manager.infrastructure.seed --db "$FINHIVE_DB_PATH" --replace
+./run_local_mac.sh demo-reset
 ```
 
 **Windows (PowerShell)**
 ```powershell
-python -m loan_manager.infrastructure.seed --db $env:FINHIVE_DB_PATH --replace
+.\run_local_windows.bat demo-reset
 ```
 
-This recreates the demo ledger, removing your approvals and undos.
+This recreates the demo ledger, removing your approvals and undos, then opens the app.
 
 ---
 
 ## 8. Move your MVP1 ledger to MVP1.1 (existing users, once)
 
-Do this when you are happy with the demo. Close the app first, and use a **new window**
-where `FINHIVE_DB_PATH` is **not** set, so the commands act on your real
-`data/loans.db`. Your master key from §3 must be set in that window.
+Do this when you are happy with the demo. **Close the app first.** These commands use
+the app's own Python (`.venv`, created by the launcher's first run), so nothing needs
+activating. Your master key from §3 must be set (macOS: `ops/.env.local` is loaded below;
+Windows: a window opened after `setx`).
 
 **1. Back up your ledger somewhere outside the app folder, and back up your key** (a
 password manager, not the same folder). After this step the two are useless apart.
@@ -281,28 +263,27 @@ beside the file.
 **3. Add the columns the Approvals tab needs for AI drafts.** It writes its own backup
 first.
 
-**macOS / Linux**
+**macOS** (from the `FinHive` folder)
 ```bash
+set -a; . ops/.env.local; set +a                                   # load your keys
 cd "src/Loan Manager"
-source .venv/bin/activate
 unset FINHIVE_DB_PATH
-cp data/loans.db ~/Desktop/loans-backup-before-mvp1.1.db                  # step 1
-python -m loan_manager.infrastructure.migrations.encrypt_existing_rows    # step 2
-python -m loan_manager.infrastructure.migrations.add_report_proposal_columns --db data/loans.db   # step 3
+cp data/loans.db ~/Desktop/loans-backup-before-mvp1.1.db                                      # step 1
+.venv/bin/python -m loan_manager.infrastructure.migrations.encrypt_existing_rows              # step 2
+.venv/bin/python -m loan_manager.infrastructure.migrations.add_report_proposal_columns --db data/loans.db   # step 3
 ```
 
-**Windows (PowerShell)**
+**Windows (PowerShell)** (from the `FinHive` folder)
 ```powershell
 cd "src\Loan Manager"
-.\.venv\Scripts\Activate.ps1
 Remove-Item Env:FINHIVE_DB_PATH -ErrorAction SilentlyContinue
-Copy-Item data\loans.db "$HOME\Desktop\loans-backup-before-mvp1.1.db"     # step 1
-python -m loan_manager.infrastructure.migrations.encrypt_existing_rows    # step 2
-python -m loan_manager.infrastructure.migrations.add_report_proposal_columns --db data\loans.db   # step 3
+Copy-Item data\loans.db "$HOME\Desktop\loans-backup-before-mvp1.1.db"                          # step 1
+.\.venv\Scripts\python.exe -m loan_manager.infrastructure.migrations.encrypt_existing_rows    # step 2
+.\.venv\Scripts\python.exe -m loan_manager.infrastructure.migrations.add_report_proposal_columns --db data\loans.db   # step 3
 ```
 
-**4. Start the app as you always do** (`run_mac.sh` / double-click `run_windows.bat`),
-check your loans in **View**, then delete the Step 1 backup when you are satisfied.
+**4. Start the app as you always do** (no `demo`), check your loans in **View**, then
+delete the Step 1 backup when you are satisfied.
 
 If you skip this section, nothing breaks: the app simply prints these same steps at
 startup and stops, leaving your ledger as it was.
@@ -316,15 +297,18 @@ startup and stops, leaving your ledger as it was.
 
 | Symptom | Fix |
 |---|---|
-| "Cannot start Loan Manager … created before encryption at rest" | Your real ledger has not been migrated yet — follow §8, or launch with `FINHIVE_DB_PATH` set to the demo (§4). |
-| A message about the **master key** at startup | `FINHIVE_KEY_VERSION` / `FINHIVE_MASTER_KEY_V1` are not visible to the app. Windows: `setx` only reaches *new* windows — open a fresh one. Also check the key matches the one the database was encrypted with. |
-| "The AI service is not configured… OPENROUTER_API_KEY…" | Set `OPENROUTER_API_KEY` (§3), then **restart** the app. |
+| `ModuleNotFoundError: No module named 'sqlalchemy'` (or any other module) | The command ran on your system Python, not the app's. Use the launcher (`./run_local_mac.sh demo` / `.\run_local_windows.bat demo`); for §8 use `.venv/bin/python` / `.\.venv\Scripts\python.exe` exactly as shown. |
+| macOS: `python: command not found` | Expected — macOS only ships `python3`, and nothing here needs `python`. If you want the alias anyway: `echo 'alias python=python3' >> ~/.zshrc && source ~/.zshrc` |
+| Windows: `python` opens the Microsoft Store, or "Python was not found" | Install Python from python.org with **"Add python.exe to PATH"** ticked, then open a new window. Turn off the Store aliases under *Settings → Apps → Advanced app settings → App execution aliases*. |
+| "Cannot start Loan Manager … created before encryption at rest" | Your real ledger has not been migrated yet — follow §8, or start the demo instead (§4). |
+| A message about the **master key** at startup | The keys are not visible to the app. macOS: check `ops/.env.local`. Windows: `setx` only reaches *new* windows — open a fresh one. Also check the key matches the one the database was encrypted with. |
+| "The AI service is not configured… OPENROUTER_API_KEY…" | Set `OPENROUTER_API_KEY` (§3), then restart the app. |
 | "Not configured" even though `OPENROUTER_API_KEY` is set | Your `data/settings.json` is missing the `"llm"` block — usually a local theme edit kept the old file. Run the `git stash` / `git pull` / `git stash pop` from §0, then restart. |
-| The demo opened your real ledger | `FINHIVE_DB_PATH` was not set in the window you launched from (or you double-clicked the launcher). Use §5 from the same window as §4. |
+| The app opened your real ledger instead of the demo | The launcher was started without `demo` (a double-click cannot pass it). Use the §4 command. |
+| `./run_local_mac.sh: Permission denied` | `chmod +x run_local_mac.sh "src/Loan Manager/run_mac.sh"` once. |
+| "KCH-90 is not fully satisfiable" | You passed `--web`, which starts the paused MVP2 web app. Drop `--web`. |
 | A question takes a long time | Each model call can take up to 60 s. There is no cancel button yet; wait, or close the app. |
 | "I stopped before sending the next request…" | The privacy check found a name or amount it could not mask. Rephrase without the unusual spelling. |
-| `ModuleNotFoundError: finhive` | Run the last install line from §2 with the venv active. |
-| PowerShell: "running scripts is disabled" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then activate again. |
 
 ---
 

@@ -210,7 +210,7 @@ def _launch_and_verify_spa(
 )
 def test_mac_launcher_brings_up_a_reachable_spa() -> None:
     _launch_and_verify_spa(
-        ["bash", str(MAC_SCRIPT), "--allow-partial"],
+        ["bash", str(MAC_SCRIPT), "--web", "--allow-partial"],
     )
 
 
@@ -224,6 +224,6 @@ def test_mac_launcher_brings_up_a_reachable_spa() -> None:
 )
 def test_mac_launcher_full_stack() -> None:
     _launch_and_verify_spa(
-        ["bash", str(MAC_SCRIPT)],
+        ["bash", str(MAC_SCRIPT), "--web"],
         api_port=8000,
     )

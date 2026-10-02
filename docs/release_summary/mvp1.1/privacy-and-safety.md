@@ -12,34 +12,31 @@ the file with another tool shows unreadable bytes. The app needs your master key
 start. Lose the key and the data cannot be recovered, so keep it in a password manager.
 
 ### Test it: the app refuses to start without the key
-Close the app, then start it with the key removed for this window only.
+Close the app first.
 
-**Windows (PowerShell)**
+**Windows (PowerShell)**: this removes the key for this window only.
 ```powershell
-Remove-Item Env:FINHIVE_MASTER_KEY_V1; python -m loan_manager.main
+Remove-Item Env:FINHIVE_MASTER_KEY_V1; .\run_local_windows.bat demo
 ```
-**macOS**
+**macOS**: the launcher loads keys from `ops/.env.local`, so move that file aside for one run:
 ```bash
-env -u FINHIVE_MASTER_KEY_V1 python -m loan_manager.main
+mv ops/.env.local ops/.env.local.off; ./run_local_mac.sh demo; mv ops/.env.local.off ops/.env.local
 ```
-**Expect:** a message explaining the master key is required, with setup steps. The app
-does not open, and nothing is changed.
-
-(Windows: if you saved the key with `setx`, open a new window afterwards to get it back.)
+**Expect:** a message explaining that the master key is required, with setup steps. The
+app does not open, and nothing is changed.
 
 ### Test it: names are not readable in the file
-With the demo ledger path set (Quick start step 3), search the raw file for a demo name.
-The command is the same on both systems, but the variable is written differently:
+Search the demo database file for a demo name. Neither command needs Python:
 
 **Windows (PowerShell)**
 ```powershell
-python -c "import sys; print(b'sharma' in open(sys.argv[1],'rb').read())" $env:FINHIVE_DB_PATH
+Select-String -Path "$HOME\finhive-demo\demo.db" -Pattern sharma -Quiet
 ```
 **macOS**
 ```bash
-python -c "import sys; print(b'sharma' in open(sys.argv[1],'rb').read())" "$FINHIVE_DB_PATH"
+grep -c sharma ~/finhive-demo/demo.db
 ```
-**Expect:** `False`. The name only appears inside the app.
+**Expect:** `False` on Windows and `0` on macOS. The name only appears inside the app.
 
 ### MVP1 ledgers
 An MVP1 `loans.db` is still plaintext. MVP1.1 refuses to open it and prints the steps to

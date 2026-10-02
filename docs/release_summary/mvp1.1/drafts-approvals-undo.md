@@ -77,13 +77,10 @@ batches show a message saying they cannot be undone here.
 
 ## Reset the demo
 
-**Windows (PowerShell)**, in the window where you set the demo path:
-```powershell
-python -m loan_manager.infrastructure.seed --db $env:FINHIVE_DB_PATH --replace
-```
-**macOS**
-```bash
-python -m loan_manager.infrastructure.seed --db "$FINHIVE_DB_PATH" --replace
-```
+| macOS | Windows (PowerShell) |
+|---|---|
+| `./run_local_mac.sh demo-reset` | `.\run_local_windows.bat demo-reset` |
+
+This recreates the 27 demo loans and opens the app.
 
 Next: [privacy and safety →](privacy-and-safety.md)

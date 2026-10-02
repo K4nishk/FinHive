@@ -3,6 +3,8 @@
 One command brings up the FinHive web app locally: backend, frontend, and a
 local database.
 
+> **Without `--web` this script starts the Loan Manager desktop app** (MVP1 / MVP1.1), which is what you want for testing Ask FinHive — see `docs/AskFinHive_instructions.md`. This guide covers the paused MVP2 web app only.
+
 ## Prerequisites
 
 - **Python 3.10+** (3.13+ recommended) — https://www.python.org/downloads/
@@ -21,7 +23,7 @@ local database.
 ## Run it
 
 ```bash
-./run_local_mac.sh
+./run_local_mac.sh --web
 ```
 
 The script:
@@ -39,7 +41,7 @@ The script:
    those exist (KCH-91, KCH-94, KCH-102 respectively). **Until all three
    exist, the script fails instead of launching a partial app**, since a
    clean-machine run without them is not a working local app. Pass
-   `--allow-partial` (or set `ALLOW_PARTIAL_SETUP=1`) to opt into an
+   `--web --allow-partial` (or set `ALLOW_PARTIAL_SETUP=1`) to opt into an
    SPA-only run anyway, e.g. for frontend-only work.
    Seeding (KCH-94) needs the service-account credentials described below,
    in addition to `DATABASE_URL`.
@@ -78,7 +80,7 @@ export MVP1_OWNER_PASSWORD="..."
 `SUPABASE_SERVICE_ROLE_KEY` bypasses Row Level Security and is used in
 exactly one place, `finhive/db/admin.py`, to provision the Supabase Auth user
 this seed needs. Re-running `python -m finhive.db.seed_service_account` (or
-`./run_local_mac.sh`) is idempotent: it looks the org and auth user up by
+`./run_local_mac.sh --web`) is idempotent: it looks the org and auth user up by
 name/email before creating either.
 
 ## Current milestone state
@@ -92,13 +94,13 @@ depend on infrastructure that hasn't landed yet:
 | Service account seed | KCH-94 — done |
 | FastAPI app (`finhive.dev_server:app`) | KCH-102 |
 
-Until all three exist, `./run_local_mac.sh` fails with a list of what's
+Until all three exist, `./run_local_mac.sh --web` fails with a list of what's
 missing rather than launching an incomplete app — that partial state isn't
-KCH-90's "working local app" acceptance criterion. Pass `--allow-partial`
+KCH-90's "working local app" acceptance criterion. Pass `--web --allow-partial`
 (or set `ALLOW_PARTIAL_SETUP=1`) if you specifically want the SPA-only
 subset anyway, e.g. for frontend-only work; the script prints a `PARTIAL
 SETUP` warning naming what's missing rather than presenting it as success.
-Once those land, re-running `./run_local_mac.sh` (no flag needed) picks them
+Once those land, re-running `./run_local_mac.sh --web` (no other flag needed) picks them
 up automatically.
 
 ## Troubleshooting
@@ -113,7 +115,7 @@ up automatically.
   — start Docker Desktop (or another Docker API-compatible runtime) and
   retry, or set `DATABASE_URL` in `ops/.env.local` instead.
 - **`KCH-90 is not fully satisfiable yet`** — the migration runner,
-  service-account seed, or API haven't landed. Pass `--allow-partial` for an
+  service-account seed, or API haven't landed. Pass `--web --allow-partial` for an
   SPA-only run, or wait for KCH-91/KCH-94/KCH-102.
 - **Port already in use** — another process is bound to `8000` or `5173`;
   stop it or edit the port in `run_local_mac.sh` / `web/vite.config.ts`.
