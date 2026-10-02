@@ -6,6 +6,8 @@ read-only tools, shows its working step by step, and — only when you ask for a
 drafts it for you to approve in the **Pending Approval** tab. Nothing changes in the
 ledger until you approve it, and anything you approve can be undone.
 
+Release notes and per-capability test steps: [`docs/release_summary/mvp1.1/README.md`](release_summary/mvp1.1/README.md).
+
 Every command below is given for **macOS / Linux (bash or zsh)** and for **Windows
 (PowerShell)**. Run all of them from the `src/Loan Manager` folder unless a step says
 otherwise.
