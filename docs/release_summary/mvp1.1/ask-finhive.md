@@ -60,17 +60,14 @@ the exact sentence.
 | Paste more than 2,000 characters | "That question is too long…". Nothing is sent. |
 | Close the window while a question is running | The app closes within about 5 seconds, without an error. |
 
-To unset the key for one test run:
+To run once without the AI key:
 
-**Windows (PowerShell)**
+**Windows (PowerShell)**: this removes the key for this window only.
 ```powershell
-Remove-Item Env:OPENROUTER_API_KEY; python -m loan_manager.main
+Remove-Item Env:OPENROUTER_API_KEY; .\run_local_windows.bat demo
 ```
-**macOS**
-```bash
-env -u OPENROUTER_API_KEY python -m loan_manager.main
-```
-(If you saved the key with `setx` on Windows, this only affects the current window.)
+**macOS**: the launcher reloads `ops/.env.local` on every start, so put `#` in front of
+the `OPENROUTER_API_KEY` line there, run `./run_local_mac.sh demo`, then remove the `#`.
 
 ---
 

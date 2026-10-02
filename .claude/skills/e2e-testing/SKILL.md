@@ -41,8 +41,8 @@ hostile input → **C**.
 
 **Target resolution order**: the URL the user names → `BASE_URL` env var → the current
 PR's Vercel preview → `http://localhost:5173`. For the desktop app (MVP1 / MVP1.1),
-launch via `src/Loan Manager/run_mac.sh` / `src\Loan Manager\run_windows.bat` — never the
-repo-root `run_local_*` scripts, which start the paused MVP2 web app.
+launch with `./run_local_mac.sh` / `.\run_local_windows.bat` from the repo root (add `demo`
+for the demo ledger, `demo-reset` to reseed it); `--web` starts the paused MVP2 web app.
 
 State the target you resolved before you start. Never assume production.
 

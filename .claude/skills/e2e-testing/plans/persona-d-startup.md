@@ -16,11 +16,12 @@ a finding — a startup failure is S1 for that user, however correct the code be
 ### D1 · Find the right launcher
 | Check | Pass when |
 |---|---|
-| List every launcher in the repo (`*.bat`, `*.sh`, `python -m …main`) | Each one says, **in its first screen of output**, which app it starts and whether that app is runnable today |
-| Run the repo-root `run_local_windows.bat` / `run_local_mac.sh` (MVP2 web, paused) | It names the desktop launcher `src/Loan Manager/run_*` **before** installing anything, and again in its refusal (F-001) |
-| Same, and time it | The refusal and its pointer appear **before** the slow frontend `npm install`, i.e. within the backend install time, and are still on screen at the `Press any key` prompt (F-002) |
-| Run `src/Loan Manager/run_windows.bat` (double-click **and** from PowerShell) and `run_mac.sh` | Reaches the app or a message that names the exact fix |
-| Every doc path a launcher prints | Exists, and documents *that* app (not the other one) |
+| Repo-root `run_local_windows.bat` (PowerShell **and** double-click) / `./run_local_mac.sh`, no args | Starts the **desktop** app on the real ledger, after one line saying so and naming `--web` |
+| Same with `demo`, then `demo` again, then `demo-reset` | First run prints `Seeded 27 demo loans`, the second reuses the ledger, reset reseeds; every run prints `Using the demo ledger` and opens the app on it (F-003) |
+| `src/Loan Manager/run_mac.sh demo` / `src\Loan Manager\run_windows.bat demo` | Identical behaviour to the root launcher |
+| Root launcher with `--web` (MVP2, paused) | Refuses with KCH-90 **before** the frontend `npm install`, still naming the desktop launcher (F-001, F-002) |
+| A shell with **no** `python` on PATH (macOS default) and an un-activated venv | Every step in the user docs still works — no doc step may need `python`, activation, or a per-window env var (F-003) |
+| Every doc path a launcher prints | Exists, and documents *that* app |
 
 ### D2 · Missing prerequisites, one at a time
 Run each with exactly one thing missing; the message must name the fix, never a traceback.

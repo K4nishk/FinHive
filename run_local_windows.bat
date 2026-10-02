@@ -19,10 +19,23 @@ set ALLOW_PARTIAL=%ALLOW_PARTIAL_SETUP%
 if "%ALLOW_PARTIAL%"=="" set ALLOW_PARTIAL=0
 if "%~1"=="--allow-partial" set ALLOW_PARTIAL=1
 
+REM Default: start the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive),
+REM which is what people test today. The paused MVP2 web flow below runs only
+REM with --web. Arguments pass through, so "run_local_windows.bat demo" works.
+set RUN_WEB=0
+for %%a in (%*) do if /i "%%~a"=="--web" set RUN_WEB=1
+if "!RUN_WEB!"=="0" (
+    echo Starting the Loan Manager desktop app ^(MVP1 / MVP1.1 Ask FinHive^).
+    echo For the paused MVP2 web app instead: run_local_windows.bat --web
+    echo.
+    call "%~dp0src\Loan Manager\run_windows.bat" %*
+    exit /b !errorlevel!
+)
+
 echo === FinHive -- Windows Local Setup ^(MVP2 web app, paused^) ===
 echo.
-echo NOTE: this starts the FinHive WEB app, which is not runnable yet.
-echo       For the Loan Manager desktop app ^(MVP1 / MVP1.1 Ask FinHive^) run:
+echo NOTE: --web starts the FinHive WEB app, which is not runnable yet.
+echo       For the Loan Manager desktop app ^(MVP1 / MVP1.1 Ask FinHive^) run without --web, or:
 echo           src\Loan Manager\run_windows.bat
 echo       Guide: docs\AskFinHive_instructions.md
 echo.

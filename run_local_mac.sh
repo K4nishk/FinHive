@@ -21,10 +21,26 @@ for arg in "$@"; do
     fi
 done
 
+# Default: start the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive),
+# which is what people test today. The paused MVP2 web flow below runs only
+# with --web. Arguments pass through, so `./run_local_mac.sh demo` works.
+RUN_WEB=0
+for arg in "$@"; do
+    if [ "$arg" = "--web" ]; then
+        RUN_WEB=1
+    fi
+done
+if [ "$RUN_WEB" = "0" ]; then
+    echo "Starting the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive)."
+    echo "For the paused MVP2 web app instead: ./run_local_mac.sh --web"
+    echo
+    exec bash "$(cd "$(dirname "$0")" && pwd)/src/Loan Manager/run_mac.sh" "$@"
+fi
+
 echo "=== FinHive — macOS/Linux Local Setup (MVP2 web app, paused) ==="
 echo
-echo "NOTE: this starts the FinHive WEB app, which is not runnable yet."
-echo "      For the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive) run:"
+echo "NOTE: --web starts the FinHive WEB app, which is not runnable yet."
+echo "      For the Loan Manager desktop app (MVP1 / MVP1.1 Ask FinHive) run without --web, or:"
 echo "          src/Loan Manager/run_mac.sh"
 echo "      Guide: docs/AskFinHive_instructions.md"
 echo

@@ -6,10 +6,10 @@ encrypts your ledger on disk and tightens the approval flow.
 
 Everything here runs on the **desktop app**. Nothing in MVP1 was removed.
 
-> **Which launcher?** Use the one inside `src/Loan Manager/`:
-> **Windows:** `src\Loan Manager\run_windows.bat` · **macOS:** `src/Loan Manager/run_mac.sh`.
-> The `run_local_*` scripts at the repo root start the future **web** app (MVP2),
-> which is paused and will stop with a "KCH-90" message.
+> **One command, from the `FinHive` folder.** macOS: `./run_local_mac.sh demo` ·
+> Windows (PowerShell): `.\run_local_windows.bat demo`. The launcher installs
+> everything it needs and opens the app on a demo ledger. You never activate an
+> environment or type `python`.
 
 ---
 
@@ -30,21 +30,24 @@ Everything here runs on the **desktop app**. Nothing in MVP1 was removed.
 
 ## Quick start (about 15 minutes)
 
-Each step links to the exact section of the setup guide,
-[`docs/AskFinHive_instructions.md`](../../AskFinHive_instructions.md), which has
-separate **Windows (PowerShell)** and **macOS** commands for every step.
+Full detail for each step: [`docs/AskFinHive_instructions.md`](../../AskFinHive_instructions.md).
 
-1. **Install or update** — new machine: [§2 Install](../../AskFinHive_instructions.md#2-install).
-   MVP1 user: `git pull`, then run your launcher as usual — read [§0](../../AskFinHive_instructions.md#0-already-using-mvp1-read-this-first) first.
-2. **Set two keys, once** — a master key (encryption) and an OpenRouter key (AI):
+1. **Get the code.** On a new machine: `git clone https://github.com/K4nishk/FinHive.git`,
+   then `cd FinHive` and `git checkout development`. As an MVP1 user: `git pull`. Read
+   [§0](../../AskFinHive_instructions.md#0-already-using-mvp1-read-this-first) first.
+2. **Set two keys, once:** a master key (encryption) and an OpenRouter key (AI). See
    [§3](../../AskFinHive_instructions.md#3-set-your-keys-once).
-   *Windows and macOS differ here:* Windows uses `setx` and needs a **new** window
-   afterwards; macOS uses `ops/.env.local` or `export`.
-3. **Create the demo ledger and launch on it** — [§4](../../AskFinHive_instructions.md#4-create-a-demo-ledger) and
-   [§5](../../AskFinHive_instructions.md#5-launch-the-demo).
-   *Windows:* start the app **from the same PowerShell window**. A double-clicked
-   launcher does not see the demo setting and opens your real ledger instead.
-4. **Test each capability** with the pages linked in the table above.
+   *macOS:* put them in `ops/.env.local`. *Windows:* `setx`, then **open a new
+   PowerShell window**.
+3. **Start on the demo ledger** from the `FinHive` folder:
+
+   | macOS | Windows (PowerShell) |
+   |---|---|
+   | `./run_local_mac.sh demo` | `.\run_local_windows.bat demo` |
+
+   The first run takes a few minutes while it installs. Expect
+   `Seeded 27 demo loans…`, then the app window.
+4. **Test each capability** using the pages linked in the table above.
 
 Your real `data/loans.db` is never touched by steps 1–4. Moving it to MVP1.1 is a
 separate, deliberate step: [§8 of the guide](../../AskFinHive_instructions.md#8-move-your-mvp1-ledger-to-mvp11-existing-users-once).
@@ -58,12 +61,14 @@ terminal:
 
 | Task | Windows (PowerShell) | macOS (Terminal) |
 |---|---|---|
-| Activate the environment | `.\.venv\Scripts\Activate.ps1` | `source .venv/bin/activate` |
-| Save a key for future windows | `setx NAME "value"` (open a new window after) | line in `ops/.env.local` |
-| Set a value for this window only | `$env:NAME = "value"` | `export NAME="value"` |
-| Launcher | `run_windows.bat` | `./run_mac.sh` |
-| Copy a file | `Copy-Item a b` | `cp a b` |
-| Paths | `src\Loan Manager` | `src/Loan Manager` |
+| Start on the demo ledger | `.\run_local_windows.bat demo` | `./run_local_mac.sh demo` |
+| Start the demo over | `.\run_local_windows.bat demo-reset` | `./run_local_mac.sh demo-reset` |
+| Start on your real ledger | `.\run_local_windows.bat` (or double-click it) | `./run_local_mac.sh` |
+| Where the keys live | your user environment (`setx`, then a **new** window) | `ops/.env.local` |
+| Python command (only if you need one) | `py` | `python3` (there is no `python`) |
+| Demo ledger location | `%USERPROFILE%\finhive-demo\demo.db` | `~/finhive-demo/demo.db` |
+
+A double-click on Windows cannot pass `demo`, so it always opens your real ledger.
 
 ---
 
