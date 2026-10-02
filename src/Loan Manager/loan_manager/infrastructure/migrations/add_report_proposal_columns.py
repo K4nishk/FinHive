@@ -390,7 +390,7 @@ def main() -> int:
         return 0
 
     try:
-        key_ring = Container().get_key_ring()
+        key_ring = Container().get_key_ring(also_protect=(db_path,))
     except KeyConfigurationError as exc:
         print(f"Cannot migrate: the master key is not usable.\n\n{exc}", file=sys.stderr)
         return 1

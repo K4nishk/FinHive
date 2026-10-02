@@ -20,16 +20,16 @@ import loan_manager.config as config
 import loan_manager.infrastructure.database.session as db_session_module
 import pytest
 
-from tests.unit.test_report_proposal_migration import _pre_kch242_db, _ring
+from tests.unit.test_report_proposal_migration import M1, _pre_kch242_db, _ring
 
 
 @pytest.fixture(autouse=True)
 def _key_env(monkeypatch):
-    """Step 3a needs a syntactically usable master key -- it never checks
-    that key against what encrypted any existing row, so any valid one
-    works here."""
+    """Step 3a now proves the key can decrypt a stored row (F-006 review
+    #3), so this must be the key the rows were written under: `_ring()`'s
+    master `M1`."""
     monkeypatch.setenv("FINHIVE_KEY_VERSION", "1")
-    monkeypatch.setenv("FINHIVE_MASTER_KEY_V1", base64.b64encode(b"\x99" * 32).decode())
+    monkeypatch.setenv("FINHIVE_MASTER_KEY_V1", base64.b64encode(M1).decode())
 
 
 def _point_db_at(monkeypatch, path) -> None:
