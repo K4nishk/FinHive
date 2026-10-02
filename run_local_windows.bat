@@ -113,16 +113,6 @@ if not !errorlevel! == 0 (
     exit /b 1
 )
 
-echo Installing frontend dependencies...
-pushd "%ROOT_DIR%web"
-call npm install --silent
-if not !errorlevel! == 0 (
-    echo ERROR: "npm install" failed in web\.
-    popd
-    pause
-    exit /b 1
-)
-popd
 
 :: --- Detect which stages have landed (before touching the database) ---
 set MISSING_STAGES=
@@ -155,6 +145,19 @@ if not "!MISSING_STAGES!"=="" (
     echo WARNING: PARTIAL SETUP -- proceeding without:
     echo !MISSING_STAGES!
 )
+
+:: Frontend install runs only once the KCH-90 gate has passed (F-002): a
+:: refusal must not wait behind a slow npm install.
+echo Installing frontend dependencies...
+pushd "%ROOT_DIR%web"
+call npm install --silent
+if not !errorlevel! == 0 (
+    echo ERROR: "npm install" failed in web\.
+    popd
+    pause
+    exit /b 1
+)
+popd
 
 :: --- Database: only required when a DB-dependent stage will run ---
 set NEEDS_DB=0

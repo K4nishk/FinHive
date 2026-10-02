@@ -64,3 +64,13 @@ def test_desktop_windows_launcher_points_to_the_mvp11_guide() -> None:
     assert "LOCAL_SETUP_WINDOWS.md" not in text, (
         "LOCAL_SETUP_WINDOWS.md documents the MVP2 web app, not the desktop app"
     )
+
+
+@pytest.mark.parametrize("script,desktop", _CASES, ids=_IDS)
+def test_web_launcher_refuses_before_the_frontend_install(script: Path, desktop: str) -> None:
+    """F-002: the refusal (and its desktop pointer) must not wait behind a slow
+    `npm install` whose output scrolls the top-of-run banner off screen."""
+    lines = _executable_lines(script)
+    refusal = next(i for i, line in enumerate(lines) if "KCH-90 is not fully satisfiable" in line)
+    npm_install = next(i for i, line in enumerate(lines) if "npm install" in line)
+    assert refusal < npm_install, f"{script.name} runs npm install before its KCH-90 refusal"
