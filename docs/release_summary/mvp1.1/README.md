@@ -112,7 +112,7 @@ A double-click on Windows cannot pass `demo`, so it always opens your real ledge
 
 ## Known limits in this release
 
-- No **Stop** button while a question is being answered (each AI call can take up to 60 s).
+- **Stop** takes effect before the next request to the AI server, or at once while it is retrying. A request already sent still finishes or times out first (up to 60 s).
 - Change requests must use English verbs (create, add, extend, renew, update, change,
   rename, correct, edit, modify). Hindi/Hinglish ("badha do") is not recognised yet.
 - Undo works for extensions and newly created loans; paid-off and edit (UPDATE) batches

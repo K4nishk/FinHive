@@ -379,7 +379,7 @@ _EXIT_PROBE = textwrap.dedent(
     from types import SimpleNamespace
 
     class Slow:
-        def execute(self, conv, text, emit=None):
+        def execute(self, conv, text, emit=None, **_kw):
             time.sleep(float(sys.argv[1]))
             return TurnResult(TurnOutcome.ANSWERED, "ok", "t", 1)
 
@@ -436,3 +436,76 @@ def test_app_exit_with_a_turn_longer_than_the_wait_ends_cleanly_and_promptly(tmp
     assert "Destroyed while thread" not in proc.stderr
     assert proc.returncode == 0, proc.stderr
     assert elapsed < 10, f"exit took {elapsed:.1f}s"
+
+
+# ── slice 1 (D-18): Stop button and retry status ───────────────────────────
+
+
+def _held_turn(**kwargs) -> FakeRunTurn:
+    outcome = kwargs.pop("outcome", TurnOutcome.ANSWERED)
+    return FakeRunTurn(
+        events=[TraceEvent(TraceKind.FINAL, 1, MAX_STEPS, text="ok", outcome=outcome)],
+        result=TurnResult(outcome, "ok", "t", 1),
+        **kwargs,
+    )
+
+
+def test_stop_button_is_enabled_only_while_a_question_runs(qapp, wait_until) -> None:
+    gate = threading.Event()
+    tab = _tab(StubContainer(run_turn=_held_turn(gate=gate)))
+    assert not tab._stop_btn.isEnabled()
+
+    tab._input.setText("q")
+    tab._ask_btn.click()
+    assert tab._stop_btn.isEnabled()
+
+    gate.set()
+    wait_until(lambda: not tab._busy and tab._worker is None)
+    assert not tab._stop_btn.isEnabled()
+
+
+def test_stop_cancels_the_running_turn_and_says_so(qapp, wait_until) -> None:
+    run_turn = _held_turn(outcome=TurnOutcome.CANCELLED, stop_aware=True)
+    tab = _tab(StubContainer(run_turn=run_turn))
+    tab._input.setText("q")
+    tab._ask_btn.click()
+
+    tab._stop_btn.click()
+
+    assert "Stopping" in tab._status.text()
+    assert not tab._stop_btn.isEnabled()
+    wait_until(lambda: not tab._busy and tab._worker is None)
+    assert run_turn.kwargs["cancel"].cancelled
+    assert tab._answer.text() == OUTCOME_TEXT[TurnOutcome.CANCELLED]
+
+
+@pytest.mark.parametrize(
+    ("kind", "words"),
+    [("busy", "warming up"), ("unreachable", "can't reach")],
+)
+def test_a_retry_notice_says_why_the_tab_is_waiting(qapp, wait_until, kind, words) -> None:
+    from loan_manager.application.agent.retry import FailureKind, RetryNotice
+
+    gate = threading.Event()
+    notice = RetryNotice(FailureKind(kind), 2, 8.0)
+    tab = _tab(StubContainer(run_turn=_held_turn(gate=gate, notices=[notice])))
+    tab._input.setText("q")
+    tab._ask_btn.click()
+
+    wait_until(lambda: words in tab._status.text().lower())
+    assert "attempt 2" in tab._status.text()
+
+    gate.set()
+    wait_until(lambda: not tab._busy and tab._worker is None)
+    assert words not in tab._status.text().lower()
+
+
+def test_closing_the_window_asks_a_running_turn_to_stop(qapp, wait_until) -> None:
+    run_turn = _held_turn(outcome=TurnOutcome.CANCELLED, stop_aware=True)
+    tab = _tab(StubContainer(run_turn=run_turn))
+    tab._input.setText("q")
+    tab._ask_btn.click()
+
+    tab.shutdown()
+
+    assert run_turn.kwargs["cancel"].cancelled

@@ -122,10 +122,23 @@ class FakeRunTurn:
     raises: Exception | None = None
     calls: int = 0
     threads: list[int] = field(default_factory=list)
+    # Slice 1: `notices` are sent to `on_wait` first; `stop_aware` holds the
+    # turn open until the worker's cancel token is set (the Stop button).
+    notices: list = field(default_factory=list)
+    stop_aware: bool = False
+    kwargs: dict = field(default_factory=dict)
 
-    def execute(self, conversation, user_text, emit=lambda e: None) -> TurnResult:
+    def execute(self, conversation, user_text, emit=lambda e: None, **kwargs) -> TurnResult:
         self.calls += 1
+        self.kwargs = kwargs
         self.threads.append(threading.get_ident())
+        for notice in self.notices:
+            kwargs["on_wait"](notice)
+        if self.stop_aware:
+            deadline = time.monotonic() + 10
+            while not kwargs["cancel"].cancelled and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert kwargs["cancel"].cancelled, "Stop was never requested"
         if self.gate is not None:
             assert self.gate.wait(10), "gate never released"
         for event in self.events:

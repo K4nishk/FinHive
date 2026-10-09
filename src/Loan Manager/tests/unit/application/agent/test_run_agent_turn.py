@@ -21,9 +21,16 @@ import pytest
 from loan_manager.application.agent import tokeniser as tk
 from loan_manager.application.agent.llm_port import (
     Completion,
+    LLMResponseError,
     LLMTimeoutError,
     LLMUnavailableError,
     Usage,
+)
+from loan_manager.application.agent.retry import (
+    CancelToken,
+    FailureKind,
+    RetryNotice,
+    RetryPolicy,
 )
 from loan_manager.application.agent.system_prompt import (
     PROMPT_VERSION,
@@ -64,6 +71,9 @@ from .conftest import demo_loans, make_loan, uow_factory_for
 CASSETTE = Path(__file__).resolve().parents[3] / "fixtures" / "llm" / "agent_turn_4step.json"
 OVERDUE_USER_TEXT = "What does Sharma Group owe that is overdue?"
 OVERDUE_FINAL = "sharma group has ₹5,50,000.00 overdue."
+
+# Slice 1: retries in these tests never sleep.
+INSTANT_RETRY = RetryPolicy(busy_delays_s=(0, 0, 0), unreachable_delays_s=(0, 0), max_wait_s=120)
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -111,8 +121,8 @@ class Rig:
     reports: list
     events: list[TraceEvent] = field(default_factory=list)
 
-    def ask(self, text: str):
-        return self.uc.execute(self.conv, text, self.events.append)
+    def ask(self, text: str, **kwargs: Any):
+        return self.uc.execute(self.conv, text, self.events.append, **kwargs)
 
     @property
     def bodies(self) -> list[dict]:
@@ -129,6 +139,7 @@ def make_rig(
     loans: list | None = None,
     read_registry: ToolRegistry | None = None,
     propose_registry_for: Callable[..., ToolRegistry] | None = None,
+    retry_policy: RetryPolicy = INSTANT_RETRY,
 ) -> Rig:
     loans = loans if loans is not None else demo_loans()
     reports: list = []
@@ -149,6 +160,7 @@ def make_rig(
         or (lambda **kw: build_propose_registry(uf, clock, EventBus(), **kw)),
         recorder=recorder,
         new_id=lambda: f"turn-{next(counter)}",
+        retry_policy=retry_policy,
     )
     return Rig(uc, conv, llm, recorder, loans, reports)
 
@@ -475,8 +487,10 @@ def test_an_unclassified_numeric_observation_field_fails_closed() -> None:
     assert len(rig.bodies) == 1
 
 
-@pytest.mark.parametrize("exc", [LLMTimeoutError("t"), LLMUnavailableError("u", status=503)])
+@pytest.mark.parametrize("exc", [LLMUnavailableError("u", status=401), LLMResponseError("r")])
 def test_an_llm_error_becomes_a_final_event_not_an_exception(exc: Exception) -> None:
+    """Permanent failures only: timeouts and 5xx are retried first (slice 1,
+    see the retry tests below)."""
     class Boom:
         requests: list = []
 
@@ -998,3 +1012,101 @@ def test_a_typed_change_request_unlocks_propose_tools_and_persists_the_draft() -
     assert len(rig.reports) == 1
     assert [e.kind for e in rig.events if e.tool == "extend_overdue_batch"] == [
         TraceKind.ACTION, TraceKind.PROPOSAL]
+
+
+# ── slice 1 (D-18): retries, an unreachable server, Stop ────────────────────
+
+
+class Flaky:
+    """Raises `errors` in order, then answers from the recorded fake."""
+
+    def __init__(self, errors: list[Exception], recordings: list[dict[str, Any]]) -> None:
+        self.errors = list(errors)
+        self.inner = RecordedFakeLLM(recordings, _settings())
+        self.calls = 0
+
+    @property
+    def requests(self) -> list:
+        return self.inner.requests
+
+    def complete(self, messages, tools=None):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.inner.complete(messages, tools)
+
+
+def test_a_busy_server_is_retried_and_the_turn_still_answers() -> None:
+    llm = Flaky([LLMUnavailableError("loading", status=503), LLMTimeoutError("slow")],
+                [_rec("Hello.")])
+    rig = make_rig(llm=llm)
+    notices: list[RetryNotice] = []
+
+    result = rig.ask("What is the date today?", on_wait=notices.append)
+
+    assert result.outcome is TurnOutcome.ANSWERED
+    assert llm.calls == 3
+    assert result.step_count == 1  # a retry is not a step
+    assert [n.kind for n in notices] == [FailureKind.BUSY, FailureKind.BUSY]
+
+
+def test_an_unreachable_server_ends_the_turn_with_its_own_message() -> None:
+    llm = Flaky([LLMUnavailableError("refused", status=None)] * 10, [])
+    rig = make_rig(llm=llm)
+
+    result = rig.ask("What is the date today?")
+
+    assert result.outcome is TurnOutcome.LLM_UNREACHABLE
+    assert result.text == rat._OUTCOME_TEXT[TurnOutcome.LLM_UNREACHABLE]
+    assert len(_final_events(rig)) == 1
+    assert rig.conv.turns == []  # nothing half-answered is kept as history
+    assert rig.recorder.records[-1].outcome is TurnOutcome.LLM_UNREACHABLE
+
+
+def test_a_server_that_stays_busy_ends_the_turn_with_its_own_message() -> None:
+    llm = Flaky([LLMUnavailableError("loading", status=503)] * 10, [])
+    rig = make_rig(llm=llm)
+
+    result = rig.ask("What is the date today?")
+
+    assert result.outcome is TurnOutcome.LLM_BUSY
+    assert result.text == rat._OUTCOME_TEXT[TurnOutcome.LLM_BUSY]
+
+
+def test_stop_between_steps_sends_nothing_more() -> None:
+    """Stop pressed while a tool runs: the next model call never happens."""
+    cancel = CancelToken()
+
+    class StopDuringTool(Spy):
+        def __call__(self, args):
+            cancel.cancel()
+            return super().__call__(args)
+
+    spy = StopDuringTool()
+    rig = make_rig(
+        [_ctx_call(1), _rec("Never sent.")],
+        read_registry=spy_registry("get_current_context", spy),
+        propose_registry_for=_no_propose,
+    )
+
+    result = rig.ask("What is the date today?", cancel=cancel)
+
+    assert result.outcome is TurnOutcome.CANCELLED
+    assert result.text == rat._OUTCOME_TEXT[TurnOutcome.CANCELLED]
+    assert len(rig.bodies) == 1
+    assert len(spy.calls) == 1
+    assert rig.conv.turns == []
+
+
+def test_stop_during_a_retry_wait_ends_the_turn_at_once() -> None:
+    cancel = CancelToken()
+    llm = Flaky([LLMTimeoutError("slow")] * 10, [])
+    rig = make_rig(
+        llm=llm,
+        retry_policy=RetryPolicy(busy_delays_s=(30,), unreachable_delays_s=(30,), max_wait_s=120),
+    )
+
+    result = rig.ask("What is the date today?", cancel=cancel, on_wait=lambda n: cancel.cancel())
+
+    assert result.outcome is TurnOutcome.CANCELLED
+    assert llm.calls == 1

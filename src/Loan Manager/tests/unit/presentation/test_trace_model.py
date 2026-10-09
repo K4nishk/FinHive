@@ -139,3 +139,11 @@ def test_prompt_too_long_final_row_has_its_own_label(qapp) -> None:
     model.append(_ev(TraceKind.FINAL, 0, outcome=TurnOutcome.PROMPT_TOO_LONG))
 
     assert model.data(model.index(0, 2), DISPLAY) == "Stopped: question too long"
+
+
+def test_every_outcome_has_its_own_trace_label() -> None:
+    """Slice 1 added outcomes; the 'Stopped' fallback must not hide them."""
+    from loan_manager.application.agent.trace import TurnOutcome
+    from loan_manager.presentation.widgets.trace_model import OUTCOME_LABEL
+
+    assert set(OUTCOME_LABEL) == set(TurnOutcome)
