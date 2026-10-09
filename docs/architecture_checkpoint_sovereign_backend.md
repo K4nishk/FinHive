@@ -156,3 +156,50 @@ The key and the `TokenMap` never leave the desktop (D-15, OQ-01). So a server-si
 4. **Switch `settings.json`**, plus a D-18 ARB entry.
 5. **Gateway**, only if S-5 needs more than `--api-key`.
 6. **Judge service**, after S-2, together with KCH-249 evals.
+
+---
+
+## 8. Owner decisions, interview of 2026-10-09
+
+These supersede the defaults in §6 and the slicing in §7.
+
+| Topic | Decision | What it means |
+|---|---|---|
+| Drivers | Sovereignty, cost at scale, showcase/learning. **Not** several clients | Nothing triggers Option B |
+| Agent loop | **Option A.** The loop, the tools and the tokeniser stay on the desktop | The desktop calls the home box by `base_url` |
+| Ledger and key | **Desktop, plus escrow.** A sealed backup of `master_key.key` is kept in Vault/OpenBao on the box | The box only ever sees tokens; a dead laptop no longer loses the key |
+| Hardware | **Own box:** RTX 3090 with **8 GB VRAM free**. A low-tier model is acceptable | Main model at most about 7B at 4-bit; vLLM `gpu_memory_utilization` ≈ 0.3 |
+| Box OS | **Windows, native** | vLLM runs in Linux containers via Docker Desktop (WSL2 backend, GPU passthrough) |
+| Runtime | **Docker Compose on the box; K8s manifests validated in CI** | The manifests are portfolio-complete (`kubeconform` plus a GPU-less `kind` smoke test) and are not applied at home |
+| Box availability | **On when the owner works.** The GPU's other 16 GB is used by other work | Cold starts (model load, about 30–90 s) are routine, so a warming-up state is required |
+| Network | **Same LAN only** | Away from the LAN, or with the box off: a clear "AI server unreachable" in the tab, and **no fallback to OpenRouter** |
+| Main model | **Chosen by the E2 spike** from 2–3 candidates that fit 8 GB, e.g. Qwen2.5-7B-Instruct-AWQ, Qwen2.5-3B-Instruct, Llama-3.1-8B-Instruct-AWQ | The owner runs the spike on the box; the cloud cannot reach the LAN |
+| Laya ([`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya); owner: an open-source alternative to TypeSafeAI's Jev) | Roles: **offline evals, the eval pipeline, and a live guard in shadow mode**. Size **≤ 2B** (owner) | The shadow verdict is logged per turn and never changes the answer; it runs after the turn, off the user's path |
+| Eval pipeline | **Both**: an on-demand eval command now, and a self-hosted GitHub runner on the box later | Scheduled jobs queue until the box is on; the PR lane stays zero-network |
+| Order | **Resilience fix, then KCH-247, then this track** | KCH-249 and 251 are re-scoped to the home box and Laya |
+
+**VRAM budget** (estimates, `[REVIEW REQUIRED]` on the box):
+- A 7B at 4-bit is about 5.5 GB of weights; a 3B at 4-bit about 2 GB.
+- Laya at ≤ 2B is about 4 GB at fp16, or about 1.5 GB at 4-bit.
+- A 7B plus Laya at fp16 does not fit in 8 GB. The E2 winner sets whether Laya runs on the GPU or on CPU (fine for shadow mode).
+
+### Revised slices (one issue each, thinnest first)
+
+| # | Slice | Review |
+|---|---|---|
+| 1 | **Desktop resilience.** Retry with backoff on connect, 5xx and timeout inside the step budget; warming-up and unreachable states in the tab. Useful against OpenRouter today | Self-review + CI |
+| 2 | **KCH-247.** The owner migrates the real ledger | (existing) |
+| 3 | **Box stack (Compose).** vLLM with a model cache volume and a `gpu_memory_utilization` cap; a thin FastAPI gateway (OpenAI-compatible pass-through, `/health` reporting warming or ready, a per-device API key, a route to Laya); DCGM-Exporter. Windows setup guide | Opus: it carries prompts off the machine |
+| 4 | **E2 spike** on 2–3 candidates, run by the owner on the box, which picks the model | — |
+| 5 | **Desktop provider switch** to the home box, plus ARB **D-18** | Opus: egress path |
+| 6 | **K8s manifests:** Deployments, Services, PVCs, GPU `nodeSelector`/taints/tolerations, DCGM DaemonSet; `kubeconform` + `kind` smoke in CI | Self-review + CI |
+| 7 | **Laya in evals:** an offline judge in the KCH-249 harness plus the on-demand eval command | Self-review + CI |
+| 8 | **Laya shadow guard:** an async verdict stored per turn; needs a schema change | Opus: migration |
+| 9 | **Key escrow** to OpenBao on the box | Opus: keys |
+| 10 | **Self-hosted runner** for the eval pipeline (KCH-251 re-scoped) | Self-review |
+
+### Still to verify before slice 3
+- **Laya's licence, serving method and exact size**, from its model card. `huggingface.co` is blocked by this session's network policy.
+- **DCGM-Exporter on a GeForce 3090:** basic metrics are expected; profiling metrics are data-centre-GPU only.
+- **Docker Desktop GPU passthrough** for the vLLM image on the owner's box: `docker run --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`.
+- **Owner's OK to record D-18** in `ARB_DECISIONS.md`, which is LIVE and authoritative.
