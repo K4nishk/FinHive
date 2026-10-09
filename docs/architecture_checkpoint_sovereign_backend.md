@@ -187,9 +187,9 @@ These supersede the defaults in §6 and the slicing in §7.
 
 | # | Slice | Review |
 |---|---|---|
-| 1 | **Desktop resilience.** Retry with backoff on connect, 5xx and timeout inside the step budget; warming-up and unreachable states in the tab. Useful against OpenRouter today | Self-review + CI |
+| 1 | ✅ *(D-18, 2026-10-09)* **Desktop resilience.** Retry with backoff on connect, 5xx and timeout inside the step budget; warming-up and unreachable states in the tab. Useful against OpenRouter today | Self-review + CI |
 | 2 | **KCH-247.** The owner migrates the real ledger | (existing) |
-| 3 | **Box stack (Compose).** vLLM with a model cache volume and a `gpu_memory_utilization` cap; a thin FastAPI gateway (OpenAI-compatible pass-through, `/health` reporting warming or ready, a per-device API key, a route to Laya); DCGM-Exporter. Windows setup guide | Opus: it carries prompts off the machine |
+| 3 | **Box stack (Compose).** vLLM with a model cache volume and a `gpu_memory_utilization` cap; a thin FastAPI gateway (OpenAI-compatible pass-through that **answers 503 while vLLM loads**, since vLLM refuses connections until loaded and slice 1 treats a refused connection as "box off"; `/health` reporting warming or ready; a per-device API key; a route to Laya); DCGM-Exporter. Windows setup guide | Opus: it carries prompts off the machine |
 | 4 | **E2 spike** on 2–3 candidates, run by the owner on the box, which picks the model | — |
 | 5 | **Desktop provider switch** to the home box, plus ARB **D-18** | Opus: egress path |
 | 6 | **K8s manifests:** Deployments, Services, PVCs, GPU `nodeSelector`/taints/tolerations, DCGM DaemonSet; `kubeconform` + `kind` smoke in CI | Self-review + CI |

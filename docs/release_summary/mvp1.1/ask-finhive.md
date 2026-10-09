@@ -70,6 +70,8 @@ Before this fix the lookup could only filter by group, so these questions failed
 | Unset `OPENROUTER_API_KEY` and restart the app (see note below) | The answer line says the AI service is **not configured**, naming the key. No crash. |
 | Paste more than 2,000 characters | "That question is too long…". Nothing is sent. |
 | Close the window while a question is running | The app closes within about 5 seconds, without an error. |
+| Ask a question, then press **Stop** while the status line says "Step 1 / 6" | The status line says **Stopping…**, then the answer line says "Stopped. Nothing more was sent to the AI server." A request already sent finishes first (up to 60 s). |
+| Turn off Wi-Fi, then ask a question | After about 5 seconds: "The AI server can't be reached…". The status line shows "Can't reach the AI server · retrying in …" while it tries. Turn Wi-Fi back on and ask again. |
 
 To run once without the AI key:
 

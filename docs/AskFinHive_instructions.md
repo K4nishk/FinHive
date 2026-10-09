@@ -335,14 +335,16 @@ startup and stops, leaving your ledger as it was.
 | The app opened your real ledger instead of the demo | The launcher was started without `demo` (a double-click cannot pass it). Use the §4 command. |
 | `./run_local_mac.sh: Permission denied` | `chmod +x run_local_mac.sh "src/Loan Manager/run_mac.sh"` once. |
 | "KCH-90 is not fully satisfiable" | You passed `--web`, which starts the paused MVP2 web app. Drop `--web`. |
-| A question takes a long time | Each model call can take up to 60 s. There is no cancel button yet; wait, or close the app. |
+| A question takes a long time | Each model call can take up to 60 s. Press **Stop**: it takes effect before the next request to the AI server, and at once during a retry wait. A request already sent finishes or times out first. |
+| "The AI server is busy or warming up · retrying in …" in the status line | The server answered but isn't ready (it is loading its model, or is overloaded). The app retries for about 2 minutes, then says "still starting up or busy". Wait, or press **Stop** and ask again later. |
+| "The AI server can't be reached…" | No connection at all, after 2 quick retries (about 5 s): no internet, or a home AI server that is switched off or on another network. Check the connection and ask again. |
 | "I stopped before sending the next request…" | The privacy check found a name or amount it could not mask. Rephrase without the unusual spelling. |
 
 ---
 
 ## 10. What is not in MVP1.1 yet
 
-- Cancelling a question mid-way, and showing token cost in the status strip.
+- Cancelling a request already sent to the AI server (**Stop** waits for it to finish or time out), and showing token cost in the status strip.
 - Thumbs up/down feedback on answers.
 - Hindi/Hinglish change requests ("badha do"). Use the English verbs listed in 6.5.
 

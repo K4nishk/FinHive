@@ -43,6 +43,16 @@ from loan_manager.application.agent.llm_port import (
     LLMError,
     LLMPort,
 )
+from loan_manager.application.agent.retry import (
+    DEFAULT_RETRY_POLICY,
+    CancelToken,
+    FailureKind,
+    RetriesExhaustedError,
+    RetryNotice,
+    RetryPolicy,
+    TurnCancelledError,
+    call_with_retry,
+)
 from loan_manager.application.agent.system_prompt import (
     PROMPT_VERSION,
     SYSTEM_MESSAGE,
@@ -109,6 +119,15 @@ _OUTCOME_TEXT: Mapping[TurnOutcome, str] = {
         "This conversation has reached its limit. Please start a new one."
     ),
     TurnOutcome.LLM_ERROR: "The assistant is unavailable right now. Please try again.",
+    # Slice 1 (D-18): retrying has given up, or the user pressed Stop.
+    TurnOutcome.LLM_UNREACHABLE: (
+        "The AI server can't be reached. Check your network connection and, for "
+        "a home server, that it is switched on. Then ask again."
+    ),
+    TurnOutcome.LLM_BUSY: (
+        "The AI server is still starting up or busy. Please ask again in a minute."
+    ),
+    TurnOutcome.CANCELLED: "Stopped. Nothing more was sent to the AI server.",
     TurnOutcome.INTERNAL_ERROR: "Something went wrong while answering. Please try again.",
 }
 
@@ -147,6 +166,8 @@ class _Turn:
     proposals: int = 0
     propose_registry: ToolRegistry | None = None
     mode: ToolMode = ToolMode.READ
+    cancel: CancelToken = field(default_factory=CancelToken)
+    on_wait: Callable[[RetryNotice], None] = field(default=lambda notice: None)
 
 
 def _noop(event: TraceEvent) -> None:
@@ -243,6 +264,7 @@ class RunAgentTurn:
         recorder: TurnRecorder | None = None,
         new_id: Callable[[], str] = _default_new_id,
         monotonic: Callable[[], float] = time.monotonic,
+        retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
     ) -> None:
         self._llm = llm
         self._read_registry = read_registry
@@ -250,6 +272,7 @@ class RunAgentTurn:
         self._recorder: TurnRecorder = recorder or NullTurnRecorder()
         self._new_id = new_id
         self._monotonic = monotonic
+        self._retry_policy = retry_policy
         # KCH-246: schemas per turn mode. A READ turn is never offered a
         # PROPOSE tool (structural, not a prompt request).
         self._tools_by_mode = {
@@ -262,9 +285,19 @@ class RunAgentTurn:
         conversation: Conversation,
         user_text: str,
         emit: Callable[[TraceEvent], None] = _noop,
+        *,
+        cancel: CancelToken | None = None,
+        on_wait: Callable[[RetryNotice], None] | None = None,
     ) -> TurnResult:
+        """`cancel` is the Stop button: checked before every model call and
+        during every retry wait. `on_wait` hears about each retry before its
+        wait, so the UI can say why it is waiting (slice 1, D-18)."""
         t0 = self._monotonic()
         turn = _Turn(turn_id=self._new_id(), user_text=user_text)
+        if cancel is not None:
+            turn.cancel = cancel
+        if on_wait is not None:
+            turn.on_wait = on_wait
 
         def emit_event(event: TraceEvent) -> None:
             turn.events.append(event)
@@ -323,6 +356,13 @@ class RunAgentTurn:
             return self._failed(TurnOutcome.BLOCKED_PLAINTEXT)
         except UnknownTokenError:
             return self._failed(TurnOutcome.UNKNOWN_TOKEN)
+        except TurnCancelledError:
+            return self._failed(TurnOutcome.CANCELLED)
+        # Before LLMError: RetriesExhaustedError is one.
+        except RetriesExhaustedError as exc:
+            if exc.kind is FailureKind.UNREACHABLE:
+                return self._failed(TurnOutcome.LLM_UNREACHABLE)
+            return self._failed(TurnOutcome.LLM_BUSY)
         except LLMError:
             return self._failed(TurnOutcome.LLM_ERROR)
         except Exception:
@@ -353,7 +393,17 @@ class RunAgentTurn:
             # The infrastructure body builder is off limits here (AST guard),
             # so guard the messages themselves: the same leaves it would send.
             assert_no_plaintext({"messages": messages}, tm)
-            completion = self._llm.complete(messages, tools)
+            # Retries re-send these same, already-checked messages; Stop is
+            # honoured here, between steps, and during every retry wait.
+            completion = call_with_retry(
+                lambda: self._llm.complete(messages, tools),  # noqa: B023 -- called before the next iteration
+                policy=self._retry_policy,
+                cancel=turn.cancel,
+                # The real clock: the deadline bounds real waiting, while
+                # `self._monotonic` is the latency clock tests pin tick by tick.
+                monotonic=time.monotonic,
+                on_wait=turn.on_wait,
+            )
             turn.step = step
             turn.completions.append(completion)
             assistant = _assistant_message(completion)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import os
 import time
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from loan_manager.application.agent.retry import FailureKind, RetryNotice
 from loan_manager.application.agent.trace import TraceEvent, TurnOutcome
 from loan_manager.application.use_cases.agent.run_agent_turn import MAX_STEPS
 from loan_manager.application.use_cases.loans.get_loans import GetAllLoans
@@ -84,8 +86,24 @@ OUTCOME_TEXT: dict[TurnOutcome, str] = {
         "This conversation has reached its limit. Press New conversation to continue."
     ),
     TurnOutcome.LLM_ERROR: "The assistant is unavailable right now. Please try again.",
+    TurnOutcome.LLM_UNREACHABLE: (
+        "The AI server can't be reached. Check your network connection and, for "
+        "a home server, that it is switched on. Then ask again."
+    ),
+    TurnOutcome.LLM_BUSY: (
+        "The AI server is still starting up or busy. Please ask again in a minute."
+    ),
+    TurnOutcome.CANCELLED: "Stopped. Nothing more was sent to the AI server.",
     TurnOutcome.INTERNAL_ERROR: GENERIC_FAILURE_TEXT,
 }
+
+# Slice 1 (D-18): why the turn is waiting, shown in the status line.
+WAITING_TEXT = {
+    FailureKind.BUSY: "The AI server is busy or warming up",
+    FailureKind.UNREACHABLE: "Can't reach the AI server",
+}
+STOPPING_TEXT = "Stopping…"
+
 
 logger = get_logger(__name__)
 
@@ -133,7 +151,10 @@ class AskFinHiveTab(QWidget):
         self._run_turn = None
         self._worker: AgentWorker | None = None
         self._busy = False
+        self._stopping = False
         self._step = 0
+        self._notice: RetryNotice | None = None
+        self._notice_clock = QElapsedTimer()
         self._elapsed = QElapsedTimer()
         self._tick = QTimer(self)
         self._tick.setInterval(500)
@@ -160,6 +181,14 @@ class AskFinHiveTab(QWidget):
         self._new_btn.setAccessibleName("Start a new conversation")
         self._new_btn.clicked.connect(self._on_new_conversation)
         row.addWidget(self._new_btn)
+        self._stop_btn = QPushButton("Stop")
+        self._stop_btn.setAccessibleName("Stop the current question")
+        self._stop_btn.setToolTip(
+            "Stops before the next request to the AI server. A request already "
+            "sent finishes or times out first."
+        )
+        self._stop_btn.clicked.connect(self._on_stop)
+        row.addWidget(self._stop_btn)
         layout.addLayout(row)
 
         self._note_npi = self._note(NOTE_NPI)
@@ -222,9 +251,13 @@ class AskFinHiveTab(QWidget):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        if not busy:
+            self._stopping = False
+            self._notice = None
         self._input.setEnabled(not busy)
         self._ask_btn.setEnabled(not busy)
         self._new_btn.setEnabled(not busy)
+        self._stop_btn.setEnabled(busy and not self._stopping)
         if busy:
             self._elapsed.start()
             self._tick.start()
@@ -233,7 +266,18 @@ class AskFinHiveTab(QWidget):
 
     def _update_status(self) -> None:
         seconds = self._elapsed.elapsed() // 1000 if self._elapsed.isValid() else 0
-        self._status.setText(f"Step {self._step} / {MAX_STEPS} · elapsed {seconds}s")
+        if self._stopping:
+            self._status.setText(f"{STOPPING_TEXT} · elapsed {seconds}s")
+        elif self._notice is not None:
+            notice = self._notice
+            left = math.ceil(notice.delay_s - self._notice_clock.elapsed() / 1000)
+            when = f"retrying in {left}s" if left > 0 else "retrying now"
+            self._status.setText(
+                f"{WAITING_TEXT[notice.kind]} · {when} (attempt {notice.attempt})"
+                f" · elapsed {seconds}s"
+            )
+        else:
+            self._status.setText(f"Step {self._step} / {MAX_STEPS} · elapsed {seconds}s")
 
     def _clear_views(self) -> None:
         self._trace_model.clear()
@@ -252,6 +296,7 @@ class AskFinHiveTab(QWidget):
         worker = AgentWorker(self._container, self._conversation, self._run_turn, text)
         self._worker = worker
         worker.event.connect(self._on_event)
+        worker.waiting.connect(self._on_waiting)
         worker.done.connect(self._on_done)
         worker.finished.connect(self._on_finished)
         self._set_busy(True)
@@ -264,7 +309,21 @@ class AskFinHiveTab(QWidget):
         self._conversation = None  # keep the cached RunAgentTurn: same LLM client
         self._clear_views()
 
+    def _on_stop(self) -> None:
+        if not self._busy or self._stopping or self._worker is None:
+            return
+        self._stopping = True
+        self._worker.request_stop()
+        self._stop_btn.setEnabled(False)
+        self._update_status()
+
+    def _on_waiting(self, notice: RetryNotice) -> None:
+        self._notice = notice
+        self._notice_clock.start()
+        self._update_status()
+
     def _on_event(self, event: TraceEvent) -> None:
+        self._notice = None  # a step got through: no longer waiting
         self._trace_model.append(event)
         self._step = max(self._step, event.step)
         self._update_status()
@@ -335,6 +394,7 @@ class AskFinHiveTab(QWidget):
         worker = self._worker
         if worker is None or not worker.isRunning():
             return
+        worker.request_stop()  # ends a retry wait at once (slice 1)
         if worker.wait(_SHUTDOWN_WAIT_MS):
             return
         for signal in (worker.event, worker.done, worker.finished):

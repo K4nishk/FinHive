@@ -31,6 +31,9 @@ class TurnOutcome(str, Enum):
     PROMPT_TOO_LONG = "prompt_too_long"
     CONVERSATION_FULL = "conversation_full"
     LLM_ERROR = "llm_error"
+    LLM_UNREACHABLE = "llm_unreachable"
+    LLM_BUSY = "llm_busy"
+    CANCELLED = "cancelled"
     INTERNAL_ERROR = "internal_error"
 
 

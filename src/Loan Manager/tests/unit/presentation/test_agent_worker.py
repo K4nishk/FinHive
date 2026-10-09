@@ -183,3 +183,35 @@ def test_direct_run_counts_proposals(qapp) -> None:
     )
     c = _run_direct(StubContainer(run_turn=turn))
     assert c.results[0].proposals == 1
+
+
+# ── slice 1 (D-18): Stop and retry notices ─────────────────────────────────
+
+
+def test_request_stop_sets_the_token_the_turn_was_given(qapp) -> None:
+    from loan_manager.application.use_cases.agent.run_agent_turn import TurnResult
+
+    run_turn = FakeRunTurn(result=TurnResult(TurnOutcome.CANCELLED, "", "t", 0))
+    worker = AgentWorker(StubContainer(run_turn=run_turn), None, run_turn, OVERDUE_QUESTION)
+    worker.request_stop()
+
+    worker.run()
+
+    assert run_turn.kwargs["cancel"].cancelled is True
+
+
+def test_retry_notices_are_relayed_on_the_waiting_signal(qapp) -> None:
+    from loan_manager.application.agent.retry import FailureKind, RetryNotice
+    from loan_manager.application.use_cases.agent.run_agent_turn import TurnResult
+
+    notice = RetryNotice(FailureKind.BUSY, 2, 8.0)
+    run_turn = FakeRunTurn(
+        result=TurnResult(TurnOutcome.ANSWERED, "ok", "t", 1), notices=[notice]
+    )
+    worker = AgentWorker(StubContainer(run_turn=run_turn), None, run_turn, OVERDUE_QUESTION)
+    received: list = []
+    worker.waiting.connect(received.append)
+
+    worker.run()
+
+    assert received == [notice]

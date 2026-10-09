@@ -41,6 +41,9 @@ OUTCOME_LABEL = {
     TurnOutcome.PROMPT_TOO_LONG: "Stopped: question too long",
     TurnOutcome.CONVERSATION_FULL: "Stopped: conversation full",
     TurnOutcome.LLM_ERROR: "Stopped: assistant unavailable",
+    TurnOutcome.LLM_UNREACHABLE: "Stopped: AI server unreachable",
+    TurnOutcome.LLM_BUSY: "Stopped: AI server busy",
+    TurnOutcome.CANCELLED: "Stopped by you",
     TurnOutcome.INTERNAL_ERROR: "Stopped: internal error",
 }
 

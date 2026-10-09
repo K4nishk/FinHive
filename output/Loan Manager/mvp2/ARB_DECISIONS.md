@@ -581,6 +581,71 @@ work now, written down so the trigger is recognised rather than rediscovered.
 
 ---
 
+## Sovereign inference — **DECIDED 2026-10-09**
+
+### D-18 — self-hosted inference on the owner's home box; the agent loop stays on the desktop
+
+**Context.** A proposal to move `RunAgentTurn` onto a Kubernetes backend with vLLM
+was checked against `src/` before any build
+(`docs/architecture_checkpoint_sovereign_backend.md`):
+- Inference was never local. It runs on OpenRouter per D-4a.
+- The desktop app peaks at 129 MiB RSS.
+- 8 of the 10 agent tools read the encrypted local ledger, so a server-side loop
+  would call back to the desktop on every tool step.
+
+The owner then decided the following in an interview (§8 of that document).
+
+**Decision.**
+1. **Option A.** The agent loop, the tools, the tokeniser and the READ/PROPOSE gate stay
+   on the desktop. Only tokenised requests leave it, as today.
+2. **Inference target: the owner's own box.**
+   - Windows, RTX 3090, 8 GB VRAM free; LAN only.
+   - Served by vLLM, which keeps the OpenAI-compatible transport (D-4a), behind a thin
+     FastAPI gateway.
+   - Run with Docker Compose at home. The K8s manifests are validated in CI only.
+   - The gateway must answer **503 while vLLM loads its model**. vLLM itself refuses
+     connections until it is loaded, which would look like "box off".
+3. **Model:** chosen by the D-4a E2 tool-calling spike, from 2–3 candidates that fit in
+   8 GB. The owner runs the spike on the box.
+4. **OpenRouter stays the configured provider until a model passes E2 on the box.** The
+   provider switch then retires it for production.
+5. **No automatic fallback.** When the box is unreachable, Ask FinHive says so, and
+   nothing goes to a third party instead.
+6. **Ledger and master key stay on the laptop.** A sealed backup of `master_key.key`
+   is escrowed to OpenBao on the box. The decryption boundary does not move.
+7. **Laya** ([`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya),
+   ≤ 2B per the owner, "an open-source alternative to TypeSafeAI's Jev"):
+   - judge for offline evals and the eval pipeline;
+   - a live guard in **shadow mode**, logging a verdict without changing any answer.
+   It only ever sees tokenised traces.
+8. **Order of work:**
+   - First, slice 1: client resilience.
+     - Retry for about 2 minutes on a busy or warming server.
+     - Fail fast, in about 5 seconds, when the server is unreachable.
+     - Stop between retries.
+   - Then KCH-247.
+   - Then the box stack (slices 3–10 in the checkpoint document).
+
+**What it changes.**
+- **OQ-01 (amended).** Once inference is self-hosted, no path leaves the owner's
+  premises. Tokenisation stays mandatory as defence in depth, and because OpenRouter
+  remains the provider until the switch.
+- **D-4a.** The provider changes from OpenRouter to the owner's vLLM gateway at the
+  switch. The transport clause is unchanged.
+
+**Not decided here.**
+- Laya's licence, serving method and exact size. Its model card could not be read
+  from the build environment: the network policy blocked `huggingface.co`.
+- DCGM-Exporter metrics on a GeForce card.
+- Docker Desktop GPU passthrough on the owner's box.
+
+All three must be verified before slice 3.
+
+**Review.** Every slice that changes the egress path, a schema, or keys gets one
+Opus review (CLAUDE.md policy 3).
+
+---
+
 ---
 
 ## Change history
@@ -593,3 +658,4 @@ work now, written down so the trigger is recognised rather than rediscovered.
 | 2026-09-22 | **DECIDED.** D-1a, D-15, D-8 approved; D-12 confirmed. D-4a approved but **modified**: provider is a free-tier open-source endpoint (NVIDIA Build / DeepSeek / OpenRouter), not Groq — dev and demo both at zero cost; the tool-calling spike becomes blocking and moves ahead of the tool work. D-16 approved but **deferrable**: SQLite may carry the PoC, since encryption is backend-independent. OQ-01 amended, plus new **D-17** (model emits parameterised SQL instead of tool calls) — spike before commitment. |
 | 2026-09-22 | **Postgres pivot proposed.** Operator interview added D-1a (SQLAlchemy over Postgres, sync — D-1's raw-SQL choice scoped to the MVP2 web backend), D-15 (encryption at rest mandatory in M1.1; master key interim in env), D-16 (local Docker `pgvector/pgvector:pg16` replaces Supabase). OQ-01 amended: data at rest is local, so only Groq inference crosses. M1a's encryption and schema scope absorbed into M1.1; KCH-99/100/105/114 re-milestoned. Awaiting approval. |
 | 2026-09-22 | **KCH-229 folded into KCH-227.** Encrypting the identity columns breaks `ilike` and `distinct` the moment it lands, so the blind index is not a follow-up — the two are one unit of work. Full-table decrypt accepted for `get_unique_values` at current scale; the columnar/Parquet successor recorded above and on KCH-214. |
+| 2026-10-09 | **D-18 decided.** Self-hosted inference on the owner's home box (vLLM behind a gateway, LAN only, no automatic fallback). Agent loop, tools and tokeniser stay on the desktop (Option A). Ledger and key stay on the laptop, with the key escrowed to OpenBao. Laya as offline/pipeline judge and shadow-mode guard. OpenRouter stays the provider until a model passes E2 on the box. Slice 1 (client resilience) first. |
